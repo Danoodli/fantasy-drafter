@@ -454,6 +454,34 @@ export default function Setup({
             />
             Show 🔥 on trending players (most-added on Sleeper, last 24h)
           </label>
+          <label className="mt-1 flex items-center gap-2 text-sm text-ink-dim">
+            <input
+              type="checkbox"
+              checked={sources.wire}
+              onChange={(e) => updateSources({ ...sources, wire: e.target.checked })}
+            />
+            Insider wire — poll NFL reporters on Bluesky for breaking posts (free)
+          </label>
+          {sources.wire && (
+            <label className="mt-1 block text-xs text-ink-dim">
+              Wire handles (one per line; blank = the default insiders)
+              <textarea
+                rows={3}
+                value={sources.wireHandles.join("\n")}
+                onChange={(e) =>
+                  updateSources({
+                    ...sources,
+                    wireHandles: e.target.value
+                      .split("\n")
+                      .map((h) => h.trim().replace(/^@/, ""))
+                      .filter(Boolean),
+                  })
+                }
+                placeholder={"rapsheet.bsky.social\nfieldyates.bsky.social\nrotoworld-fb.bsky.social"}
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
+              />
+            </label>
+          )}
           <p className="mt-1 text-xs text-ink-faint">
             FFC stays the uncertainty model either way — it&apos;s the only source that publishes
             per-player ADP spread, which powers the survival math. These apply everywhere, not per

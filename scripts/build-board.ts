@@ -28,7 +28,13 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
-import { fetchFantasyProsData, loadEnvLocal, type FpData, type FpEcr } from "../lib/etl/fantasypros";
+import {
+  fetchFantasyProsData,
+  fetchFantasyProsNews,
+  loadEnvLocal,
+  type FpData,
+  type FpEcr,
+} from "../lib/etl/fantasypros";
 import type {
   Board,
   BoardPlayer,
@@ -169,7 +175,12 @@ function buildBoard(
   playerInfo: Record<string, SlimPlayerInfo>,
   sos: SosTable,
   sleeperProj: Record<string, SleeperProjection>,
-  fp: { ecr: Map<string, FpEcr>; stats: Map<string, import("../lib/types").StatLine>; experts: number } | null
+  fp: {
+    ecr: Map<string, FpEcr>;
+    stats: Map<string, import("../lib/types").StatLine>;
+    news: Map<string, { headline: string; published: string }>;
+    experts: number;
+  } | null
 ): Board {
   const warnings: string[] = [];
 
@@ -286,6 +297,7 @@ function buildBoard(
       sosPlayoff: sos[f.team]?.[pos]?.playoff ?? null,
       statsSleeper: sp?.stats,
       statsFp: pos === "K" || pos === "DST" ? undefined : fpStats,
+      news: (ids.fantasypros && fp?.news.get(ids.fantasypros)) || null,
       adpSources: {
         ffc: f.adp,
         espn: proj?.adp ?? null,
@@ -372,6 +384,15 @@ async function main() {
     .filter((r) => r.page_type === "redraft-overall" && r.id && r.id !== "NA")
     .map((r) => r.id);
   const fpData: FpData | null = await fetchFantasyProsData(SEASON, fpIds);
+  const fpNews = new Map<string, { headline: string; published: string }>();
+  for (const n of await fetchFantasyProsNews()) {
+    if (!n.fpid) continue;
+    const existing = fpNews.get(n.fpid);
+    if (!existing || Date.parse(n.published) > Date.parse(existing.published)) {
+      fpNews.set(n.fpid, { headline: n.headline, published: n.published });
+    }
+  }
+  if (fpNews.size > 0) console.log(`fantasypros: ${fpNews.size} player news items`);
   if (fpData)
     console.log(
       `fantasypros: live consensus — ${fpData.ecr.ppr.size} ECR entries/format, ${fpData.stats.size} projections, ${fpData.experts} experts`
@@ -411,7 +432,7 @@ async function main() {
   for (const format of FORMATS) {
     const ffc = await fetchFfcAdp(format, 12, SEASON);
     const fp = fpData
-      ? { ecr: fpData.ecr[format], stats: fpData.stats, experts: fpData.experts }
+      ? { ecr: fpData.ecr[format], stats: fpData.stats, news: fpNews, experts: fpData.experts }
       : null;
     const board = buildBoard(
       format, SCORING_PRESETS[format], defaultConfigFor(format),

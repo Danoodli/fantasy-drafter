@@ -68,6 +68,8 @@ export interface BoardPlayer {
   statsSleeper?: StatLine;
   /** Third projection source: FantasyPros consensus stat line (keyed builds only). */
   statsFp?: StatLine;
+  /** Build-time news blurb (FantasyPros, keyed builds) — merged with live feeds client-side. */
+  news?: { headline: string; published: string } | null;
   /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */
   adpSources?: { ffc: number; espn: number | null; sleeper: number | null };
   adp: number;

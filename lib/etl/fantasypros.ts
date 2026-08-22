@@ -199,3 +199,34 @@ export async function fetchFantasyProsData(
     console.warn(`⚠️  fantasypros: ${failures} batch requests failed (rate limits?)`);
   return data;
 }
+
+export interface FpNewsItem {
+  fpid: string | null;
+  headline: string;
+  published: string;
+}
+
+/**
+ * FP player news (25-50 items). Response shape parsed defensively — the free
+ * tier blocked schema inspection. Returns [] without a key or on failure.
+ */
+export async function fetchFantasyProsNews(): Promise<FpNewsItem[]> {
+  const key = process.env.FANTASYPROS_API_KEY;
+  if (!key) return [];
+  try {
+    const res = await throttled(`${BASE}/news?limit=50`, key);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = (await res.json()) as Record<string, unknown>;
+    const list = (json.news ?? json.items ?? json.articles ?? []) as Record<string, unknown>[];
+    return list
+      .map((n) => ({
+        fpid: n.fpid != null ? String(n.fpid) : n.player_id != null ? String(n.player_id) : null,
+        headline: String(n.headline ?? n.title ?? ""),
+        published: String(n.published ?? n.date ?? n.updated ?? ""),
+      }))
+      .filter((n) => n.headline);
+  } catch (err) {
+    console.warn(`⚠️  fantasypros news: skipped (${err})`);
+    return [];
+  }
+}

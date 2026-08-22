@@ -659,8 +659,8 @@ describe("data-source preferences", () => {
   it("switching ADP and projection sources actually changes the board", async () => {
     const { rescoreBoard } = await import("../lib/client/rescore");
     const scoring = SCORING_PRESETS.ppr;
-    const espnBoard = rescoreBoard(board, scoring, config, { projections: "espn", adp: "ffc", trending: true });
-    const slpBoard = rescoreBoard(board, scoring, config, { projections: "sleeper", adp: "sleeper", trending: true });
+    const espnBoard = rescoreBoard(board, scoring, config, { projections: "espn" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [] });
+    const slpBoard = rescoreBoard(board, scoring, config, { projections: "sleeper" as const, adp: "sleeper" as const, trending: true, wire: false, wireHandles: [] });
     const pick = (b: Board, name: string) => b.players.find((p) => p.name === name)!;
     const g1 = pick(espnBoard, "Jahmyr Gibbs");
     const g2 = pick(slpBoard, "Jahmyr Gibbs");
@@ -673,7 +673,7 @@ describe("data-source preferences", () => {
     });
     expect(diffs.length).toBeGreaterThan(10);
     // Blend sits between the two for a player where both sources exist
-    const blend = rescoreBoard(board, scoring, config, { projections: "blend", adp: "blend", trending: true });
+    const blend = rescoreBoard(board, scoring, config, { projections: "blend" as const, adp: "blend" as const, trending: true, wire: false, wireHandles: [] });
     const gb = pick(blend, "Jahmyr Gibbs");
     const lo = Math.min(g1.projPoints, g2.projPoints) - 0.11;
     const hi = Math.max(g1.projPoints, g2.projPoints) + 0.11;
@@ -685,7 +685,7 @@ describe("data-source preferences", () => {
     const { rescoreBoard } = await import("../lib/client/rescore");
     const base = SCORING_PRESETS.ppr;
     const ppfd = { ...base, rush_fd: 0.5, rec_fd: 0.5 };
-    const prefs = { projections: "blend" as const, adp: "ffc" as const, trending: true };
+    const prefs = { projections: "blend" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [] };
     const without = rescoreBoard(board, base, config, prefs);
     const withFd = rescoreBoard(board, ppfd, config, prefs);
     const g0 = without.players.find((p) => p.name === "Jahmyr Gibbs")!;
@@ -721,5 +721,18 @@ describe("news matching", () => {
     expect(line.receptions).toBeCloseTo(71.3);
     expect(line.fumblesLost).toBeCloseTo(1.5);
     expect(line.passYds).toBeUndefined();
+  });
+});
+
+describe("news merging (wire + articles + baked)", () => {
+  it("newest item wins across feeds", async () => {
+    const { mergeNews } = await import("../lib/client/bskyNews");
+    const old = new Map([["p1", { headline: "old", published: "2026-08-20T00:00:00Z", href: null }]]);
+    const fresh = new Map([["p1", { headline: "fresh", published: "2026-08-22T00:00:00Z", href: "x" }]]);
+    const other = new Map([["p2", { headline: "solo", published: "2026-08-21T00:00:00Z", href: null }]]);
+    const merged = mergeNews(old, fresh, other);
+    expect(merged.get("p1")?.headline).toBe("fresh");
+    expect(merged.get("p2")?.headline).toBe("solo");
+    expect(merged.size).toBe(2);
   });
 });

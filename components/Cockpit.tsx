@@ -26,6 +26,8 @@ import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
 import { loadSources, fetchTrendingIds } from "../lib/client/sources";
 import { fetchBoardNews, type PlayerNews } from "../lib/client/espnNews";
+import { fetchWireNews, mergeNews, DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
+import { connectWireStream } from "../lib/client/wireStream";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
 
@@ -66,31 +68,59 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
   const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
 
-  // Live signals, refreshed every 10 minutes: Sleeper's most-added players
-  // and ESPN's breaking headlines matched to board names (trades,
-  // suspensions, injuries as they break).
+  // Live signals, refreshed every 10 minutes: Sleeper's most-added players,
+  // ESPN's breaking headlines, and the Bluesky insider wire (Rapoport, Yates,
+  // Rotoworld…) — merged newest-wins into one news map.
   useEffect(() => {
-    const wantTrending = loadSources().trending;
+    const prefs = loadSources();
+    const handles = prefs.wireHandles.length ? prefs.wireHandles : DEFAULT_WIRE_HANDLES;
     let cancelled = false;
     const load = () => {
-      if (wantTrending)
+      if (prefs.trending)
         fetchTrendingIds()
           .then((ids) => !cancelled && setTrendingIds(ids))
           .catch(() => {
             // offline — badges just don't show
           });
-      fetchBoardNews(board.players)
-        .then((news) => !cancelled && setBoardNews(news))
-        .catch(() => {
-          // offline — badges just don't show
-        });
+      const feeds = [
+        fetchBoardNews(board.players).catch(() => new Map<string, PlayerNews>()),
+        prefs.wire
+          ? fetchWireNews(board.players, handles).catch(() => new Map<string, PlayerNews>())
+          : Promise.resolve(new Map<string, PlayerNews>()),
+      ];
+      // Build-time FP news rides along (72h window), refreshed 3x/day by CI.
+      const baked = new Map<string, PlayerNews>();
+      const cutoff = Date.now() - 72 * 3600_000;
+      for (const p of board.players) {
+        if (p.news && Date.parse(p.news.published) >= cutoff) {
+          baked.set(p.id, { ...p.news, href: null });
+        }
+      }
+      Promise.all(feeds).then(([espn, wire]) => {
+        if (!cancelled) setBoardNews(mergeNews(baked, espn, wire));
+      });
     };
     load();
     const timer = setInterval(load, 10 * 60 * 1000);
+
+    // LIVE push on top of the poll: Jetstream delivers reporter posts the
+    // second they publish — no gap right before your pick.
+    const disconnect = prefs.wire
+      ? connectWireStream(board.players, handles, (matched) => {
+          if (cancelled) return;
+          setBoardNews((prev) => mergeNews(prev, matched));
+          const [id, item] = [...matched.entries()][0];
+          const player = board.players.find((p) => p.id === id);
+          if (player) showToast(`📰 ${player.name}: ${item.headline.slice(0, 70)}`);
+        })
+      : () => {};
+
     return () => {
       cancelled = true;
       clearInterval(timer);
+      disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is stable in practice
   }, [board]);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

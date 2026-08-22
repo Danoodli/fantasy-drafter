@@ -19,12 +19,18 @@ export interface SourcePrefs {
   adp: "ffc" | "sleeper" | "espn" | "blend";
   /** Show 🔥 on players the Sleeper community is adding fastest (24h). */
   trending: boolean;
+  /** Poll the Bluesky insider wire for breaking reporter posts. */
+  wire: boolean;
+  /** Bluesky handles to follow — editable; defaults to top NFL insiders. */
+  wireHandles: string[];
 }
 
 export const DEFAULT_SOURCES: SourcePrefs = {
   projections: "blend",
   adp: "ffc",
   trending: true,
+  wire: true,
+  wireHandles: [], // empty = use DEFAULT_WIRE_HANDLES
 };
 
 const KEY = "draft-cockpit-sources-v1";
