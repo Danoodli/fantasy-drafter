@@ -130,6 +130,62 @@ export function fetchPlayerIds() {
   );
 }
 
+export interface SlimPlayerInfo {
+  injury: string | null;
+  depthOrder: number | null;
+  team: string | null;
+}
+
+/**
+ * Injury status + depth-chart order for every player, keyed by sleeper_id.
+ * The raw players dump is 14.6 MB (Sleeper says fetch at most daily), so we
+ * reduce it immediately and cache only the ~100 KB slim map as the fixture.
+ */
+export async function fetchSleeperPlayerInfo(): Promise<SourceResult<Record<string, SlimPlayerInfo>>> {
+  const key = "sleeper-players-slim.json";
+  const fixturePath = join(RAW_DIR, key);
+  try {
+    const res = await fetch("https://api.sleeper.app/v1/players/nfl");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const full = (await res.json()) as Record<
+      string,
+      {
+        active?: boolean;
+        injury_status?: string | null;
+        depth_chart_order?: number | null;
+        team?: string | null;
+        position?: string | null;
+      }
+    >;
+    const slim: Record<string, SlimPlayerInfo> = {};
+    for (const [id, p] of Object.entries(full)) {
+      if (!p.active) continue;
+      if (!["QB", "RB", "WR", "TE", "K", "DEF"].includes(p.position ?? "")) continue;
+      slim[id] = {
+        injury: p.injury_status ?? null,
+        depthOrder: p.depth_chart_order ?? null,
+        team: p.team ?? null,
+      };
+    }
+    if (Object.keys(slim).length < 500) throw new Error("suspiciously small players payload");
+    mkdirSync(RAW_DIR, { recursive: true });
+    writeFileSync(fixturePath, JSON.stringify(slim));
+    const meta = readMeta();
+    const fetchedAt = new Date().toISOString();
+    meta[key] = { fetchedAt };
+    writeMeta(meta);
+    return { data: slim, fetchedAt, fromFixture: false };
+  } catch (err) {
+    if (!existsSync(fixturePath)) {
+      console.warn(`⚠️  sleeper players: fetch failed (${err}) and no fixture — injury/depth data skipped`);
+      return { data: {}, fetchedAt: "unknown", fromFixture: true };
+    }
+    const fetchedAt = readMeta()[key]?.fetchedAt ?? "unknown";
+    console.warn(`⚠️  sleeper players: live fetch FAILED (${err}). Using fixture from ${fetchedAt}.`);
+    return { data: JSON.parse(readFileSync(fixturePath, "utf8")), fetchedAt, fromFixture: true };
+  }
+}
+
 export function fetchEcr() {
   return fetchWithFixture(
     "db_fpecr_latest.csv",

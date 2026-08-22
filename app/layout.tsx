@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Barlow, Barlow_Condensed, IBM_Plex_Mono } from "next/font/google";
+import ServiceWorker from "../components/ServiceWorker";
 import "./globals.css";
 
 const barlow = Barlow({
@@ -23,6 +24,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Draft Cockpit",
   description: "Who to take, right now.",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -30,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className={`${barlow.variable} ${barlowCondensed.variable} ${plexMono.variable}`}>
         {children}
+        <ServiceWorker />
       </body>
     </html>
   );

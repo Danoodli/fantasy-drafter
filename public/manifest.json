@@ -1,0 +1,10 @@
+{
+  "name": "Draft Cockpit",
+  "short_name": "Cockpit",
+  "description": "Who to take, right now.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#10151b",
+  "theme_color": "#10151b",
+  "icons": []
+}

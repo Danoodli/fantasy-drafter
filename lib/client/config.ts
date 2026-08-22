@@ -13,10 +13,43 @@ export const DEFAULT_CONFIG: LeagueConfig = {
   teams: 12,
   rounds: 15,
   scoring: "ppr",
+  leagueType: "redraft",
   rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 },
   flexEligible: ["RB", "WR", "TE"],
   strategy: "balanced",
 };
+
+/** Common best-ball tournament formats, selectable in manual setup. */
+export const BESTBALL_PRESETS: {
+  id: string;
+  label: string;
+  config: Partial<LeagueConfig>;
+}[] = [
+  {
+    id: "underdog",
+    label: "Underdog (12tm · 18rd · half-PPR)",
+    config: {
+      leagueType: "bestball",
+      teams: 12,
+      rounds: 18,
+      scoring: "half-ppr",
+      rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
+      strategy: "tournament-ceiling",
+    },
+  },
+  {
+    id: "draftkings",
+    label: "DraftKings (12tm · 20rd · PPR)",
+    config: {
+      leagueType: "bestball",
+      teams: 12,
+      rounds: 20,
+      scoring: "ppr",
+      rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
+      strategy: "tournament-ceiling",
+    },
+  },
+];
 
 export function loadConfig(): LeagueConfig | null {
   try {
@@ -36,9 +69,10 @@ export function clearConfig() {
 }
 
 export interface CustomStrategyParams {
-  lambda: number;
+  lambda: number; // negative = pay for variance (tournaments)
   baselineBlend: number;
   adpDiscipline: number;
+  stacking: number; // QB↔pass-catcher stack bonus, 0–1.5
   earlyRb: number; // rounds 1-5 RB multiplier
   earlyWr: number; // rounds 1-5 WR multiplier
 }
@@ -47,6 +81,7 @@ export const DEFAULT_CUSTOM: CustomStrategyParams = {
   lambda: 0.5,
   baselineBlend: 0.5,
   adpDiscipline: 0.5,
+  stacking: 0,
   earlyRb: 1,
   earlyWr: 1,
 };

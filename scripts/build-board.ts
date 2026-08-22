@@ -12,7 +12,9 @@ import {
   fetchEspnProjections,
   fetchPlayerIds,
   fetchEcr,
+  fetchSleeperPlayerInfo,
   type FfcPlayer,
+  type SlimPlayerInfo,
   type SourceResult,
 } from "../lib/etl/fetchers";
 import {
@@ -74,6 +76,7 @@ function defaultConfigFor(format: ScoringFormat): LeagueConfig {
     teams: 12,
     rounds: 15,
     scoring: format,
+    leagueType: "redraft",
     rosterSlots:
       format === "2qb"
         ? { QB: 2, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 }
@@ -152,7 +155,8 @@ function buildBoard(
   espnFetchedAt: string,
   cross: CrossRow[],
   ecrRows: Record<string, string>[],
-  ecrMeta: { fetchedAt: string; fromFixture: boolean }
+  ecrMeta: { fetchedAt: string; fromFixture: boolean },
+  playerInfo: Record<string, SlimPlayerInfo>
 ): Board {
   const warnings: string[] = [];
 
@@ -239,6 +243,7 @@ function buildBoard(
     }
 
     const ecrRow = (ids.fantasypros && ecrByFp.get(ids.fantasypros)) || ecrByMerge.get(mergeName(f.name));
+    const info = playerInfo[id];
 
     players.push({
       id,
@@ -258,6 +263,8 @@ function buildBoard(
       vorp: 0,
       vols: 0,
       tier: 0,
+      injury: info?.injury ?? null,
+      depthOrder: info?.depthOrder ?? null,
       ids,
     });
   }
@@ -309,10 +316,11 @@ function buildBoard(
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const [idsRes, ecrRes, espnRes] = await Promise.all([
+  const [idsRes, ecrRes, espnRes, playersRes] = await Promise.all([
     fetchPlayerIds(),
     fetchEcr(),
     fetchEspnProjections(SEASON),
+    fetchSleeperPlayerInfo(),
   ]);
   const cross = parseCsv(idsRes.data as string) as unknown as CrossRow[];
   const ecrRows = parseCsv(ecrRes.data as string);
@@ -352,7 +360,8 @@ async function main() {
     const board = buildBoard(
       format, SCORING_PRESETS[format], defaultConfigFor(format),
       ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
-      { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture }
+      { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
+      playersRes.data
     );
     const path = join(OUT_DIR, `board-${format}.json`);
     writeFileSync(path, JSON.stringify(board));
@@ -365,16 +374,90 @@ async function main() {
       const custom = buildBoard(
         format, customScoring, customConfig,
         ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
-        { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture }
+        { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
+        playersRes.data
       );
       writeFileSync(join(OUT_DIR, "board-custom.json"), JSON.stringify(custom));
       console.log(`✓ board-custom.json — real league scoring applied`);
     }
   }
 
+  await fitDriftPrior();
+
   const stale = [idsRes, ecrRes, espnRes].some((r) => r.fromFixture);
   if (stale) console.warn("\n⚠️  ONE OR MORE SOURCES USED FIXTURES — board may be stale. See warnings above.");
   console.log(`\nDone. ${totalWarnings} total warnings.`);
+}
+
+/**
+ * Fit a room-drift prior from the league's PREVIOUS season's draft:
+ * per-position mean of (actual pick − that season's national ADP).
+ * Nobody's paid tool knows this room; we do. Emits public/data/drift-prior.json
+ * for the client to seed live drift with. Skips quietly when no league is
+ * configured or there's no history.
+ */
+async function fitDriftPrior() {
+  let leagueId = "";
+  try {
+    const league: LeagueConfig = JSON.parse(readFileSync(join(process.cwd(), "config", "league.json"), "utf8"));
+    leagueId = league.leagueId;
+  } catch {
+    return;
+  }
+  if (!leagueId) return;
+  try {
+    const league = await (await fetch(`https://api.sleeper.app/v1/league/${leagueId}`)).json();
+    const prevId = league?.previous_league_id;
+    if (!prevId) {
+      console.log("drift prior: league has no previous season — skipped");
+      return;
+    }
+    const drafts: { draft_id: string; status: string; season: string; type: string }[] = await (
+      await fetch(`https://api.sleeper.app/v1/league/${prevId}/drafts`)
+    ).json();
+    const past = drafts.find((d) => d.status === "complete" && d.type !== "auction");
+    if (!past) return;
+    const picks: { pick_no: number; metadata?: { first_name?: string; last_name?: string; position?: string }; is_keeper?: boolean }[] =
+      await (await fetch(`https://api.sleeper.app/v1/draft/${past.draft_id}/picks`)).json();
+
+    // That season's national ADP, matched by name+position.
+    const rec = league?.scoring_settings?.rec ?? 1;
+    const format = rec >= 1 ? "ppr" : rec >= 0.5 ? "half-ppr" : "standard";
+    const adpRes = await fetch(
+      `https://fantasyfootballcalculator.com/api/v1/adp/${format}?teams=12&year=${past.season}`
+    );
+    const adpJson = await adpRes.json();
+    const adpByName = new Map<string, { adp: number; pos: string }>();
+    for (const p of adpJson.players ?? []) {
+      const pos = p.position === "PK" ? "K" : p.position === "DEF" ? "DST" : p.position;
+      adpByName.set(mergeName(p.name) + "|" + pos, { adp: p.adp, pos });
+    }
+
+    const sums: Record<string, { sum: number; n: number }> = {};
+    for (const pick of picks) {
+      if (pick.is_keeper) continue;
+      const m = pick.metadata;
+      if (!m?.position) continue;
+      const pos = m.position === "DEF" ? "DST" : m.position;
+      const hit = adpByName.get(mergeName(`${m.first_name ?? ""} ${m.last_name ?? ""}`) + "|" + pos);
+      if (!hit) continue;
+      const delta = Math.max(-36, Math.min(36, pick.pick_no - hit.adp));
+      const s = (sums[pos] ??= { sum: 0, n: 0 });
+      s.sum += delta;
+      s.n += 1;
+    }
+    const drift: Record<string, number> = {};
+    let samples = 0;
+    for (const [pos, s] of Object.entries(sums)) {
+      if (s.n >= 3) drift[pos] = Math.round((s.sum / s.n) * 10) / 10;
+      samples += s.n;
+    }
+    const out = { leagueId, fittedFrom: { season: past.season, draftId: past.draft_id }, samples, drift };
+    writeFileSync(join(OUT_DIR, "drift-prior.json"), JSON.stringify(out, null, 2));
+    console.log(`✓ drift-prior.json — fitted from ${past.season} draft (${samples} matched picks):`, drift);
+  } catch (err) {
+    console.warn(`drift prior: fit failed (${err}) — skipped, live drift still works`);
+  }
 }
 
 main().catch((err) => {

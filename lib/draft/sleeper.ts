@@ -14,6 +14,10 @@ export interface SleeperDraftInfo {
   slotToRoster: Record<string, number>;
   scoringSettings: Record<string, number> | null;
   rosterPositions: string[] | null;
+  /** True when the league is best ball (Sleeper settings.best_ball = 1). */
+  bestBall: boolean;
+  /** Mock drafts carry a scoring hint in draft metadata: "ppr" | "half_ppr" | "std" | "2qb". */
+  scoringType: string | null;
   tradedPicks: TradedPick[];
   status: string;
 }
@@ -28,6 +32,7 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
 
   let scoringSettings: Record<string, number> | null = null;
   let rosterPositions: string[] | null = null;
+  let bestBall = false;
   if (draft.league_id) {
     try {
       const leagueRes = await fetch(`${BASE}/league/${draft.league_id}`);
@@ -35,6 +40,7 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
         const league = await leagueRes.json();
         scoringSettings = league.scoring_settings ?? null;
         rosterPositions = league.roster_positions ?? null;
+        bestBall = league.settings?.best_ball === 1;
       }
     } catch {
       // mock drafts have no league — fine
@@ -72,6 +78,8 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
     slotToRoster,
     scoringSettings,
     rosterPositions,
+    bestBall,
+    scoringType: draft.metadata?.scoring_type ?? null,
     tradedPicks,
     status: draft.status ?? "unknown",
   };

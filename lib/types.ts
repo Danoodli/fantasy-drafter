@@ -65,6 +65,10 @@ export interface BoardPlayer {
   vorp: number;
   vols: number;
   tier: number; // within position, 1 = best
+  /** Sleeper injury status at build time: "Questionable" | "Doubtful" | "Out" | "IR" | "PUP" | "Sus" | null */
+  injury: string | null;
+  /** Depth-chart order at the position (1 = starter), from Sleeper. */
+  depthOrder: number | null;
   ids: { espn?: string; fantasypros?: string; yahoo?: string; ffc?: string };
 }
 
@@ -99,6 +103,14 @@ export interface RosterSlots {
   [slot: string]: number;
 }
 
+/**
+ * Redraft: classic season-long league — starters + bench, waivers exist.
+ * Best ball: draft once and let it ride — optimal lineup auto-scores weekly,
+ * no waivers, so depth and ceiling matter far more and roster construction
+ * follows position-count targets instead of starter slots.
+ */
+export type LeagueType = "redraft" | "bestball";
+
 export interface LeagueConfig {
   platform: "sleeper" | "manual";
   leagueId: string;
@@ -107,6 +119,7 @@ export interface LeagueConfig {
   teams: number;
   rounds: number;
   scoring: ScoringFormat;
+  leagueType: LeagueType;
   rosterSlots: RosterSlots;
   flexEligible: Position[];
   strategy: string; // strategy id from config/strategies.json
@@ -153,6 +166,11 @@ export interface Strategy {
   positionMultipliers: Record<string, Partial<Record<Position, number>>>;
   /** Max players the engine will ever recommend at a position. */
   positionCaps: Partial<Record<Position, number>>;
+  /**
+   * Stacking appetite, 0–1.5. Bonus for pairing a QB with his own
+   * pass-catchers (and vice versa) — correlated ceilings win tournaments.
+   */
+  stacking?: number;
 }
 
 // ---------------------------------------------------------------------------

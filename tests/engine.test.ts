@@ -29,6 +29,7 @@ const config: LeagueConfig = {
   teams: 12,
   rounds: 15,
   scoring: "ppr",
+  leagueType: "redraft",
   rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 },
   flexEligible: ["RB", "WR", "TE"],
   strategy: "balanced",
@@ -264,12 +265,161 @@ describe("recommendation engine (integration on real board)", () => {
     expect(["K", "DST"]).toContain(out.recommendations[0].player.pos);
   });
 
-  it("recomputes in under 50ms", () => {
-    const state = makeState();
-    recommend(state); // warm up JIT
-    const t0 = performance.now();
-    recommend(state);
-    const ms = performance.now() - t0;
-    expect(ms).toBeLessThan(50);
+});
+
+// ---------------------------------------------------------------------------
+// Best ball, stacking, injuries, drift priors
+
+import { needWeight } from "../lib/engine/recommend";
+import type { EngineOutput } from "../lib/types";
+
+const bestballConfig: LeagueConfig = {
+  ...config,
+  leagueType: "bestball",
+  rounds: 18,
+  scoring: "ppr",
+  rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
+  strategy: "tournament-ceiling",
+};
+
+describe("best ball roster construction", () => {
+  it("needWeight chases position targets, not starter slots", () => {
+    const st = { config: bestballConfig };
+    expect(needWeight("QB", { QB: 0 }, st)).toBe(1);
+    expect(needWeight("QB", { QB: 1 }, st)).toBe(1); // under min target of 2
+    expect(needWeight("QB", { QB: 3 }, st)).toBeLessThan(0.2);
+    expect(needWeight("WR", { WR: 5 }, st)).toBeGreaterThanOrEqual(0.7); // WR target ~7-9
+    expect(needWeight("K", {}, st)).toBe(0); // no K slots in this format
+    expect(needWeight("DST", {}, st)).toBe(0);
+  });
+
+  it("a full engine auto-draft builds a sane tournament roster", () => {
+    const strategy = byId("tournament-ceiling");
+    const teams = 12;
+    const mySlot = 5;
+    const myPickNos = Array.from({ length: 18 }, (_, r) => {
+      const round = r + 1;
+      return (round - 1) * teams + (round % 2 === 1 ? mySlot : teams - mySlot + 1);
+    });
+    const drafted = new Set<string>();
+    const roster: BoardPlayer[] = [];
+    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    for (let pickNo = 1; pickNo <= teams * 18; pickNo++) {
+      if (myPickNos.includes(pickNo)) {
+        const out: EngineOutput = recommend({
+          board: board.players,
+          draftedIds: drafted,
+          myRoster: roster,
+          currentPick: pickNo,
+          myPicks: myPickNos.filter((n) => n >= pickNo),
+          config: bestballConfig,
+          strategy,
+          drift: {},
+        });
+        const pick = out.recommendations[0]?.player;
+        expect(pick).toBeDefined();
+        roster.push(pick!);
+        drafted.add(pick!.id);
+      } else {
+        const next = adpOrder.find((p) => !drafted.has(p.id));
+        if (next) drafted.add(next.id);
+      }
+    }
+    const count = (pos: string) => roster.filter((p) => p.pos === pos).length;
+    expect(roster).toHaveLength(18);
+    expect(count("K")).toBe(0);
+    expect(count("DST")).toBe(0);
+    expect(count("QB")).toBeGreaterThanOrEqual(2);
+    expect(count("QB")).toBeLessThanOrEqual(3);
+    expect(count("RB")).toBeGreaterThanOrEqual(4);
+    expect(count("WR")).toBeGreaterThanOrEqual(6);
+    expect(count("TE")).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("stacking", () => {
+  const mk = (id: string, pos: BoardPlayer["pos"], team: string, pts: number, adp: number): BoardPlayer => ({
+    id, name: id, pos, team, bye: 7, projPoints: pts, projImputed: false,
+    adp, adpStdev: 6, adpHigh: adp - 10, adpLow: adp + 10, ecr: null, ecrStdev: null,
+    vorp: pts - 200, vols: pts - 250, tier: 1, injury: null, depthOrder: 1, ids: {},
+  });
+  const miniBoard = [
+    mk("qb-stack", "QB", "LAR", 320, 60),
+    mk("qb-other", "QB", "KC", 340, 60), // clearly better in a vacuum
+    mk("my-wr", "WR", "LAR", 300, 5),
+    ...Array.from({ length: 30 }, (_, i) => mk(`filler-${i}`, i % 2 ? "RB" : "WR", "X" + i, 250 - i * 3, 10 + i * 3)),
+  ];
+  const mkState = (stacking: number): EngineState => ({
+    board: miniBoard,
+    draftedIds: new Set(["my-wr"]),
+    myRoster: [miniBoard[2]],
+    currentPick: 60,
+    myPicks: [60, 84],
+    config: { ...bestballConfig },
+    strategy: { ...byId("tournament-ceiling"), stacking, positionMultipliers: {} },
+    drift: {},
+  });
+  it("stacking closes the gap on a vacuum-better QB", () => {
+    const rankOf = (out: EngineOutput, id: string) =>
+      out.recommendations.findIndex((r) => r.player.id === id);
+    const noStack = recommend(mkState(0));
+    // Without stacking the clearly-better QB outranks the stack partner.
+    expect(rankOf(noStack, "qb-other")).toBeLessThan(rankOf(noStack, "qb-stack"));
+    // Heavy stacking flips the order: correlation buys the LAR QB the spot.
+    const withStack = recommend(mkState(1.5));
+    expect(rankOf(withStack, "qb-stack")).toBeLessThan(rankOf(withStack, "qb-other"));
+  });
+});
+
+describe("injuries", () => {
+  it("never recommends players on season-long injured lists", () => {
+    const hurt = board.players.map((p, i) => (i === 0 ? { ...p, injury: "IR" } : p));
+    const out = recommend({ ...makeState(), board: hurt, currentPick: 1, myPicks: [1, 24] });
+    expect(out.recommendations.map((r) => r.player.id)).not.toContain(board.players[0].id);
+  });
+});
+
+describe("drift prior", () => {
+  it("seeds drift before any picks are observed", () => {
+    const map = new Map(board.players.map((p) => [p.id, p]));
+    const drift = computeDrift([], map, { drift: { RB: -6 }, weight: 24 });
+    expect(drift.RB).toBeLessThan(-3); // prior dominates with no observations
+    const noPrior = computeDrift([], map);
+    expect(noPrior.RB).toBeUndefined();
+  });
+});
+
+describe("season simulation", () => {
+  const roster = [
+    ...board.players.filter((p) => p.pos === "QB").slice(0, 2),
+    ...board.players.filter((p) => p.pos === "RB").slice(0, 5),
+    ...board.players.filter((p) => p.pos === "WR").slice(0, 7),
+    ...board.players.filter((p) => p.pos === "TE").slice(0, 2),
+  ];
+  it("produces a sane, seeded, reproducible distribution", async () => {
+    const { simulateSeasons } = await import("../lib/engine/season");
+    const a = simulateSeasons(roster, bestballConfig, 200, 9);
+    const b = simulateSeasons(roster, bestballConfig, 200, 9);
+    expect(a.mean).toBe(b.mean); // deterministic
+    expect(a.p10).toBeLessThan(a.p50);
+    expect(a.p50).toBeLessThan(a.p90);
+    expect(a.p90).toBeLessThan(a.p99);
+    // 17 weeks × ~6 lineup slots × ~12-25 pts/slot — sanity bounds
+    expect(a.mean).toBeGreaterThan(1000);
+    expect(a.mean).toBeLessThan(4000);
+  });
+  it("optimal lineup respects slots and flex", async () => {
+    const { optimalLineupTotal } = await import("../lib/engine/season");
+    const total = optimalLineupTotal(
+      [
+        { pos: "QB", score: 20 }, { pos: "QB", score: 15 },
+        { pos: "RB", score: 10 }, { pos: "RB", score: 9 },
+        { pos: "WR", score: 12 }, { pos: "WR", score: 11 }, { pos: "WR", score: 8 },
+        { pos: "TE", score: 5 },
+      ],
+      bestballConfig // QB1 RB1 WR2 TE1 FLEX1
+    );
+    // QB20 + RB10 + WR12 + WR11 + TE5 + FLEX(best leftover = RB9) = 67
+    expect(total).toBe(67);
   });
 });

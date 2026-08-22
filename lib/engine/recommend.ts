@@ -21,6 +21,44 @@ const MC_CANDIDATES = 12;
 const REACH_PENALTY_PER_PICK = 1.0;
 /** Soft penalty when a candidate shares a bye with a same-position starter. */
 const BYE_COLLISION_PENALTY = 4;
+/** Value-points bonus for a QB↔pass-catcher stack, at stacking = 1. */
+const STACK_BONUS = 8;
+/** Late-round bonus for the direct backup of an RB I already roster. */
+const HANDCUFF_BONUS = 6;
+/** Injuries that remove a player from recommendations entirely. */
+const INJURY_EXCLUDE = new Set(["IR", "PUP", "Sus", "NA", "COV", "DNR"]);
+/** Soft projected-value multiplier by draft-day injury status. */
+const INJURY_PENALTY: Record<string, number> = { Out: 0.75, Doubtful: 0.85, Questionable: 0.97 };
+
+/**
+ * Best-ball roster-construction targets as fractions of total rounds:
+ * [min, max] share of the roster a position should occupy. For 18 rounds
+ * this yields roughly QB 2–3, RB 5–6, WR 7–9, TE 2–3 — standard
+ * tournament construction.
+ */
+export const BESTBALL_TARGETS: Partial<Record<Position, [number, number]>> = {
+  QB: [0.11, 0.17],
+  RB: [0.26, 0.34],
+  WR: [0.36, 0.48],
+  TE: [0.11, 0.17],
+  K: [0.0, 0.06],
+  DST: [0.0, 0.06],
+};
+
+/**
+ * Best-ball positional value adjustment. Season-total projections understate
+ * WRs in best ball: weekly spike scoring is the format, and WR spike weeks
+ * are what the optimal-lineup math harvests. Tuned toward published
+ * WR-heavy-builds-win tournament findings.
+ */
+export const BESTBALL_POS_VALUE: Record<Position, number> = {
+  QB: 1.0,
+  RB: 0.9,
+  WR: 1.18,
+  TE: 1.02,
+  K: 1,
+  DST: 1,
+};
 
 export function positionMultiplier(strategy: Strategy, pos: Position, round: number): number {
   for (const [range, mults] of Object.entries(strategy.positionMultipliers)) {
@@ -36,9 +74,25 @@ export function needWeight(
   counts: Partial<Record<Position, number>>,
   state: Pick<EngineState, "config">
 ): number {
-  const { rosterSlots, flexEligible } = state.config;
+  const { rosterSlots, flexEligible, leagueType, rounds } = state.config;
   const have = counts[pos] ?? 0;
   const starters = rosterSlots[pos] ?? 0;
+
+  // Positions the league doesn't roster at all (best-ball formats usually
+  // drop K/DST) are worth nothing.
+  if ((pos === "K" || pos === "DST") && starters === 0) return 0;
+
+  if (leagueType === "bestball") {
+    // No waivers, no lineup management: chase position-count targets, not
+    // starter slots. Depth IS the lineup.
+    const [minF, maxF] = BESTBALL_TARGETS[pos] ?? [0, 0.1];
+    const minT = Math.max(starters, Math.round(minF * rounds));
+    const maxT = Math.max(minT, Math.round(maxF * rounds));
+    if (have < minT) return 1;
+    if (have < maxT) return 0.72;
+    return 0.12 * Math.pow(0.6, have - maxT);
+  }
+
   if (have < starters) return 1;
   if (pos === "K" || pos === "DST") return have >= 1 ? 0 : 1;
   // Flex capacity: how many flex slots are still unclaimed by surplus players?
@@ -58,6 +112,58 @@ function blendedValue(p: BoardPlayer, strategy: Strategy): number {
   return strategy.baselineBlend * p.vorp + (1 - strategy.baselineBlend) * p.vols;
 }
 
+/**
+ * Build the value function for this draft.
+ *
+ * Redraft: the VORP/VOLS blend.
+ *
+ * Best ball: season-total VORP is structurally broken here — a 12-round
+ * bench pushes the RB replacement baseline to ~RB67 and inflates every RB,
+ * while the format's actual scoring (weekly spikes harvested by the optimal
+ * lineup) never appears in season totals. So value anchors mostly to the
+ * MARKET: a smoothed ADP-implied value curve (what a typical player at this
+ * ADP is worth), lightly blended with projections and a positional spike
+ * premium. Construction then comes from targets, stacks, and fallers —
+ * which is how winning best-ball drafters actually operate.
+ */
+function makeValueFn(
+  board: BoardPlayer[],
+  strategy: Strategy,
+  bestball: boolean
+): (p: BoardPlayer) => number {
+  if (!bestball) return (p) => blendedValue(p, strategy);
+
+  // Smoothed blended value by ADP order — the market curve.
+  const byAdp = [...board].sort((a, b) => a.adp - b.adp);
+  const smoothed = new Map<string, number>();
+  const W = 7; // smoothing half-window
+  for (let i = 0; i < byAdp.length; i++) {
+    let sum = 0;
+    let n = 0;
+    for (let j = Math.max(0, i - W); j <= Math.min(byAdp.length - 1, i + W); j++) {
+      sum += blendedValue(byAdp[j], strategy);
+      n++;
+    }
+    smoothed.set(byAdp[i].id, sum / n);
+  }
+  const PROJ_WEIGHT = 0.35; // how much projections pull against the market
+  return (p) => {
+    const market = smoothed.get(p.id) ?? 0;
+    const proj = blendedValue(p, strategy);
+    return (market * (1 - PROJ_WEIGHT) + proj * PROJ_WEIGHT) * BESTBALL_POS_VALUE[p.pos];
+  };
+}
+
+/**
+ * Apply a need weight sign-aware: positive value shrinks toward zero as the
+ * position saturates, but NEGATIVE value must grow more negative — otherwise
+ * a surplus position's bad players outrank a needed position's mediocre ones
+ * (−30 × 0.02 beats −40 × 1.0) and late rounds hoard the wrong position.
+ */
+function applyNeed(value: number, need: number): number {
+  return value >= 0 ? value * need : value * (2 - need);
+}
+
 interface Scored {
   player: BoardPlayer;
   quickScore: number;
@@ -69,13 +175,37 @@ function quickScoreAll(
   state: EngineState,
   strategy: Strategy,
   myCounts: Partial<Record<Position, number>>,
-  round: number
+  round: number,
+  valueFn: (p: BoardPlayer) => number
 ): Scored[] {
   const { currentPick } = state;
+  const stacking = strategy.stacking ?? 0;
+  const lateRounds = round >= state.config.rounds - 6;
   return available.map((p) => {
     const mult = positionMultiplier(strategy, p.pos, round);
     const need = needWeight(p.pos, myCounts, state);
-    const base = blendedValue(p, strategy) * mult * need;
+    const injuryMult = p.injury ? INJURY_PENALTY[p.injury] ?? 1 : 1;
+    let base = applyNeed(valueFn(p) * mult * injuryMult, need);
+
+    // Stacking: QB + his own pass-catchers → correlated ceiling.
+    if (stacking > 0) {
+      const stacksWith = (a: BoardPlayer, b: BoardPlayer) =>
+        a.team === b.team &&
+        ((a.pos === "QB" && (b.pos === "WR" || b.pos === "TE")) ||
+          (b.pos === "QB" && (a.pos === "WR" || a.pos === "TE")));
+      if (state.myRoster.some((r) => stacksWith(p, r))) base += stacking * STACK_BONUS;
+    }
+
+    // Handcuff: late rounds, the direct backup of an RB I already roster.
+    if (
+      lateRounds &&
+      p.pos === "RB" &&
+      (p.depthOrder ?? 1) >= 2 &&
+      state.myRoster.some((r) => r.pos === "RB" && r.team === p.team && (r.depthOrder ?? 2) === 1)
+    ) {
+      base += HANDCUFF_BONUS;
+    }
+
     const reach = Math.max(0, p.adp - currentPick - 3); // small free slack
     const byeClash = state.myRoster.some(
       (r) => r.pos === p.pos && r.bye != null && r.bye === p.bye
@@ -95,6 +225,7 @@ function hardFilter(
   round: number
 ): BoardPlayer[] {
   const { config, strategy, myPicks } = state;
+  const bestball = config.leagueType === "bestball";
   const lastTwoRounds = round > config.rounds - 2;
 
   // If my remaining picks are only enough to fill required starting slots,
@@ -107,9 +238,17 @@ function hardFilter(
   const mustFill = myPicks.length <= required.length;
 
   return available.filter((p) => {
+    // Players stashed on season-long lists are dead weight in any format.
+    if (p.injury && INJURY_EXCLUDE.has(p.injury)) return false;
+    // Positions this league doesn't roster (best-ball formats drop K/DST).
+    if ((config.rosterSlots[p.pos] ?? 0) === 0 && (p.pos === "K" || p.pos === "DST")) return false;
     if (mustFill && !required.includes(p.pos)) return false;
-    if ((p.pos === "K" || p.pos === "DST") && !lastTwoRounds) return false;
+    if ((p.pos === "K" || p.pos === "DST") && (config.rosterSlots[p.pos] ?? 0) > 0 && !lastTwoRounds)
+      return false;
+    // Redraft only: a second QB is a bench statue before the late rounds.
+    // Best ball WANTS 2-3 QBs; its targets handle the pacing.
     if (
+      !bestball &&
       p.pos === "QB" &&
       (config.rosterSlots.QB ?? 0) <= 1 &&
       (myCounts.QB ?? 0) >= 1 &&
@@ -131,8 +270,10 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
   for (const p of state.myRoster) myCounts[p.pos] = (myCounts[p.pos] ?? 0) + 1;
   const round = slotOnClock(currentPick, config.teams).round;
 
+  const bestball = config.leagueType === "bestball";
+  const valueFn = makeValueFn(board, strategy, bestball);
   const pool = hardFilter(available, state, myCounts, round);
-  const scored = quickScoreAll(pool, state, strategy, myCounts, round).sort(
+  const scored = quickScoreAll(pool, state, strategy, myCounts, round, valueFn).sort(
     (a, b) => b.quickScore - a.quickScore
   );
   const candidates = scored.slice(0, MC_CANDIDATES);
@@ -153,7 +294,7 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
     pos: a.pos,
     adp: a.adp + (drift[a.pos] ?? 0),
     stdev: a.adpStdev,
-    value: Math.max(0, blendedValue(a, strategy)),
+    value: Math.max(0, valueFn(a)),
   }));
   const nextRound = slotOnClock(nextPick, config.teams).round;
   const myPosWeight = (pos: Position, counts: Partial<Record<Position, number>>) =>
@@ -221,7 +362,8 @@ function checkStrategyViability(
     state,
     neutral,
     myCounts,
-    round
+    round,
+    makeValueFn(state.board, neutral, state.config.leagueType === "bestball")
   ).sort((a, b) => b.quickScore - a.quickScore);
   const nTop = neutralScored[0];
   if (nTop.player.id === top.player.id) return null;

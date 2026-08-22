@@ -17,7 +17,7 @@ import type {
 } from "../types";
 import { fetchDraftInfo, fetchPicks, type SleeperDraftInfo } from "../draft/sleeper";
 import { picksForSlot, pickOwner, slotOnClock } from "../draft/snake";
-import { computeDrift } from "../engine/drift";
+import { computeDrift, type DriftPrior } from "../engine/drift";
 import { mergeName } from "../etl/names";
 
 const STORAGE_KEY = "draft-cockpit-picks-v1";
@@ -71,8 +71,27 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const [live, setLive] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastPickFlash, setLastPickFlash] = useState(0);
+  const [driftPrior, setDriftPrior] = useState<DriftPrior | undefined>(undefined);
   const lastCountRef = useRef(0);
   const restoredRef = useRef(false);
+
+  // History-fitted drift prior, if the ETL produced one for THIS league.
+  useEffect(() => {
+    if (!config?.leagueId) return;
+    let cancelled = false;
+    fetch("/data/drift-prior.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (cancelled || !json || json.leagueId !== config.leagueId) return;
+        setDriftPrior({ drift: json.drift ?? {}, weight: 20 });
+      })
+      .catch(() => {
+        // no prior fitted — live drift alone
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.leagueId]);
 
   // --- crash recovery -------------------------------------------------------
   useEffect(() => {
@@ -216,7 +235,10 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     return { myRoster: roster, draftedIds: drafted, opponentCounts: opp };
   }, [picks, teams, tradedPicks, mySlot, boardIndexes]);
 
-  const drift = useMemo(() => computeDrift(picks, boardIndexes.byId), [picks, boardIndexes]);
+  const drift = useMemo(
+    () => computeDrift(picks, boardIndexes.byId, driftPrior),
+    [picks, boardIndexes, driftPrior]
+  );
 
   const markDrafted = useCallback(
     (player: BoardPlayer) => {

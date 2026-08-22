@@ -46,6 +46,18 @@ body {
   outline-offset: 2px;
 }
 
+/* On-the-clock: the answer card breathes until you act */
+@keyframes clock-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse-color, #fff) 45%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--pulse-color, #fff) 12%, transparent); }
+}
+.on-the-clock {
+  animation: clock-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .on-the-clock { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--pulse-color, #fff) 35%, transparent); }
+}
+
 @keyframes pick-flash {
   0% { background-color: color-mix(in srgb, var(--color-wr) 22%, transparent); }
   100% { background-color: transparent; }

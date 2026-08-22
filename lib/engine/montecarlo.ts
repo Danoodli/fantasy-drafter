@@ -1,13 +1,15 @@
 // Monte Carlo over the wrap: simulate every opponent pick between now and my
-// next two picks, then greedily fill my roster at those picks. One shared set
-// of sampled drafts is evaluated for all candidates, so 12 candidates cost
-// barely more than one. Deterministic given a seed — testable, replayable.
+// next two picks, then greedily fill my roster at those picks. Deterministic
+// given a seed — testable, replayable.
 //
-// Per iteration: each player's "effective draft position" is sampled ONCE
-// (adp + stdev·gaussian); opponents then take players in that sampled order,
-// skipping roster-need-capped positions. This is O(players) gaussians per
-// iteration instead of O(players × picks), which is what keeps the full
-// recompute under the 50ms budget.
+// Two structural optimizations keep the full recompute inside the 50ms budget:
+// 1. Each player's "effective draft position" is sampled ONCE per iteration
+//    (adp + stdev·gaussian) and opponents take players in that order —
+//    O(players) gaussians per iteration instead of O(players × picks).
+// 2. The opponent walk runs ONCE per iteration and is SHARED by all
+//    candidates: opponents don't react to my pick, so each candidate just
+//    replays the taken-sequence, skipping itself (the next player in the
+//    sequence shifts in — exactly what the room would do).
 
 import type { Position } from "../types";
 
@@ -31,8 +33,11 @@ function gaussian(rng: () => number): number {
 }
 
 const POS_INDEX: Record<Position, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
+const POS_LIST: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
 /** Opponent roster-need caps: beyond these counts a position is skipped. */
 const OPP_CAP = [2, 7, 7, 2, 1, 1]; // QB RB WR TE K DST
+
+const GREEDY_SCAN = 60; // my greedy picks consider this many top-of-ADP players
 
 export interface SimPlayer {
   pos: Position;
@@ -90,7 +95,6 @@ export function simulateAll(
     value[i] = p.value;
   });
 
-  // Slots are 1..teams; flatten opponent counts into slot-major Int16 array.
   const baseOppCounts = new Int16Array((shared.teams + 1) * 6);
   for (const [slotStr, counts] of Object.entries(shared.opponentCounts)) {
     const slot = Number(slotStr);
@@ -99,80 +103,113 @@ export function simulateAll(
     }
   }
 
+  // Schedule split: for each of my sim picks, how many opponent picks precede it.
+  const oppBeforeMine: number[] = [];
+  let oppSteps = 0;
+  for (const step of shared.schedule) {
+    if (step.mine) oppBeforeMine.push(oppSteps);
+    else oppSteps++;
+  }
+  const BUFFER = 2; // extra opponent picks: replacements when a candidate collides
   const lastTwoRoundsStart = (shared.rounds - 2) * shared.teams;
-  const x = new Float64Array(n); // sampled effective draft position
+
+  const x = new Float64Array(n);
   const order = new Int32Array(n);
+  const walkTaken = new Uint8Array(n);
   const taken = new Uint8Array(n);
   const oppCounts = new Int16Array(baseOppCounts.length);
+  const seq = new Int32Array(oppSteps + BUFFER);
   const totals = candidates.map(() => new Float64Array(iterations));
-
-  // Reusable per-candidate my-counts as plain objects (small, 6 keys).
-  const myCountsProto = candidates.map((c) => ({ ...c.myCounts }));
 
   for (let it = 0; it < iterations; it++) {
     for (let i = 0; i < n; i++) x[i] = adp[i] + stdev[i] * gaussian(rng);
     for (let i = 0; i < n; i++) order[i] = i;
     order.sort((a, b) => x[a] - x[b]);
 
+    // --- one opponent walk per iteration, shared by all candidates ---------
+    walkTaken.fill(0);
+    oppCounts.set(baseOppCounts);
+    let seqLen = 0;
+    let ptr = 0;
+    for (const step of shared.schedule) {
+      if (step.mine) continue;
+      const early = step.pickNo <= lastTwoRoundsStart;
+      const cBase = step.slot * 6;
+      let picked = -1;
+      let firstSkipped = -1;
+      for (let j = ptr; j < n; j++) {
+        const i = order[j];
+        if (walkTaken[i]) {
+          if (j === ptr) ptr++;
+          continue;
+        }
+        const pi = pos[i];
+        if (oppCounts[cBase + pi] >= OPP_CAP[pi] || (early && pi >= 4)) {
+          if (firstSkipped < 0) firstSkipped = j;
+          continue;
+        }
+        picked = i;
+        break;
+      }
+      if (picked < 0 && firstSkipped >= 0) picked = order[firstSkipped];
+      if (picked >= 0) {
+        walkTaken[picked] = 1;
+        oppCounts[cBase + pos[picked]]++;
+        seq[seqLen++] = picked;
+      }
+    }
+    // Buffer picks: generic next-off-the-board replacements.
+    for (let b = 0; b < BUFFER; b++) {
+      for (let j = ptr; j < n; j++) {
+        const i = order[j];
+        if (!walkTaken[i]) {
+          walkTaken[i] = 1;
+          seq[seqLen++] = i;
+          break;
+        }
+      }
+    }
+
+    // --- each candidate replays the sequence, skipping itself --------------
     for (let ci = 0; ci < nc; ci++) {
       const cand = candidates[ci];
       taken.fill(0);
       if (cand.playerIndex >= 0) taken[cand.playerIndex] = 1;
-      oppCounts.set(baseOppCounts);
-      const myCounts: Partial<Record<Position, number>> = { ...myCountsProto[ci] };
+      const counts: Partial<Record<Position, number>> = { ...cand.myCounts };
       let total = 0;
-      let ptr = 0; // pointer into `order` for opponent picks
+      let seqPtr = 0;
+      let consumed = 0;
 
-      for (const step of shared.schedule) {
-        if (step.mine) {
-          // Greedy: best need-weighted value among top available by ADP.
-          let bestIdx = -1;
-          let bestVal = -Infinity;
-          for (let i = 0, seen = 0; i < n && seen < 50; i++) {
-            if (taken[i]) continue;
-            seen++;
-            const p = shared.players[i];
-            const w = cand.myPosWeight(p.pos, myCounts);
-            if (w <= 0) continue;
-            const v = value[i] * w;
-            if (v > bestVal) {
-              bestVal = v;
-              bestIdx = i;
-            }
+      for (let k = 0; k < oppBeforeMine.length; k++) {
+        // Opponents consume up to their pick count; a taken entry (my
+        // candidate or an earlier greedy pick) shifts the next one in.
+        const target = oppBeforeMine[k];
+        while (consumed < target && seqPtr < seqLen) {
+          const e = seq[seqPtr++];
+          if (taken[e]) continue;
+          taken[e] = 1;
+          consumed++;
+        }
+        // My greedy pick: need-weighted best among top-of-ADP survivors.
+        const w: number[] = POS_LIST.map((p) => cand.myPosWeight(p, counts));
+        let bestIdx = -1;
+        let bestVal = -Infinity;
+        for (let i = 0, seen = 0; i < n && seen < GREEDY_SCAN; i++) {
+          if (taken[i]) continue;
+          seen++;
+          const wv = w[pos[i]];
+          if (wv <= 0) continue;
+          const v = value[i] * wv;
+          if (v > bestVal) {
+            bestVal = v;
+            bestIdx = i;
           }
-          if (bestIdx >= 0) {
-            taken[bestIdx] = 1;
-            const p = shared.players[bestIdx];
-            total += bestVal;
-            myCounts[p.pos] = (myCounts[p.pos] ?? 0) + 1;
-          }
-        } else {
-          const early = step.pickNo <= lastTwoRoundsStart;
-          const cBase = step.slot * 6;
-          // Advance through sampled order; skip taken/capped positions.
-          let j = ptr;
-          let picked = -1;
-          let firstSkipped = -1;
-          while (j < n) {
-            const i = order[j];
-            if (!taken[i]) {
-              const pi = pos[i];
-              const capped = oppCounts[cBase + pi] >= OPP_CAP[pi] || (early && pi >= 4);
-              if (!capped) {
-                picked = i;
-                break;
-              }
-              if (firstSkipped < 0) firstSkipped = j;
-            } else if (j === ptr) {
-              ptr++; // shrink the window when the head is consumed
-            }
-            j++;
-          }
-          if (picked < 0 && firstSkipped >= 0) picked = order[firstSkipped];
-          if (picked >= 0) {
-            taken[picked] = 1;
-            oppCounts[cBase + pos[picked]]++;
-          }
+        }
+        if (bestIdx >= 0) {
+          taken[bestIdx] = 1;
+          total += bestVal;
+          const p = POS_LIST[pos[bestIdx]];
+          counts[p] = (counts[p] ?? 0) + 1;
         }
       }
       totals[ci][it] = total;

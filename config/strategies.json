@@ -85,6 +85,17 @@
     "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
   },
   {
+    "id": "tournament-ceiling",
+    "label": "Tournament Ceiling",
+    "blurb": "Best-ball large fields: variance is the point. Stack QBs with their receivers, chase upside.",
+    "lambda": -0.2,
+    "baselineBlend": 0.5,
+    "adpDiscipline": 0.35,
+    "stacking": 1.0,
+    "positionMultipliers": {},
+    "positionCaps": { "QB": 3, "TE": 3, "K": 1, "DST": 1 }
+  },
+  {
     "id": "safe-floor",
     "label": "Safe Floor",
     "blurb": "Minimize regret. Take the reliable points.",

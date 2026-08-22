@@ -12,12 +12,27 @@ export const DRIFT_PRIOR_WEIGHT = 8;
 const OUTLIER_CLAMP = 36;
 
 /**
+ * A drift prior fitted from this league's PREVIOUS season's draft
+ * (scripts/build-board.ts emits public/data/drift-prior.json). It enters the
+ * blend as `weight` virtual picks centered on last year's observed bias.
+ */
+export interface DriftPrior {
+  drift: Partial<Record<Position, number>>;
+  /** Virtual sample size the prior carries per position. */
+  weight: number;
+}
+
+/**
  * Per-position ADP drift, in picks. Positive = the room takes this position
  * LATER than national ADP; the survival model shifts accordingly.
+ *
+ * Blend: (prior mean × prior weight + observed deltas) / (weights + samples),
+ * with an extra zero-anchored regularizer so one pick can't swing it.
  */
 export function computeDrift(
   picks: DraftPick[],
-  boardById: Map<string, BoardPlayer>
+  boardById: Map<string, BoardPlayer>,
+  prior?: DriftPrior
 ): Partial<Record<Position, number>> {
   const sums: Partial<Record<Position, { sum: number; n: number }>> = {};
   for (const pick of picks) {
@@ -31,9 +46,12 @@ export function computeDrift(
   }
   const drift: Partial<Record<Position, number>> = {};
   for (const pos of POSITIONS) {
-    const s = sums[pos];
-    if (!s || s.n === 0) continue;
-    drift[pos] = s.sum / (s.n + DRIFT_PRIOR_WEIGHT);
+    const s = sums[pos] ?? { sum: 0, n: 0 };
+    const priorMean = prior?.drift[pos];
+    const priorW = priorMean != null ? prior!.weight : 0;
+    if (s.n === 0 && priorW === 0) continue;
+    drift[pos] =
+      (s.sum + (priorMean ?? 0) * priorW) / (s.n + priorW + DRIFT_PRIOR_WEIGHT);
   }
   return drift;
 }

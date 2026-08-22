@@ -7,12 +7,15 @@
 import { memo } from "react";
 import type { BoardPlayer, Position } from "../lib/types";
 import { POS_COLOR, POS_ORDER } from "../lib/client/pos";
+import InjuryBadge from "./InjuryBadge";
 
 interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
   myIds: Set<string>;
   onMark: (player: BoardPlayer) => void;
+  /** Columns to show — best-ball formats drop K/DST. Defaults to all. */
+  positions?: Position[];
 }
 
 const DEPTH: Record<Position, number> = { QB: 18, RB: 36, WR: 36, TE: 16, K: 8, DST: 8 };
@@ -61,7 +64,9 @@ function Column({ pos, players, draftedIds, myIds, onMark }: Props & { pos: Posi
                 } ${mine ? "border-l-2 bg-panel" : "border-l-2 border-transparent"}`}
                 style={mine ? { borderLeftColor: color } : undefined}
               >
-                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {p.name} <InjuryBadge injury={p.injury} />
+                </span>
                 <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
                 <span className="font-mono text-[11px] text-ink-dim">
                   {Math.round(p.projPoints)}
@@ -76,9 +81,10 @@ function Column({ pos, players, draftedIds, myIds, onMark }: Props & { pos: Posi
 }
 
 function TierBoard(props: Props) {
+  const positions = props.positions ?? POS_ORDER;
   return (
     <div className="tier-scroll flex h-full gap-2 overflow-x-auto overflow-y-auto pb-4">
-      {POS_ORDER.map((pos) => (
+      {positions.map((pos) => (
         <Column key={pos} pos={pos} {...props} />
       ))}
     </div>

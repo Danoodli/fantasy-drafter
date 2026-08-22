@@ -42,7 +42,10 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 - **Survival**: P(player available at pick n) from FFC's per-player ADP mean + stdev via the normal CDF, shifted by observed **room drift** per position.
 - **VONA**: each candidate vs. the expected best at his position at your next pick — tier-cliff urgency falls out of the math.
 - **Monte Carlo**: simulates the room between your picks (ADP + noise + roster-need), scores candidates on `E[value] − λ·stdev`.
-- **Strategies are config, not code** (`config/strategies.json`): λ, VORP/VOLS blend, ADP discipline, position multipliers by round. The Custom strategy exposes the dials as sliders.
+- **Strategies are config, not code** (`config/strategies.json`): λ, VORP/VOLS blend, ADP discipline, stacking, position multipliers by round. The Custom strategy exposes the dials as sliders — λ can go negative to *pay* for variance.
+- **Best ball mode** (Underdog/DraftKings-style draft-once tournaments, or any Sleeper best-ball league — auto-detected): value anchors to a market curve instead of season-total VORP, roster construction chases 2-3 QB / 5-6 RB / 7-9 WR / 2-3 TE targets, QB↔receiver stacks earn a bonus, and K/DST disappear when the format has none.
+- **Injury + depth data** from Sleeper is baked into the board nightly: IR/PUP players are never recommended, Out/Doubtful are discounted, and late rounds get a handcuff bonus for your own RBs' direct backups.
+- **History-fitted room drift**: with a `leagueId` in `config/league.json`, the nightly build fits per-position ADP bias from your league's previous draft and seeds draft-night drift with it.
 
 ## Scripts
 
@@ -52,6 +55,7 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 | `pnpm build:board` | rebuild boards from live sources (falls back to committed fixtures in `data/raw/` with a loud staleness warning) |
 | `pnpm test` | engine math test suite (vitest) |
 | `pnpm backtest <draft_id> <slot> [strategy] [scoring]` | replay a real Sleeper draft with the engine in your slot; compare rosters |
+| `pnpm simulate <draft_id> [slot] [scoring] [--sims=500] [--bestball]` | run every roster in a drafted room through hundreds of simulated seasons; report win rates and ceiling percentiles |
 
 ## Validating and tuning
 

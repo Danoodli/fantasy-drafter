@@ -5,8 +5,9 @@
 // peripheral vision, and the Pick button confirms — it never computes.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Board, BoardPlayer, LeagueConfig, Strategy } from "../lib/types";
-import { recommend } from "../lib/engine/recommend";
+import type { Board, BoardPlayer, LeagueConfig, Position, Strategy } from "../lib/types";
+import { recommend, BESTBALL_TARGETS } from "../lib/engine/recommend";
+import { survivalProb } from "../lib/engine/survival";
 import { useDraft } from "../lib/client/useDraft";
 import { POS_COLOR } from "../lib/client/pos";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../lib/client/config";
 import TierBoard from "./TierBoard";
 import SearchBox, { type SearchBoxHandle } from "./SearchBox";
+import InjuryBadge from "./InjuryBadge";
 
 interface Props {
   board: Board;
@@ -24,7 +26,7 @@ interface Props {
   onReconfigure: () => void;
 }
 
-function customStrategy(p: CustomStrategyParams): Strategy {
+function customStrategy(p: CustomStrategyParams, bestball: boolean): Strategy {
   return {
     id: "custom",
     label: "Custom",
@@ -32,8 +34,11 @@ function customStrategy(p: CustomStrategyParams): Strategy {
     lambda: p.lambda,
     baselineBlend: p.baselineBlend,
     adpDiscipline: p.adpDiscipline,
+    stacking: p.stacking,
     positionMultipliers: { "1-5": { RB: p.earlyRb, WR: p.earlyWr } },
-    positionCaps: { QB: 2, TE: 2, K: 1, DST: 1 },
+    positionCaps: bestball
+      ? { QB: 3, TE: 3, K: 1, DST: 1 }
+      : { QB: 2, TE: 2, K: 1, DST: 1 },
   };
 }
 
@@ -51,10 +56,11 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage hydration
   useEffect(() => setCustom(loadCustomStrategy()), []);
 
+  const bestball = config.leagueType === "bestball";
   const strategy = useMemo(() => {
-    if (strategyId === "custom" && custom) return customStrategy(custom);
+    if (strategyId === "custom" && custom) return customStrategy(custom, bestball);
     return strategies.find((s) => s.id === strategyId) ?? strategies[0];
-  }, [strategyId, strategies, custom]);
+  }, [strategyId, strategies, custom, bestball]);
 
   const totalPicks = config.teams * config.rounds;
   const draftOver = draft.currentPick > totalPicks;
@@ -78,9 +84,38 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
   const top = output?.recommendations[0];
   const alternates = output?.recommendations.slice(1) ?? [];
+  const picksUntilMe = draft.myPicks.length > 0 ? draft.myPicks[0] - draft.currentPick : null;
+
+  // Browser tab is a second signal — glanceable from another window.
+  useEffect(() => {
+    document.title = draftOver
+      ? "Draft over — Draft Cockpit"
+      : myTurn
+        ? "🟢 YOUR PICK — Draft Cockpit"
+        : `Pick ${draft.currentPick}${picksUntilMe != null ? ` · you in ${picksUntilMe}` : ""} — Draft Cockpit`;
+  }, [draftOver, myTurn, draft.currentPick, picksUntilMe]);
+
+  // Snipe detection: the player we were planning to take got drafted by
+  // someone else → say so, loudly, with the new answer already on screen.
+  const myIds = useMemo(() => new Set(draft.myRoster.map((p) => p.id)), [draft.myRoster]);
+  const prevTopRef = useRef<{ id: string; name: string } | null>(null);
+  const [snipe, setSnipe] = useState<string | null>(null);
+  useEffect(() => {
+    const prev = prevTopRef.current;
+    if (prev && draft.draftedIds.has(prev.id)) {
+      if (!myIds.has(prev.id)) {
+        setSnipe(prev.name); // reacting to the external pick feed
+      }
+      prevTopRef.current = null;
+    }
+    if (top && !draft.draftedIds.has(top.player.id)) {
+      prevTopRef.current = { id: top.player.id, name: top.player.name };
+    }
+  }, [draft.draftedIds, top, myIds]);
 
   function mark(player: BoardPlayer, mine = false) {
     draft.markDrafted(player);
+    if (mine) setSnipe(null);
     showToast(mine ? `Drafted ${player.name}.` : `${player.name} is off the board.`);
   }
 
@@ -113,8 +148,24 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   }); // deliberately unmemoized: cheap, always-fresh closures
 
   const staleSources = board.meta.sources.filter((s) => s.fromFixture);
-  const myIds = useMemo(() => new Set(draft.myRoster.map((p) => p.id)), [draft.myRoster]);
   const posColor = top ? POS_COLOR[top.player.pos] : "var(--color-ink)";
+
+  // Look-ahead: what each position probably offers at my pick after this one.
+  const planner = useMemo(() => {
+    const n2 = draft.myPicks[1];
+    if (!n2 || draftOver) return null;
+    const rows = (["QB", "RB", "WR", "TE"] as Position[]).map((pos) => {
+      const cands = board.players
+        .filter((p) => p.pos === pos && !draft.draftedIds.has(p.id))
+        .sort((a, b) => b.projPoints - a.projPoints)
+        .slice(0, 8)
+        .map((p) => ({ p, s: survivalProb(p, n2, draft.drift) }));
+      const best = cands[0];
+      const likely = cands.find((x) => x.s >= 0.55) ?? cands[cands.length - 1];
+      return { pos, best, likely };
+    });
+    return { n2, rows };
+  }, [board, draft.draftedIds, draft.myPicks, draft.drift, draftOver]);
 
   // Roster slot fill (starters first, then bench)
   const rosterView = useMemo(() => {
@@ -142,10 +193,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           <span className={draft.lastPickFlash ? "pick-flash rounded px-1" : "px-1"}>
             {draftOver ? "DRAFT OVER" : `PICK ${draft.currentPick} · RND ${draft.round}`}
           </span>
-          {!draftOver && draft.myPicks.length > 0 && (
+          {!draftOver && myTurn && (
+            <span className="ml-2 font-semibold uppercase" style={{ color: posColor }}>
+              you&apos;re on the clock
+            </span>
+          )}
+          {!draftOver && !myTurn && picksUntilMe != null && (
             <span className="ml-2 text-ink-dim">
-              your next: <span className="text-ink">{draft.myPicks[0]}</span>
-              {draft.myPicks[1] ? ` · then ${draft.myPicks[1]}` : ""}
+              slot {draft.onClockSlot} up ·{" "}
+              <span className="text-ink">
+                {picksUntilMe === 1 ? "you're next" : `you in ${picksUntilMe}`}
+              </span>{" "}
+              (pick {draft.myPicks[0]}{draft.myPicks[1] ? `, then ${draft.myPicks[1]}` : ""})
             </span>
           )}
         </div>
@@ -204,12 +263,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
       {/* Custom dials */}
       {strategyId === "custom" && showDials && custom && (
-        <section className="mt-2 grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg bg-panel p-3 sm:grid-cols-5">
+        <section className="mt-2 grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg bg-panel p-3 sm:grid-cols-6">
           {(
             [
-              ["lambda", "Risk aversion λ", 0, 1.5],
+              ["lambda", "Risk λ (neg = chase ceiling)", -0.5, 1.5],
               ["baselineBlend", "VORP ↔ VOLS", 0, 1],
               ["adpDiscipline", "ADP discipline", 0, 1],
+              ["stacking", "Stacking", 0, 1.5],
               ["earlyRb", "Early RB ×", 0.4, 1.6],
               ["earlyWr", "Early WR ×", 0.4, 1.6],
             ] as const
@@ -268,11 +328,30 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             </div>
           ) : top ? (
             <div
-              className="rounded-lg border-l-4 bg-panel p-5"
-              style={{ borderLeftColor: posColor }}
+              className={`rounded-lg border-l-4 bg-panel p-5 ${myTurn ? "on-the-clock" : ""}`}
+              style={{ borderLeftColor: posColor, ["--pulse-color" as string]: posColor }}
             >
-              <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
-                {myTurn ? "The pick" : `Plan for pick ${planningPick} · slot ${draft.onClockSlot} is up`}
+              {snipe && (
+                <div className="mb-3 flex items-start justify-between gap-2 rounded bg-warn/15 px-3 py-2 text-sm text-warn">
+                  <span>
+                    Sniped — <strong>{snipe}</strong> is gone. New pick below.
+                  </span>
+                  <button
+                    onClick={() => setSnipe(null)}
+                    aria-label="Dismiss snipe alert"
+                    className="font-mono text-xs text-warn/80 hover:text-warn"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <p
+                className={`font-mono text-xs uppercase tracking-widest ${myTurn ? "font-semibold" : "text-ink-dim"}`}
+                style={myTurn ? { color: posColor } : undefined}
+              >
+                {myTurn
+                  ? `You're on the clock — pick ${planningPick}`
+                  : `Plan for your pick ${planningPick} · ${picksUntilMe === 1 ? "you're next" : `${picksUntilMe} picks away`}`}
               </p>
               <h2
                 className="mt-1 font-display text-6xl font-bold uppercase leading-[0.95] tracking-tight sm:text-7xl"
@@ -280,9 +359,10 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               >
                 {top.player.name}
               </h2>
-              <p className="mt-2 font-mono text-sm text-ink-dim">
+              <p className="mt-2 flex items-center gap-1.5 font-mono text-sm text-ink-dim">
                 <span style={{ color: posColor }}>{top.player.pos}</span> · {top.player.team} · bye{" "}
                 {top.player.bye ?? "—"} · {Math.round(top.player.projPoints)} proj
+                <InjuryBadge injury={top.player.injury} />
               </p>
               <p className="mt-3 text-[15px] leading-snug text-ink">{top.reason}</p>
               <button
@@ -316,7 +396,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                         {r.player.name}
                       </span>
                       <span className="ml-2 font-mono text-xs text-ink-dim">
-                        {r.player.pos} · {r.player.team}
+                        {r.player.pos} · {r.player.team} <InjuryBadge injury={r.player.injury} />
                       </span>
                       <span className="block text-sm text-ink-dim">{r.reason}</span>
                     </span>
@@ -334,23 +414,86 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             onMark={(p) => mark(p)}
           />
 
+          {/* Look-ahead: what's probably still there at my pick after this one */}
+          {planner && (
+            <div className="rounded-lg bg-panel p-3">
+              <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
+                At your pick {planner.n2}
+              </p>
+              <ul className="mt-1.5 space-y-0.5">
+                {planner.rows.map(({ pos, best, likely }) =>
+                  best ? (
+                    <li key={pos} className="flex items-baseline gap-2 text-[13px]">
+                      <span className="w-7 shrink-0 font-mono text-[11px]" style={{ color: POS_COLOR[pos] }}>
+                        {pos}
+                      </span>
+                      <span className="truncate">
+                        {best.p.name}{" "}
+                        <span className="font-mono text-[11px] text-ink-faint">
+                          {Math.round(best.s * 100)}%
+                        </span>
+                      </span>
+                      {likely && likely.p.id !== best.p.id && (
+                        <span className="ml-auto truncate text-right text-ink-dim">
+                          likely: {likely.p.name}
+                        </span>
+                      )}
+                    </li>
+                  ) : null
+                )}
+              </ul>
+            </div>
+          )}
+
           {/* My roster */}
           <div className="rounded-lg bg-panel p-3">
-            <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">My roster</p>
-            <ul className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5">
-              {rosterView.map(({ slot, player }, i) => (
-                <li key={i} className="flex items-baseline gap-2 text-sm">
-                  <span className="w-9 shrink-0 font-mono text-[11px] text-ink-faint">{slot}</span>
-                  {player ? (
-                    <span className="truncate" style={{ color: POS_COLOR[player.pos] }}>
+            <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
+              My roster{bestball ? " · best ball construction" : ""}
+            </p>
+            {bestball ? (
+              <>
+                <ul className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1">
+                  {(["QB", "RB", "WR", "TE"] as Position[]).map((pos) => {
+                    const have = draft.myRoster.filter((p) => p.pos === pos).length;
+                    const [minF, maxF] = BESTBALL_TARGETS[pos] ?? [0, 0];
+                    const minT = Math.round(minF * config.rounds);
+                    const maxT = Math.round(maxF * config.rounds);
+                    const done = have >= minT;
+                    return (
+                      <li key={pos} className="font-mono text-sm">
+                        <span style={{ color: POS_COLOR[pos] }}>{pos}</span>{" "}
+                        <span className={done ? "text-ink" : "text-warn"}>{have}</span>
+                        <span className="text-ink-faint">
+                          /{minT}–{maxT}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  {draft.myRoster.map((player, i) => (
+                    <li key={i} className="truncate text-sm" style={{ color: POS_COLOR[player.pos] }}>
                       {player.name}
-                    </span>
-                  ) : (
-                    <span className="text-ink-faint">—</span>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <ul className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                {rosterView.map(({ slot, player }, i) => (
+                  <li key={i} className="flex items-baseline gap-2 text-sm">
+                    <span className="w-9 shrink-0 font-mono text-[11px] text-ink-faint">{slot}</span>
+                    {player ? (
+                      <span className="truncate" style={{ color: POS_COLOR[player.pos] }}>
+                        {player.name}
+                      </span>
+                    ) : (
+                      <span className="text-ink-faint">—</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 
@@ -361,6 +504,9 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             draftedIds={draft.draftedIds}
             myIds={myIds}
             onMark={(p) => mark(p)}
+            positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
+              (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
+            )}
           />
         </section>
       </div>

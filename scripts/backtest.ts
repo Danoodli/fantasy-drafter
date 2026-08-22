@@ -55,7 +55,10 @@ async function main() {
     teams: info.teams,
     rounds: info.rounds,
     scoring: scoring as LeagueConfig["scoring"],
-    rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 },
+    leagueType: info.bestBall ? "bestball" : "redraft",
+    rosterSlots: info.bestBall
+      ? { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 }
+      : { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 },
     flexEligible: ["RB", "WR", "TE"],
     strategy: strategyId,
   };

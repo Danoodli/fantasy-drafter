@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle }
 import type { BoardPlayer } from "../lib/types";
 import { searchPlayers } from "../lib/draft/fuzzy";
 import { POS_COLOR } from "../lib/client/pos";
+import InjuryBadge from "./InjuryBadge";
 
 export interface SearchBoxHandle {
   focus: () => void;
@@ -81,7 +82,9 @@ const SearchBox = forwardRef<SearchBoxHandle, Props>(function SearchBox(
                 >
                   {p.pos}
                 </span>
-                <span className="flex-1">{p.name}</span>
+                <span className="flex-1">
+                  {p.name} <InjuryBadge injury={p.injury} />
+                </span>
                 <span className="font-mono text-[11px] text-ink-faint">
                   {p.team} · ADP {p.adp.toFixed(0)}
                 </span>

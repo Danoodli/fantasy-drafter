@@ -6,6 +6,7 @@
   "teams": 12,
   "rounds": 15,
   "scoring": "ppr",
+  "leagueType": "redraft",
   "rosterSlots": { "QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1 },
   "flexEligible": ["RB", "WR", "TE"],
   "strategy": "balanced"
