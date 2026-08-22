@@ -114,6 +114,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
       {/* Mobile: full-width bottom drawer, native-sheet feel.
           Desktop: centered card sized to the screen, not a fixed px width. */}
       <div
+        data-tour-screen="modal"
         className="drawer-panel max-h-[92dvh] w-full max-w-full overflow-y-auto overflow-x-hidden rounded-t-2xl border border-line border-l-4 bg-panel p-4 shadow-2xl sm:max-h-[88dvh] sm:w-[min(94vw,72rem)] sm:rounded-xl sm:p-5"
         style={{ borderLeftColor: color }}
         onClick={(e) => e.stopPropagation()}
@@ -149,7 +150,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           </button>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div data-tour="modal-verdict" className="mt-3 flex flex-wrap items-center gap-2">
           <span
             className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field"
             style={{ background: VERDICT_COLOR[blurb.verdict] }}
@@ -220,7 +221,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
             )}
           </div>
 
-          <div className="min-w-0">
+          <div data-tour="modal-news" className="min-w-0">
             {/* The breaking item behind the 📰 badge — wire post or headline */}
             {wireItem && (
               <div className="mb-3 min-w-0 rounded border-l-2 border-warn bg-warn/10 p-3">

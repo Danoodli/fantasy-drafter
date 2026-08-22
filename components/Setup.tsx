@@ -145,7 +145,7 @@ export default function Setup({
   const ready = config.myDraftSlot != null && (mode === "manual" || config.draftId);
 
   return (
-    <main className="stagger mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-6 px-6 py-12">
+    <main data-tour-screen="setup" className="stagger mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-6 px-6 py-12">
       <header>
         <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
           Draft Cockpit
@@ -209,6 +209,7 @@ export default function Setup({
               setMode(m);
               setConfig((c) => ({ ...c, platform: m }));
             }}
+            data-tour={m === "manual" ? "mode-manual" : undefined}
             className={`rounded px-4 py-2 text-sm font-semibold uppercase tracking-wide ${
               mode === m ? "bg-panel-2 text-ink" : "bg-panel text-ink-dim hover:text-ink"
             }`}
@@ -245,7 +246,7 @@ export default function Setup({
       )}
 
       {mode === "manual" && (
-        <section className="rounded-lg bg-panel p-4">
+        <section data-tour="formats" className="rounded-lg bg-panel p-4">
           <p className="text-sm font-medium text-ink-dim">League type</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
@@ -361,7 +362,7 @@ export default function Setup({
         </section>
       )}
 
-      <section className="rounded-lg bg-panel p-4">
+      <section data-tour="slots" className="rounded-lg bg-panel p-4">
         <p className="text-sm font-medium text-ink-dim">Your draft slot</p>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {Array.from({ length: config.teams }, (_, i) => i + 1).map((slot) => (
@@ -382,7 +383,7 @@ export default function Setup({
       </section>
 
       {/* Advanced: every dial. Defaults are sane — open only when your league is weird. */}
-      <details className="rounded-lg bg-panel p-4">
+      <details data-tour="advanced" className="rounded-lg bg-panel p-4">
         <summary className="cursor-pointer text-sm font-medium text-ink-dim">
           Advanced — roster slots &amp; format dials
         </summary>
@@ -494,7 +495,7 @@ export default function Setup({
       </details>
 
       {/* Save & share this exact setup — no accounts, the link IS the config. */}
-      <section className="flex flex-wrap items-center gap-2 rounded-lg bg-panel p-3">
+      <section data-tour="save-share" className="flex flex-wrap items-center gap-2 rounded-lg bg-panel p-3">
         <input
           value={presetName}
           onChange={(e) => setPresetName(e.target.value)}
@@ -525,6 +526,7 @@ export default function Setup({
       <button
         onClick={() => onDone(config)}
         disabled={!ready}
+        data-tour="open"
         className="btn-shimmer rounded-lg bg-rb py-4 font-display text-2xl font-bold uppercase tracking-wide text-field disabled:opacity-30"
       >
         Open the cockpit

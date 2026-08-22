@@ -99,7 +99,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
   const myRank = rows.findIndex((t) => t.slot === mySlot);
 
   return (
-    <main className="mx-auto max-w-5xl px-4 pb-10 pt-4">
+    <main data-tour-screen="recap" className="mx-auto max-w-5xl px-4 pb-10 pt-4">
       <header className="flex flex-wrap items-center gap-3 border-b border-line pb-3">
         <h1 className="font-display text-4xl font-bold uppercase tracking-tight">
           {draftOver ? "Draft recap" : "Standings so far"}
@@ -128,12 +128,14 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
                 console.error("share card failed:", err);
               }
             }}
+            data-tour="recap-share"
             className="btn-shimmer rounded border border-line bg-panel px-4 py-2 text-sm text-ink hover:bg-panel-2"
             title="Render your recap as a PNG for the group chat"
           >
             Share card
           </button>
           <button
+            data-tour="recap-sim"
             onClick={runSim}
             disabled={simming}
             className="rounded bg-rb px-4 py-2 font-display text-lg font-bold uppercase text-field disabled:opacity-50"
@@ -141,6 +143,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
             {simming ? "Simulating…" : sim ? `Re-run ${SIMS} seasons` : `Simulate ${SIMS} seasons`}
           </button>
           <button
+            data-tour="recap-back"
             onClick={onClose}
             className="rounded border border-line bg-panel px-4 py-2 text-sm text-ink-dim hover:text-ink"
           >
@@ -196,7 +199,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
         </p>
       )}
 
-      <ol className="stagger mt-4 space-y-2">
+      <ol data-tour="recap-standings" className="stagger mt-4 space-y-2">
         {rows.map((t, i) => {
           const mine = t.slot === mySlot;
           const s = sim?.get(t.slot);

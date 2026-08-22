@@ -16,6 +16,7 @@ import Setup from "../components/Setup";
 import Cockpit from "../components/Cockpit";
 import Recap from "../components/Recap";
 import Portfolio from "../components/Portfolio";
+import Walkthrough from "../components/Walkthrough";
 import strategiesJson from "../config/strategies.json";
 
 /** Recap of a saved draft: loads the board that config needs, then renders. */
@@ -130,18 +131,22 @@ export default function Page() {
     };
   }, [config]);
 
+  const walkthrough = <Walkthrough autoStart />;
+
   if (viewingPortfolio) {
-    return <Portfolio onClose={() => setViewingPortfolio(false)} />;
+    return <>{walkthrough}<Portfolio onClose={() => setViewingPortfolio(false)} /></>;
   }
 
   if (viewingDraft) {
-    return <HistoryRecap draft={viewingDraft} onClose={() => setViewingDraft(null)} />;
+    return <>{walkthrough}<HistoryRecap draft={viewingDraft} onClose={() => setViewingDraft(null)} /></>;
   }
 
   if (config === "unset") return null;
 
   if (!config) {
     return (
+      <>
+      {walkthrough}
       <Setup
         initialConfig={shared}
         onViewDraft={setViewingDraft}
@@ -152,6 +157,7 @@ export default function Page() {
           setShared(null);
         }}
       />
+      </>
     );
   }
 
@@ -173,6 +179,8 @@ export default function Page() {
   }
 
   return (
+    <>
+    {walkthrough}
     <Cockpit
       board={board}
       config={config}
@@ -183,5 +191,6 @@ export default function Page() {
         setBoard(null);
       }}
     />
+    </>
   );
 }
