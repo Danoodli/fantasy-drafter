@@ -68,8 +68,8 @@ export async function fetchWireNews(
       }
     })
   );
-  // Wire news is only interesting FRESH — 36h window, tighter than articles.
-  return matchNewsToPlayers(items, players, 36);
+  // Wire news is only interesting FRESH — 48h window.
+  return matchNewsToPlayers(items, players, 48);
 }
 
 /** Newest-wins merge of news maps (wire beats articles on recency, not rank). */
