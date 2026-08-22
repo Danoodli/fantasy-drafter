@@ -426,9 +426,10 @@ export default function Setup({
                 }
                 className="mt-1 w-full rounded border border-line bg-field px-3 py-2 text-sm"
               >
-                <option value="blend">Blend ESPN + Sleeper (recommended)</option>
+                <option value="blend">Blend all available (recommended)</option>
                 <option value="espn">ESPN only</option>
                 <option value="sleeper">Sleeper only</option>
+                <option value="fp">FantasyPros consensus (keyed builds)</option>
               </select>
             </label>
             <label className="text-xs text-ink-dim">

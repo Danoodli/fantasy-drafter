@@ -5,8 +5,12 @@
 // switching is instant because the board carries all raw inputs.
 
 export interface SourcePrefs {
-  /** ESPN and Sleeper both publish full projected stat lines. Blend averages them. */
-  projections: "espn" | "sleeper" | "blend";
+  /**
+   * ESPN, Sleeper, and (with an API key configured at build time)
+   * FantasyPros consensus all publish full projected stat lines.
+   * Blend averages whichever are present.
+   */
+  projections: "espn" | "sleeper" | "fp" | "blend";
   /**
    * FFC is the default: it's the only source with per-player stdev, which
    * powers the survival model. Choosing Sleeper/ESPN swaps the ADP mean but

@@ -25,6 +25,7 @@ import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
 import { loadSources, fetchTrendingIds } from "../lib/client/sources";
+import { fetchBoardNews, type PlayerNews } from "../lib/client/espnNews";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
 
@@ -63,24 +64,34 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [endedEarly, setEndedEarly] = useState(false);
   const [boardQuery, setBoardQuery] = useState("");
   const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
+  const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
 
-  // Sleeper's most-added players (24h) — refreshed every 10 minutes.
+  // Live signals, refreshed every 10 minutes: Sleeper's most-added players
+  // and ESPN's breaking headlines matched to board names (trades,
+  // suspensions, injuries as they break).
   useEffect(() => {
-    if (!loadSources().trending) return;
+    const wantTrending = loadSources().trending;
     let cancelled = false;
-    const load = () =>
-      fetchTrendingIds()
-        .then((ids) => !cancelled && setTrendingIds(ids))
+    const load = () => {
+      if (wantTrending)
+        fetchTrendingIds()
+          .then((ids) => !cancelled && setTrendingIds(ids))
+          .catch(() => {
+            // offline — badges just don't show
+          });
+      fetchBoardNews(board.players)
+        .then((news) => !cancelled && setBoardNews(news))
         .catch(() => {
           // offline — badges just don't show
         });
+    };
     load();
     const timer = setInterval(load, 10 * 60 * 1000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [board]);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -788,6 +799,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                 : null
             }
             trendingIds={trendingIds}
+            newsIds={boardNews}
             positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}

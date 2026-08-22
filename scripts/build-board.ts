@@ -28,7 +28,7 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
-import { fetchFantasyProsEcr, loadEnvLocal, type FpRank } from "../lib/etl/fantasypros";
+import { fetchFantasyProsData, loadEnvLocal, type FpData, type FpEcr } from "../lib/etl/fantasypros";
 import type {
   Board,
   BoardPlayer,
@@ -169,7 +169,7 @@ function buildBoard(
   playerInfo: Record<string, SlimPlayerInfo>,
   sos: SosTable,
   sleeperProj: Record<string, SleeperProjection>,
-  fp: { ranks: FpRank[]; experts: number } | null
+  fp: { ecr: Map<string, FpEcr>; stats: Map<string, import("../lib/types").StatLine>; experts: number } | null
 ): Board {
   const warnings: string[] = [];
 
@@ -200,13 +200,6 @@ function buildBoard(
     if (r.page_type !== "redraft-overall") continue;
     if (r.id && r.id !== "NA") ecrByFp.set(r.id, r);
     ecrByMerge.set(mergeName(r.player), r);
-  }
-  // Live FantasyPros ranks (daily, format-specific) beat the weekly mirror.
-  const fpById = new Map<string, FpRank>();
-  const fpByMerge = new Map<string, FpRank>();
-  for (const r of fp?.ranks ?? []) {
-    fpById.set(r.fpId, r);
-    fpByMerge.set(mergeName(r.name), r);
   }
 
   const players: BoardPlayer[] = [];
@@ -263,8 +256,9 @@ function buildBoard(
     }
 
     const ecrRow = (ids.fantasypros && ecrByFp.get(ids.fantasypros)) || ecrByMerge.get(mergeName(f.name));
-    const fpRank =
-      (ids.fantasypros && fpById.get(ids.fantasypros)) || fpByMerge.get(mergeName(f.name));
+    // Live FantasyPros consensus (daily, format-specific) beats the weekly mirror.
+    const fpRank = ids.fantasypros ? fp?.ecr.get(ids.fantasypros) : undefined;
+    const fpStats = ids.fantasypros ? fp?.stats.get(ids.fantasypros) : undefined;
     const info = playerInfo[id];
     const sp = pos === "K" || pos === "DST" ? undefined : sleeperProj[id];
 
@@ -291,6 +285,7 @@ function buildBoard(
       sosSeason: sos[f.team]?.[pos]?.season ?? null,
       sosPlayoff: sos[f.team]?.[pos]?.playoff ?? null,
       statsSleeper: sp?.stats,
+      statsFp: pos === "K" || pos === "DST" ? undefined : fpStats,
       adpSources: {
         ffc: f.adp,
         espn: proj?.adp ?? null,
@@ -370,6 +365,19 @@ async function main() {
   const cross = parseCsv(idsRes.data as string) as unknown as CrossRow[];
   const ecrRows = parseCsv(ecrRes.data as string);
   const espn = parseEspn(espnRes.data as { players: unknown[] });
+
+  // FantasyPros (optional, keyed): batch-fetch by fp id. The ECR csv's
+  // redraft-overall rows ARE the draft pool in consensus order — perfect ids.
+  const fpIds = ecrRows
+    .filter((r) => r.page_type === "redraft-overall" && r.id && r.id !== "NA")
+    .map((r) => r.id);
+  const fpData: FpData | null = await fetchFantasyProsData(SEASON, fpIds);
+  if (fpData)
+    console.log(
+      `fantasypros: live consensus — ${fpData.ecr.ppr.size} ECR entries/format, ${fpData.stats.size} projections, ${fpData.experts} experts`
+    );
+  else if (!process.env.FANTASYPROS_API_KEY)
+    console.log("fantasypros: no FANTASYPROS_API_KEY — using DynastyProcess weekly ECR");
   console.log(`crosswalk: ${cross.length} rows · ecr: ${ecrRows.length} rows · espn: ${espn.length} projections`);
 
   // Optional: real league scoring from Sleeper for board-custom.json
@@ -402,10 +410,9 @@ async function main() {
   let totalWarnings = 0;
   for (const format of FORMATS) {
     const ffc = await fetchFfcAdp(format, 12, SEASON);
-    const fp = await fetchFantasyProsEcr(SEASON, format);
-    if (fp) console.log(`fantasypros: live ${format} consensus from ${fp.experts} experts`);
-    else if (!process.env.FANTASYPROS_API_KEY)
-      console.log("fantasypros: no FANTASYPROS_API_KEY — using DynastyProcess weekly ECR");
+    const fp = fpData
+      ? { ecr: fpData.ecr[format], stats: fpData.stats, experts: fpData.experts }
+      : null;
     const board = buildBoard(
       format, SCORING_PRESETS[format], defaultConfigFor(format),
       ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,

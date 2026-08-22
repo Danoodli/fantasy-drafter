@@ -66,6 +66,8 @@ export interface BoardPlayer {
   stats?: StatLine;
   /** Second projection source: Sleeper's raw stat line (includes first downs). */
   statsSleeper?: StatLine;
+  /** Third projection source: FantasyPros consensus stat line (keyed builds only). */
+  statsFp?: StatLine;
   /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */
   adpSources?: { ffc: number; espn: number | null; sleeper: number | null };
   adp: number;

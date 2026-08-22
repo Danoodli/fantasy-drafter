@@ -694,3 +694,32 @@ describe("data-source preferences", () => {
     expect(g1.projPoints - g0.projPoints).toBeCloseTo(fd * 0.5, 0);
   });
 });
+
+describe("news matching", () => {
+  it("matches headlines to full player names only, respecting recency", async () => {
+    const { matchNewsToPlayers } = await import("../lib/client/espnNews");
+    const now = 1_800_000_000_000;
+    const gibbs = board.players.find((p) => p.name === "Jahmyr Gibbs")!;
+    const items = [
+      { headline: "Jahmyr Gibbs suspended two games", description: "", published: new Date(now - 3600_000).toISOString(), href: "x", athleteIds: [] },
+      { headline: "Old Jahmyr Gibbs note", description: "", published: new Date(now - 10 * 86400_000).toISOString(), href: "y", athleteIds: [] },
+      { headline: "Gibbs family opens bakery", description: "", published: new Date(now).toISOString(), href: "z", athleteIds: [] },
+      { headline: "Star RB questionable for opener", description: "", published: new Date(now).toISOString(), href: "w", athleteIds: [gibbs.ids.espn!] },
+      { headline: "Roundup of nineteen players", description: "", published: new Date(now).toISOString(), href: "r", athleteIds: Array.from({ length: 19 }, () => gibbs.ids.espn!) },
+    ];
+    const matched = matchNewsToPlayers(items, board.players, 72, now);
+    // Athlete-tagged article wins (newer); roundups with many tags are ignored
+    expect(matched.get(gibbs.id)?.headline).toBe("Star RB questionable for opener");
+    // last-name-only headline must NOT match
+    expect([...matched.values()].some((n) => n.headline.includes("bakery"))).toBe(false);
+  });
+
+  it("fp stat mapping handles the projections shape", async () => {
+    const { mapFpStats } = await import("../lib/etl/fantasypros");
+    const line = mapFpStats({ rush_yds: "1381.2", rush_tds: 13.8, rec_rec: 71.3, rec_yds: 580.6, rec_tds: 4.1, fumbles: 1.5 });
+    expect(line.rushYds).toBeCloseTo(1381.2);
+    expect(line.receptions).toBeCloseTo(71.3);
+    expect(line.fumblesLost).toBeCloseTo(1.5);
+    expect(line.passYds).toBeUndefined();
+  });
+});

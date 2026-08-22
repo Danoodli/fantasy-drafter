@@ -25,11 +25,16 @@ function projectFor(p: BoardPlayer, scoring: ScoringSettings, prefs?: SourcePref
   const fdPts = p.statsSleeper ? scoreStatLine(p.statsSleeper, fdOnly, isTE) : 0;
   const espn = p.stats ? scoreStatLine(p.stats, baseScoring, isTE) : null;
   const sleeper = p.statsSleeper ? scoreStatLine(p.statsSleeper, baseScoring, isTE) : null;
+  const fp = p.statsFp ? scoreStatLine(p.statsFp, baseScoring, isTE) : null;
   const want = prefs?.projections ?? "espn";
   let base: number | null;
-  if (want === "espn") base = espn ?? sleeper;
-  else if (want === "sleeper") base = sleeper ?? espn;
-  else base = espn != null && sleeper != null ? (espn + sleeper) / 2 : espn ?? sleeper;
+  if (want === "espn") base = espn ?? sleeper ?? fp;
+  else if (want === "sleeper") base = sleeper ?? espn ?? fp;
+  else if (want === "fp") base = fp ?? espn ?? sleeper;
+  else {
+    const avail = [espn, sleeper, fp].filter((v): v is number => v != null);
+    base = avail.length ? avail.reduce((a, b) => a + b, 0) / avail.length : null;
+  }
   return base != null ? base + fdPts : null;
 }
 
