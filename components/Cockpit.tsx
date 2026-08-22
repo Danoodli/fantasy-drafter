@@ -18,6 +18,8 @@ import {
 import TierBoard from "./TierBoard";
 import SearchBox, { type SearchBoxHandle } from "./SearchBox";
 import InjuryBadge from "./InjuryBadge";
+import Confetti, { type Burst } from "./Confetti";
+import { playerBlurb } from "../lib/engine/reasons";
 
 interface Props {
   board: Board;
@@ -113,9 +115,14 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     }
   }, [draft.draftedIds, top, myIds]);
 
+  const [burst, setBurst] = useState<Burst | null>(null);
+
   function mark(player: BoardPlayer, mine = false) {
     draft.markDrafted(player);
-    if (mine) setSnipe(null);
+    if (mine) {
+      setSnipe(null);
+      setBurst({ key: Date.now(), color: POS_COLOR[player.pos] });
+    }
     showToast(mine ? `Drafted ${player.name}.` : `${player.name} is off the board.`);
   }
 
@@ -241,9 +248,10 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           </button>
           <button
             onClick={onReconfigure}
+            title="Change league or tournament format"
             className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
           >
-            League
+            {config.teams}tm · {config.scoring} · {bestball ? "best ball" : "redraft"} ⚙
           </button>
           {config.platform === "sleeper" && (
             <span
@@ -315,7 +323,10 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       {/* Main grid */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         {/* The answer */}
-        <section className="flex flex-col gap-3 lg:w-[440px] lg:shrink-0" aria-live="polite">
+        <section
+          className="tier-scroll flex flex-col gap-3 lg:min-h-0 lg:w-[440px] lg:shrink-0 lg:overflow-y-auto lg:pr-1"
+          aria-live="polite"
+        >
           {draftOver ? (
             <div className="rounded-lg bg-panel p-6">
               <h2 className="font-display text-4xl font-bold uppercase">Draft over</h2>
@@ -365,13 +376,16 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                 <InjuryBadge injury={top.player.injury} />
               </p>
               <p className="mt-3 text-[15px] leading-snug text-ink">{top.reason}</p>
-              <button
-                onClick={() => mark(top.player, myTurn)}
-                className="mt-4 w-full rounded-lg py-4 font-display text-3xl font-bold uppercase tracking-wide text-field"
-                style={{ background: posColor }}
-              >
-                {myTurn ? `Draft ${top.player.name.split(" ").slice(-1)[0]}` : "Mark him gone"}
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => mark(top.player, myTurn)}
+                  className="mt-4 w-full rounded-lg py-4 font-display text-3xl font-bold uppercase tracking-wide text-field transition-transform active:scale-[0.98]"
+                  style={{ background: posColor }}
+                >
+                  {myTurn ? `Draft ${top.player.name.split(" ").slice(-1)[0]}` : "Mark him gone"}
+                </button>
+                <Confetti burst={burst} />
+              </div>
               {output && (
                 <p className="mt-2 text-right font-mono text-[10px] text-ink-faint">
                   {output.computeMs.toFixed(0)}ms
@@ -504,6 +518,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             draftedIds={draft.draftedIds}
             myIds={myIds}
             onMark={(p) => mark(p)}
+            highlightId={myTurn && top ? top.player.id : null}
+            blurbFor={(p) =>
+              playerBlurb(p, {
+                currentPick: draft.currentPick,
+                nextPick: draft.myPicks.find((n) => n > draft.currentPick) ?? draft.currentPick + config.teams,
+                drift: draft.drift,
+                tierMatesLeft: board.players.filter(
+                  (a) =>
+                    a.pos === p.pos && a.tier === p.tier && a.id !== p.id && !draft.draftedIds.has(a.id)
+                ).length,
+              })
+            }
             positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}

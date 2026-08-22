@@ -188,7 +188,9 @@ export default function Setup({ onDone }: { onDone: (config: LeagueConfig) => vo
           {config.leagueType === "bestball" && (
             <p className="mt-2 text-sm text-ink-dim">
               Best ball: draft once, let it ride. The engine chases 2-3 QB / 5-6 RB / 7-9 WR / 2-3 TE,
-              boosts QB-receiver stacks, and pays for ceiling — variance wins tournaments.
+              spaces them like a human (no QB hoarding), boosts QB-receiver stacks, and pays for
+              ceiling — variance wins tournaments. Running a different size or scoring? Presets are
+              starting points — adjust teams, rounds, and scoring below.
             </p>
           )}
         </section>
@@ -234,6 +236,37 @@ export default function Setup({ onDone }: { onDone: (config: LeagueConfig) => vo
               ))}
             </select>
           </label>
+          {(
+            [
+              ["bonusRecTe", "TE premium", [["+0", 0], ["+0.5 / rec", 0.5], ["+1 / rec", 1]]],
+              ["passTd", "Pass TD", [["4 pts", 4], ["6 pts", 6]]],
+              ["passInt", "INT", [["−1", -1], ["−2", -2]]],
+            ] as const
+          ).map(([key, label, options]) => (
+            <label key={key} className="text-sm text-ink-dim">
+              {label}
+              <select
+                value={config.scoringTweaks?.[key] ?? options[0][1]}
+                onChange={(e) =>
+                  setConfig((c) => ({
+                    ...c,
+                    scoringTweaks: { ...c.scoringTweaks, [key]: Number(e.target.value) },
+                  }))
+                }
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2"
+              >
+                {options.map(([lab, val]) => (
+                  <option key={lab} value={val}>
+                    {lab}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <p className="col-span-2 -mt-1 text-xs text-ink-faint">
+            Tweaks re-score every projection from raw stat lines. Points-per-first-down isn&apos;t
+            supported — first-down projections aren&apos;t published anywhere free.
+          </p>
         </section>
       )}
 

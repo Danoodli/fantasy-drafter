@@ -35,6 +35,18 @@ export default function Page() {
         const res = await fetch(`/data/board-${config.scoring}.json`);
         if (!res.ok) throw new Error(`board fetch: HTTP ${res.status}`);
         let b: Board = await res.json();
+        // Manual-mode scoring tweaks (TE premium, 6-pt pass TD, INT severity)
+        // re-score the board from raw stat lines, client-side.
+        const tweaks = config.scoringTweaks;
+        if (config.platform === "manual" && tweaks) {
+          const settings = {
+            ...SCORING_PRESETS[config.scoring],
+            ...(tweaks.passTd != null ? { pass_td: tweaks.passTd } : {}),
+            ...(tweaks.passInt != null ? { pass_int: tweaks.passInt } : {}),
+            ...(tweaks.bonusRecTe ? { bonus_rec_te: tweaks.bonusRecTe } : {}),
+          };
+          if (scoringDiffers(settings, b.meta.scoring)) b = rescoreBoard(b, settings, config);
+        }
         // Real league scoring beats the preset the board was built with.
         if (config.platform === "sleeper" && config.leagueId) {
           try {

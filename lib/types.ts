@@ -69,6 +69,10 @@ export interface BoardPlayer {
   injury: string | null;
   /** Depth-chart order at the position (1 = starter), from Sleeper. */
   depthOrder: number | null;
+  /** Schedule easiness percentile 0-1 (1 = softest), full season. Null for K/DST. */
+  sosSeason: number | null;
+  /** Schedule easiness percentile 0-1 over fantasy playoff weeks 15-17. */
+  sosPlayoff: number | null;
   ids: { espn?: string; fantasypros?: string; yahoo?: string; ffc?: string };
 }
 
@@ -123,6 +127,16 @@ export interface LeagueConfig {
   rosterSlots: RosterSlots;
   flexEligible: Position[];
   strategy: string; // strategy id from config/strategies.json
+  /**
+   * Manual-mode scoring tweaks layered over the base format's presets and
+   * re-scored client-side from raw stat lines: TE premium, 6-pt passing TDs,
+   * INT severity. Sleeper leagues don't need this — their exact settings win.
+   */
+  scoringTweaks?: {
+    bonusRecTe?: number; // extra points per TE reception (TE premium)
+    passTd?: number; // 4 or 6
+    passInt?: number; // -1 or -2
+  };
 }
 
 /** A pick that has happened. */

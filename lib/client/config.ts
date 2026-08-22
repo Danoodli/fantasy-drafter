@@ -2,7 +2,9 @@
 
 import type { LeagueConfig } from "../types";
 
-const KEY = "draft-cockpit-config-v1";
+// v2: leagueType added — the version bump routes existing users through
+// setup once so they see the new format picker.
+const KEY = "draft-cockpit-config-v2";
 const STRATEGY_KEY = "draft-cockpit-custom-strategy-v1";
 
 export const DEFAULT_CONFIG: LeagueConfig = {

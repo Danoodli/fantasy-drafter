@@ -25,6 +25,7 @@ import {
 } from "../lib/scoring";
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
+import { fetchSos, type SosTable } from "../lib/etl/schedule";
 import type {
   Board,
   BoardPlayer,
@@ -156,7 +157,8 @@ function buildBoard(
   cross: CrossRow[],
   ecrRows: Record<string, string>[],
   ecrMeta: { fetchedAt: string; fromFixture: boolean },
-  playerInfo: Record<string, SlimPlayerInfo>
+  playerInfo: Record<string, SlimPlayerInfo>,
+  sos: SosTable
 ): Board {
   const warnings: string[] = [];
 
@@ -265,6 +267,8 @@ function buildBoard(
       tier: 0,
       injury: info?.injury ?? null,
       depthOrder: info?.depthOrder ?? null,
+      sosSeason: sos[f.team]?.[pos]?.season ?? null,
+      sosPlayoff: sos[f.team]?.[pos]?.playoff ?? null,
       ids,
     });
   }
@@ -316,12 +320,14 @@ function buildBoard(
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const [idsRes, ecrRes, espnRes, playersRes] = await Promise.all([
+  const [idsRes, ecrRes, espnRes, playersRes, sosRes] = await Promise.all([
     fetchPlayerIds(),
     fetchEcr(),
     fetchEspnProjections(SEASON),
     fetchSleeperPlayerInfo(),
+    fetchSos(SEASON, SEASON - 1),
   ]);
+  console.log(`sos: ${Object.keys(sosRes.data).length} teams${sosRes.fromFixture ? " (fixture)" : ""}`);
   const cross = parseCsv(idsRes.data as string) as unknown as CrossRow[];
   const ecrRows = parseCsv(ecrRes.data as string);
   const espn = parseEspn(espnRes.data as { players: unknown[] });
@@ -361,7 +367,8 @@ async function main() {
       format, SCORING_PRESETS[format], defaultConfigFor(format),
       ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
       { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
-      playersRes.data
+      playersRes.data,
+      sosRes.data
     );
     const path = join(OUT_DIR, `board-${format}.json`);
     writeFileSync(path, JSON.stringify(board));
@@ -375,7 +382,8 @@ async function main() {
         format, customScoring, customConfig,
         ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
         { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
-        playersRes.data
+        playersRes.data,
+        sosRes.data
       );
       writeFileSync(join(OUT_DIR, "board-custom.json"), JSON.stringify(custom));
       console.log(`✓ board-custom.json — real league scoring applied`);

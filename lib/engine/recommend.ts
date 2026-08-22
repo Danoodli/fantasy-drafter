@@ -12,7 +12,7 @@ import type {
 import { survivalProb } from "./survival";
 import { vona } from "./vona";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
-import { buildReason } from "./reasons";
+import { buildReason, buildAlternateReason } from "./reasons";
 import { slotOnClock, pickOwner } from "../draft/snake";
 
 const MC_ITERATIONS = 400;
@@ -21,6 +21,13 @@ const MC_CANDIDATES = 12;
 const REACH_PENALTY_PER_PICK = 1.0;
 /** Soft penalty when a candidate shares a bye with a same-position starter. */
 const BYE_COLLISION_PENALTY = 4;
+/**
+ * Escalating penalty for piling roster onto one bye week, indexed by how many
+ * rostered players already share the candidate's bye. Two is life, five is a
+ * forfeited week — especially in best ball, where that week's optimal lineup
+ * simply craters.
+ */
+const BYE_STACK_PENALTY = [0, 1, 3, 7, 12, 18];
 /** Value-points bonus for a QB↔pass-catcher stack, at stacking = 1. */
 const STACK_BONUS = 8;
 /** Late-round bonus for the direct backup of an RB I already roster. */
@@ -112,6 +119,22 @@ function blendedValue(p: BoardPlayer, strategy: Strategy): number {
   return strategy.baselineBlend * p.vorp + (1 - strategy.baselineBlend) * p.vols;
 }
 
+/** Value-points swing for schedule strength, full range (0 → 1 easiness). */
+const SOS_SEASON_WEIGHT = 5;
+/**
+ * Weeks 15-17 get their own, larger weight: they're the fantasy playoffs in
+ * redraft and the advancement weeks in best-ball tournaments.
+ */
+const SOS_PLAYOFF_WEIGHT = { redraft: 6, bestball: 10 };
+
+function sosAdjust(p: BoardPlayer, bestball: boolean): number {
+  let adj = 0;
+  if (p.sosSeason != null) adj += (p.sosSeason - 0.5) * SOS_SEASON_WEIGHT;
+  if (p.sosPlayoff != null)
+    adj += (p.sosPlayoff - 0.5) * SOS_PLAYOFF_WEIGHT[bestball ? "bestball" : "redraft"];
+  return adj;
+}
+
 /**
  * Build the value function for this draft.
  *
@@ -131,7 +154,7 @@ function makeValueFn(
   strategy: Strategy,
   bestball: boolean
 ): (p: BoardPlayer) => number {
-  if (!bestball) return (p) => blendedValue(p, strategy);
+  if (!bestball) return (p) => blendedValue(p, strategy) + sosAdjust(p, false);
 
   // Smoothed blended value by ADP order — the market curve.
   const byAdp = [...board].sort((a, b) => a.adp - b.adp);
@@ -150,7 +173,10 @@ function makeValueFn(
   return (p) => {
     const market = smoothed.get(p.id) ?? 0;
     const proj = blendedValue(p, strategy);
-    return (market * (1 - PROJ_WEIGHT) + proj * PROJ_WEIGHT) * BESTBALL_POS_VALUE[p.pos];
+    return (
+      (market * (1 - PROJ_WEIGHT) + proj * PROJ_WEIGHT) * BESTBALL_POS_VALUE[p.pos] +
+      sosAdjust(p, true)
+    );
   };
 }
 
@@ -181,11 +207,32 @@ function quickScoreAll(
   const { currentPick } = state;
   const stacking = strategy.stacking ?? 0;
   const lateRounds = round >= state.config.rounds - 6;
+
+  // Unfilled-floor urgency: as spare picks shrink, positions still under
+  // their construction floor get escalating priority — a roster must never
+  // drift toward an empty required slot.
+  const { missing, unmet } = shortfalls(state, myCounts);
+  const slack = state.myPicks.length - unmet;
+  const urgencyOf = (pos: Position): number => {
+    if (!missing[pos] || slack >= URGENCY_BY_SLACK.length) return 1;
+    return URGENCY_BY_SLACK[Math.max(0, slack)];
+  };
+
+  const byeCounts: Record<number, number> = {};
+  for (const r of state.myRoster) {
+    if (r.bye != null) byeCounts[r.bye] = (byeCounts[r.bye] ?? 0) + 1;
+  }
   return available.map((p) => {
     const mult = positionMultiplier(strategy, p.pos, round);
     const need = needWeight(p.pos, myCounts, state);
     const injuryMult = p.injury ? INJURY_PENALTY[p.injury] ?? 1 : 1;
     let base = applyNeed(valueFn(p) * mult * injuryMult, need);
+    const urg = urgencyOf(p.pos);
+    if (urg > 1) {
+      // Multiplicative when the player has value, additive floor so a weak
+      // late-round TE still beats yet another surplus WR.
+      base = (base > 0 ? base * urg : base) + (urg - 1) * 15;
+    }
 
     // Stacking: QB + his own pass-catchers → correlated ceiling.
     if (stacking > 0) {
@@ -207,16 +254,55 @@ function quickScoreAll(
     }
 
     const reach = Math.max(0, p.adp - currentPick - 3); // small free slack
-    const byeClash = state.myRoster.some(
+    // Bye congestion: same-position clash empties a lineup slot that week;
+    // roster-wide pile-ups forfeit the whole week.
+    const samePosClash = state.myRoster.some(
       (r) => r.pos === p.pos && r.bye != null && r.bye === p.bye
     );
+    const sameBye = p.bye != null ? byeCounts[p.bye] ?? 0 : 0;
+    const byePenalty =
+      BYE_STACK_PENALTY[Math.min(sameBye, BYE_STACK_PENALTY.length - 1)] +
+      (samePosClash ? BYE_COLLISION_PENALTY : 0);
     const quickScore =
-      base -
-      strategy.adpDiscipline * REACH_PENALTY_PER_PICK * reach -
-      (byeClash ? BYE_COLLISION_PENALTY : 0);
+      base - strategy.adpDiscipline * REACH_PENALTY_PER_PICK * reach - byePenalty;
     return { player: p, quickScore, baseValue: base };
   });
 }
+
+/**
+ * Construction floors: how many players at each position a roster NEEDS
+ * before anything else is a luxury. Redraft: the starting lineup. Best ball:
+ * the minimum count targets — a best-ball roster with zero TEs scores a
+ * guaranteed 0 in that slot every week; the floor makes that impossible.
+ */
+export function requiredFloor(
+  pos: Position,
+  config: EngineState["config"]
+): number {
+  const starters = config.rosterSlots[pos] ?? 0;
+  if (config.leagueType !== "bestball") return starters;
+  if (starters === 0) return 0; // formats without K/DST need none
+  const minF = BESTBALL_TARGETS[pos]?.[0] ?? 0;
+  return Math.max(starters, Math.round(minF * config.rounds));
+}
+
+/** Per-position shortfall vs the floor, plus total unmet count. */
+function shortfalls(
+  state: EngineState,
+  myCounts: Partial<Record<Position, number>>
+): { missing: Partial<Record<Position, number>>; unmet: number } {
+  const missing: Partial<Record<Position, number>> = {};
+  let unmet = 0;
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
+    const m = Math.max(0, requiredFloor(pos, state.config) - (myCounts[pos] ?? 0));
+    if (m > 0) missing[pos] = m;
+    unmet += m;
+  }
+  return { missing, unmet };
+}
+
+/** Escalating urgency multiplier as spare picks run out, by slack. */
+const URGENCY_BY_SLACK = [2.5, 2.0, 1.6, 1.3, 1.12];
 
 function hardFilter(
   available: BoardPlayer[],
@@ -228,35 +314,49 @@ function hardFilter(
   const bestball = config.leagueType === "bestball";
   const lastTwoRounds = round > config.rounds - 2;
 
-  // If my remaining picks are only enough to fill required starting slots,
-  // recommend nothing but those positions.
-  const required: Position[] = [];
-  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
-    const missing = (config.rosterSlots[pos] ?? 0) - (myCounts[pos] ?? 0);
-    for (let i = 0; i < missing; i++) required.push(pos);
-  }
-  const mustFill = myPicks.length <= required.length;
+  // If my remaining picks are only enough to fill the construction floors,
+  // recommend nothing but the unmet positions.
+  const { missing, unmet } = shortfalls(state, myCounts);
+  const required = Object.keys(missing) as Position[];
+  const mustFill = myPicks.length <= unmet;
 
+  const qbSlots = config.rosterSlots.QB ?? 0;
   return available.filter((p) => {
     // Players stashed on season-long lists are dead weight in any format.
     if (p.injury && INJURY_EXCLUDE.has(p.injury)) return false;
     // Positions this league doesn't roster (best-ball formats drop K/DST).
     if ((config.rosterSlots[p.pos] ?? 0) === 0 && (p.pos === "K" || p.pos === "DST")) return false;
     if (mustFill && !required.includes(p.pos)) return false;
-    if ((p.pos === "K" || p.pos === "DST") && (config.rosterSlots[p.pos] ?? 0) > 0 && !lastTwoRounds)
-      return false;
-    // Redraft only: a second QB is a bench statue before the late rounds.
-    // Best ball WANTS 2-3 QBs; its targets handle the pacing.
     if (
-      !bestball &&
-      p.pos === "QB" &&
-      (config.rosterSlots.QB ?? 0) <= 1 &&
-      (myCounts.QB ?? 0) >= 1 &&
-      round < 12
+      !mustFill &&
+      (p.pos === "K" || p.pos === "DST") &&
+      (config.rosterSlots[p.pos] ?? 0) > 0 &&
+      !lastTwoRounds
     )
       return false;
     const cap = strategy.positionCaps[p.pos];
     if (cap != null && (myCounts[p.pos] ?? 0) >= cap) return false;
+
+    // ---- Football-sense pacing rules ------------------------------------
+    // Round windows every competent human drafter follows. When the value
+    // math wants to break one of these, the math is wrong, not the rule.
+    // Skipped under mustFill: filling a required slot always wins.
+    if (!mustFill) {
+      // No QB in the first two rounds of any 1-QB format. Ever.
+      if (p.pos === "QB" && qbSlots <= 1 && round <= 2) return false;
+      if (bestball) {
+        // Best ball wants 2-3 QBs and 2-3 TEs — but SPACED, not hoarded.
+        if (p.pos === "QB" && (myCounts.QB ?? 0) >= 1 && round < 6) return false;
+        if (p.pos === "QB" && (myCounts.QB ?? 0) >= 2 && round < 10) return false;
+        if (p.pos === "TE" && (myCounts.TE ?? 0) >= 1 && round < 6) return false;
+        if (p.pos === "TE" && (myCounts.TE ?? 0) >= 2 && round < 10) return false;
+      } else {
+        // Redraft: a second QB or TE is a bench statue before the late rounds.
+        if (p.pos === "QB" && qbSlots <= 1 && (myCounts.QB ?? 0) >= 1 && round < 12) return false;
+        if (p.pos === "TE" && (config.rosterSlots.TE ?? 0) <= 1 && (myCounts.TE ?? 0) >= 1 && round < 10)
+          return false;
+      }
+    }
     return true;
   });
 }
@@ -333,8 +433,10 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
 
   recommendations.sort((a, b) => b.score - a.score);
   const top = recommendations.slice(0, 3);
-  for (const rec of top) {
-    rec.reason = buildReason(rec, available, nextPick);
+  if (top[0]) top[0].reason = buildReason(top[0], available, nextPick);
+  for (const rec of top.slice(1)) {
+    // Alternates explain why you might take them INSTEAD — comparative.
+    rec.reason = buildAlternateReason(rec, top[0], nextPick);
   }
 
   const strategyWarning = checkStrategyViability(state, scored, round, myCounts);

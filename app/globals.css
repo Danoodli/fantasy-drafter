@@ -58,6 +58,39 @@ body {
   .on-the-clock { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--pulse-color, #fff) 35%, transparent); }
 }
 
+/* The recommended player's tier-board row: find him fast */
+@keyframes rec-glow {
+  0%, 100% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pulse-color, #fff) 85%, transparent), 0 0 10px 0 color-mix(in srgb, var(--pulse-color, #fff) 35%, transparent); }
+  50% { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pulse-color, #fff) 45%, transparent), 0 0 3px 0 color-mix(in srgb, var(--pulse-color, #fff) 15%, transparent); }
+}
+.rec-glow {
+  border-radius: 4px;
+  animation: rec-glow 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rec-glow {
+    animation: none;
+    box-shadow: inset 0 0 0 1.5px var(--pulse-color, #fff);
+  }
+}
+
+/* Draft celebration: a brief position-colored burst from the button */
+@keyframes confetti-pop {
+  0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--cx), var(--cy)) scale(0.4) rotate(var(--cr)); opacity: 0; }
+}
+.confetti-piece {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: confetti-pop 0.8s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece { display: none; }
+}
+
 @keyframes pick-flash {
   0% { background-color: color-mix(in srgb, var(--color-wr) 22%, transparent); }
   100% { background-color: transparent; }

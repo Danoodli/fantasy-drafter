@@ -341,7 +341,8 @@ describe("stacking", () => {
   const mk = (id: string, pos: BoardPlayer["pos"], team: string, pts: number, adp: number): BoardPlayer => ({
     id, name: id, pos, team, bye: 7, projPoints: pts, projImputed: false,
     adp, adpStdev: 6, adpHigh: adp - 10, adpLow: adp + 10, ecr: null, ecrStdev: null,
-    vorp: pts - 200, vols: pts - 250, tier: 1, injury: null, depthOrder: 1, ids: {},
+    vorp: pts - 200, vols: pts - 250, tier: 1, injury: null, depthOrder: 1,
+    sosSeason: null, sosPlayoff: null, ids: {},
   });
   const miniBoard = [
     mk("qb-stack", "QB", "LAR", 320, 60),
@@ -354,7 +355,9 @@ describe("stacking", () => {
     draftedIds: new Set(["my-wr"]),
     myRoster: [miniBoard[2]],
     currentPick: 60,
-    myPicks: [60, 84],
+    // Full remaining schedule — plenty of slack, so construction urgency
+    // stays out of the way and the test isolates stacking.
+    myPicks: Array.from({ length: 16 }, (_, i) => 60 + i * 24),
     config: { ...bestballConfig },
     strategy: { ...byId("tournament-ceiling"), stacking, positionMultipliers: {} },
     drift: {},
@@ -421,5 +424,182 @@ describe("season simulation", () => {
     );
     // QB20 + RB10 + WR12 + WR11 + TE5 + FLEX(best leftover = RB9) = 67
     expect(total).toBe(67);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Football-sense rules: pacing, bye congestion, verdicts, matchups
+
+import { playerVerdict, playerBlurb } from "../lib/engine/reasons";
+
+describe("pacing rules (human draft sense)", () => {
+  it("never takes a QB in rounds 1-2, and spaces QBs/TEs in best ball", () => {
+    const strategy = byId("tournament-ceiling");
+    const teams = 12, mySlot = 7;
+    const myPickNos = Array.from({ length: 18 }, (_, r) => {
+      const round = r + 1;
+      return (round - 1) * teams + (round % 2 === 1 ? mySlot : teams - mySlot + 1);
+    });
+    const drafted = new Set<string>();
+    const roster: BoardPlayer[] = [];
+    const picksByRound: [number, string][] = [];
+    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    for (let pickNo = 1; pickNo <= teams * 18; pickNo++) {
+      if (myPickNos.includes(pickNo)) {
+        const out = recommend({
+          board: board.players, draftedIds: drafted, myRoster: roster,
+          currentPick: pickNo, myPicks: myPickNos.filter((n) => n >= pickNo),
+          config: bestballConfig, strategy, drift: {},
+        });
+        const pick = out.recommendations[0]!.player;
+        roster.push(pick);
+        drafted.add(pick.id);
+        picksByRound.push([Math.ceil(pickNo / teams), pick.pos]);
+      } else {
+        const next = adpOrder.find((p) => !drafted.has(p.id));
+        if (next) drafted.add(next.id);
+      }
+    }
+    const roundsOf = (pos: string) => picksByRound.filter(([, p]) => p === pos).map(([r]) => r);
+    const qbRounds = roundsOf("QB");
+    const teRounds = roundsOf("TE");
+    // No QB in rounds 1-2, ever, in a 1-QB lineup.
+    expect(qbRounds.every((r) => r >= 3)).toBe(true);
+    // Second QB/TE not before round 6, third not before round 10.
+    expect(qbRounds[1] === undefined || qbRounds[1] >= 6).toBe(true);
+    expect(qbRounds[2] === undefined || qbRounds[2] >= 10).toBe(true);
+    expect(teRounds[1] === undefined || teRounds[1] >= 6).toBe(true);
+  });
+
+  it("redraft: no second TE before round 10", () => {
+    const te = board.players.find((p) => p.pos === "TE")!;
+    const out = recommend(
+      makeState({
+        myRoster: [te],
+        draftedIds: new Set([te.id]),
+        currentPick: 53,
+        myPicks: [53, 68, 77, 92, 101, 116, 125, 140, 149, 164, 173],
+      })
+    );
+    for (const r of out.recommendations) expect(r.player.pos).not.toBe("TE");
+  });
+});
+
+describe("bye congestion", () => {
+  it("prefers the equal player who does not pile onto a stacked bye week", () => {
+    const mk = (id: string, bye: number, adp: number): BoardPlayer => ({
+      id, name: id, pos: "WR", team: "T" + id, bye, projPoints: 200, projImputed: false,
+      adp, adpStdev: 6, adpHigh: adp - 8, adpLow: adp + 8, ecr: null, ecrStdev: null,
+      vorp: 60, vols: 30, tier: 3, injury: null, depthOrder: 1,
+      sosSeason: null, sosPlayoff: null, ids: {},
+    });
+    const mkRoster = (bye: number, i: number): BoardPlayer =>
+      ({ ...mk(`r${i}`, bye, 10 + i), pos: (["RB", "QB", "TE", "RB"] as const)[i % 4] }) as BoardPlayer;
+    const roster = [0, 1, 2, 3].map((i) => mkRoster(7, i)); // four players on bye 7
+    const sameBye = mk("same-bye", 7, 60);
+    const freshBye = mk("fresh-bye", 9, 60);
+    const filler = Array.from({ length: 20 }, (_, i) => mk(`f${i}`, 5, 80 + i * 4));
+    const out = recommend({
+      board: [...roster, sameBye, freshBye, ...filler],
+      draftedIds: new Set(roster.map((r) => r.id)),
+      myRoster: roster,
+      currentPick: 60,
+      myPicks: [60, 84],
+      config,
+      strategy: byId("balanced"),
+      drift: {},
+    });
+    const ids = out.recommendations.map((r) => r.player.id);
+    expect(ids.indexOf("fresh-bye")).toBeLessThan(ids.indexOf("same-bye") < 0 ? 99 : ids.indexOf("same-bye"));
+  });
+});
+
+describe("verdicts (precanned, math-only)", () => {
+  const base = board.players.find((p) => p.pos === "WR" && p.adp > 30 && p.adp < 40)!;
+  const ctx = { currentPick: 36, nextPick: 48, drift: {}, tierMatesLeft: 4 };
+  it("grades a fair-price healthy player as fair/good, a big reach as bad/horrible", () => {
+    const fair = playerVerdict(base, ctx);
+    expect(["fair", "good", "perfect"]).toContain(fair.verdict);
+    const reach = playerVerdict({ ...base, adp: base.adp + 30 }, { ...ctx, currentPick: Math.round(base.adp) - 12 });
+    expect(["bad", "horrible"]).toContain(reach.verdict);
+    expect(playerVerdict({ ...base, injury: "IR" }, ctx).verdict).toBe("horrible");
+  });
+  it("flags risk from injury, ADP variance, and backup roles", () => {
+    expect(playerVerdict({ ...base, injury: "Questionable" }, ctx).risk).toBe("high risk");
+    expect(playerVerdict({ ...base, adpStdev: 14 }, ctx).risk).toBe("high risk");
+  });
+  it("blurb always includes market, tier, and survival lines", () => {
+    const blurb = playerBlurb(base, ctx);
+    expect(blurb.lines.length).toBeGreaterThanOrEqual(3);
+    expect(blurb.lines.join(" ")).toMatch(/ADP/);
+    expect(blurb.lines.join(" ")).toMatch(/survives/);
+  });
+});
+
+describe("matchups (SOS)", () => {
+  it("a softer playoff schedule outranks an identical player with a brutal one", () => {
+    const mk = (id: string, sos: number): BoardPlayer => ({
+      id, name: id, pos: "WR", team: id, bye: 7, projPoints: 210, projImputed: false,
+      adp: 40, adpStdev: 6, adpHigh: 32, adpLow: 48, ecr: null, ecrStdev: null,
+      vorp: 70, vols: 40, tier: 2, injury: null, depthOrder: 1,
+      sosSeason: 0.5, sosPlayoff: sos, ids: {},
+    });
+    const filler = Array.from({ length: 20 }, (_, i) => ({
+      ...mk(`f${i}`, 0.5), projPoints: 150 - i, vorp: 20 - i, vols: -10 - i, adp: 70 + i * 4,
+    }));
+    const out = recommend({
+      board: [mk("soft", 0.9), mk("brutal", 0.1), ...filler],
+      draftedIds: new Set(),
+      myRoster: [],
+      currentPick: 40,
+      myPicks: [40, 64],
+      config,
+      strategy: byId("balanced"),
+      drift: {},
+    });
+    const ids = out.recommendations.map((r) => r.player.id);
+    expect(ids.indexOf("soft")).toBeLessThan(ids.indexOf("brutal"));
+  });
+});
+
+describe("construction floors (the zero-TE bug)", () => {
+  it("a 15-round best-ball auto-draft never ends below any floor (TE≥2, QB≥2, RB≥4, WR≥5)", () => {
+    const cfg = { ...bestballConfig, rounds: 15 };
+    const strategy = byId("tournament-ceiling");
+    const teams = 12, mySlot = 4;
+    const myPickNos = Array.from({ length: 15 }, (_, r) => {
+      const round = r + 1;
+      return (round - 1) * teams + (round % 2 === 1 ? mySlot : teams - mySlot + 1);
+    });
+    const drafted = new Set<string>();
+    const roster: BoardPlayer[] = [];
+    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    for (let pickNo = 1; pickNo <= teams * 15; pickNo++) {
+      if (myPickNos.includes(pickNo)) {
+        const out = recommend({
+          board: board.players, draftedIds: drafted, myRoster: roster,
+          currentPick: pickNo, myPicks: myPickNos.filter((n) => n >= pickNo),
+          config: cfg, strategy, drift: {},
+        });
+        const pick = out.recommendations[0]!.player;
+        roster.push(pick);
+        drafted.add(pick.id);
+      } else {
+        const next = adpOrder.find((p) => !drafted.has(p.id));
+        if (next) drafted.add(next.id);
+      }
+    }
+    const count = (pos: string) => roster.filter((p) => p.pos === pos).length;
+    expect(count("TE")).toBeGreaterThanOrEqual(2);
+    expect(count("QB")).toBeGreaterThanOrEqual(2);
+    expect(count("RB")).toBeGreaterThanOrEqual(4);
+    expect(count("WR")).toBeGreaterThanOrEqual(5);
+  });
+
+  it("requiredFloor scales with format", async () => {
+    const { requiredFloor } = await import("../lib/engine/recommend");
+    expect(requiredFloor("TE", bestballConfig)).toBe(2); // 18 rounds
+    expect(requiredFloor("TE", config)).toBe(1); // redraft: lineup slots
+    expect(requiredFloor("K", bestballConfig)).toBe(0); // no K in format
   });
 });
