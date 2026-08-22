@@ -40,14 +40,31 @@ const VERDICT_COLOR: Record<string, string> = {
   horrible: "var(--color-qb)",
 };
 
-function StatCell({ label, value }: { label: string; value: number | string | undefined }) {
+function StatCell({
+  label,
+  value,
+  scroll,
+}: {
+  label: string;
+  value: number | string | undefined;
+  /** In a horizontally-scrolling row: keep natural width, never shrink. */
+  scroll?: boolean;
+}) {
   if (value == null) return null;
   return (
-    <div className="min-w-0 rounded bg-field px-1.5 py-1.5 text-center">
-      <p className="truncate font-mono text-base text-ink">
+    <div
+      className={`rounded bg-field px-1.5 py-1.5 text-center ${
+        scroll ? "shrink-0" : "min-w-0"
+      }`}
+    >
+      <p className={`font-mono text-base text-ink ${scroll ? "whitespace-nowrap" : "truncate"}`}>
         {typeof value === "number" ? Math.round(value) : value}
       </p>
-      <p className="break-words font-mono text-[9px] uppercase leading-tight tracking-wide text-ink-faint">
+      <p
+        className={`font-mono text-[9px] uppercase leading-tight tracking-wide text-ink-faint ${
+          scroll ? "whitespace-nowrap" : "break-words"
+        }`}
+      >
         {label}
       </p>
     </div>
@@ -182,7 +199,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
                 </p>
                 <div className="stagger tier-scroll mt-1 flex gap-1.5 overflow-x-auto">
                   {extras.lastSeason.labels.map((label, i) => (
-                    <StatCell key={i} label={label} value={extras.lastSeason!.values[i]} />
+                    <StatCell key={i} label={label} value={extras.lastSeason!.values[i]} scroll />
                   ))}
                 </div>
               </div>
