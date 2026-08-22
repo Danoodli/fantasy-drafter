@@ -91,6 +91,18 @@ body {
   .confetti-piece { display: none; }
 }
 
+/* Mobile: player card slides up as a bottom drawer, like a native sheet */
+@keyframes drawer-up {
+  from { transform: translateY(24px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.drawer-panel {
+  animation: drawer-up 0.22s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-panel { animation: none; }
+}
+
 @keyframes pick-flash {
   0% { background-color: color-mix(in srgb, var(--color-wr) 22%, transparent); }
   100% { background-color: transparent; }

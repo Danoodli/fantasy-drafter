@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import type { BoardPlayer, LeagueConfig } from "../lib/types";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { fetchPlayerExtras, type PlayerExtras } from "../lib/client/espnPlayer";
+import type { PlayerNews } from "../lib/client/espnNews";
 import { POS_COLOR } from "../lib/client/pos";
 import InjuryBadge from "./InjuryBadge";
 
@@ -21,6 +22,10 @@ interface Props {
   canUnmark: boolean;
   /** Most-added on Sleeper in the last 24h. */
   trending?: boolean;
+  /** Recap / history view: informational only, no draft actions. */
+  readonly?: boolean;
+  /** The matched breaking item behind this player's 📰 badge (wire or article). */
+  wireItem?: PlayerNews | null;
   myTurn: boolean;
   onMark: (player: BoardPlayer, mine: boolean) => void;
   onUnmark: (player: BoardPlayer) => void;
@@ -45,8 +50,17 @@ function StatCell({ label, value }: { label: string; value: number | string | un
   );
 }
 
-export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, trending, myTurn, onMark, onUnmark, onClose }: Props) {
+export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, trending, readonly, wireItem, myTurn, onMark, onUnmark, onClose }: Props) {
   const [extras, setExtras] = useState<PlayerExtras | null | "loading">("loading");
+  const [agoLabel, setAgoLabel] = useState("");
+
+  // Clock reads are impure in render — stamp the "Nh ago" label in an effect.
+  useEffect(() => {
+    if (!wireItem) return;
+    const h = Math.round((Date.now() - Date.parse(wireItem.published)) / 3600_000);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time clock stamp per item
+    setAgoLabel(h < 1 ? "this hour" : `${h}h ago`);
+  }, [wireItem]);
   const blurb = playerBlurb(p, ctx);
   const color = POS_COLOR[p.pos];
 
@@ -70,17 +84,21 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
   const s = p.stats;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-field/80 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-field/80 backdrop-blur-sm sm:items-center sm:overflow-y-auto sm:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={`${p.name} details`}
     >
+      {/* Mobile: full-width bottom drawer, native-sheet feel.
+          Desktop: centered card sized to the screen, not a fixed px width. */}
       <div
-        className="w-full max-w-3xl rounded-xl border-l-4 border border-line bg-panel p-5 shadow-2xl"
+        className="drawer-panel max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-line border-l-4 bg-panel p-5 shadow-2xl sm:max-h-[88dvh] sm:w-[min(94vw,72rem)] sm:rounded-xl"
         style={{ borderLeftColor: color }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Drawer grab handle (mobile only) */}
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line sm:hidden" aria-hidden />
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-4xl font-bold uppercase leading-none" style={{ color }}>
@@ -164,6 +182,25 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           </div>
 
           <div>
+            {/* The breaking item behind the 📰 badge — wire post or headline */}
+            {wireItem && (
+              <div className="mb-3 rounded border-l-2 border-warn bg-warn/10 p-3">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-warn">
+                  📰 Breaking · {agoLabel}
+                </p>
+                <p className="mt-1 text-sm leading-snug text-ink">{wireItem.headline}</p>
+                {wireItem.href && (
+                  <a
+                    href={wireItem.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block text-xs text-wr hover:underline"
+                  >
+                    View source ↗
+                  </a>
+                )}
+              </div>
+            )}
             {extras === "loading" && (
               <p className="font-mono text-xs text-ink-faint">Loading news…</p>
             )}
@@ -216,7 +253,15 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
         </div>
 
         <div className="mt-5 flex gap-2">
-          {!drafted && (
+          {readonly ? (
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-lg border border-line py-3 text-sm text-ink-dim hover:text-ink"
+            >
+              Close
+            </button>
+          ) : null}
+          {!readonly && !drafted && (
             <button
               onClick={() => {
                 onMark(p, myTurn);
@@ -228,7 +273,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
               {myTurn ? `Draft ${p.name.split(" ").slice(-1)[0]}` : "Mark him gone"}
             </button>
           )}
-          {drafted && canUnmark && (
+          {!readonly && drafted && canUnmark && (
             <button
               onClick={() => {
                 onUnmark(p);
@@ -239,17 +284,19 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
               Put him back
             </button>
           )}
-          {drafted && !canUnmark && (
+          {!readonly && drafted && !canUnmark && (
             <p className="flex-1 self-center text-sm text-ink-faint">
               Drafted via live sync — can&apos;t be undone here.
             </p>
           )}
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-line px-4 py-3 text-sm text-ink-dim hover:text-ink"
-          >
-            Close
-          </button>
+          {!readonly && (
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-line px-4 py-3 text-sm text-ink-dim hover:text-ink"
+            >
+              Close
+            </button>
+          )}
         </div>
         <p className="mt-2 text-right font-mono text-[9px] text-ink-faint">
           news &amp; last-season stats: ESPN · {config.scoring} scoring

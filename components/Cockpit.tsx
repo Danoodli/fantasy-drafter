@@ -120,7 +120,6 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       clearInterval(timer);
       disconnect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- showToast is stable in practice
   }, [board]);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -878,6 +877,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           drafted={draft.draftedIds.has(modalPlayer.id)}
           canUnmark={draft.isManuallyMarked(modalPlayer.id)}
           trending={trendingIds.has(modalPlayer.id)}
+          wireItem={boardNews.get(modalPlayer.id) ?? null}
           myTurn={myTurn}
           onMark={(p, mine) => mark(p, mine)}
           onUnmark={(p) => {

@@ -7,7 +7,8 @@
 // header to check mid-draft standings.
 
 import { useMemo, useState } from "react";
-import type { Board, DraftPick, LeagueConfig, TradedPick } from "../lib/types";
+import type { Board, BoardPlayer, DraftPick, LeagueConfig, TradedPick } from "../lib/types";
+import PlayerModal from "./PlayerModal";
 import { buildRecap, gradeFor, superlatives, type TeamRecap } from "../lib/engine/recap";
 import { simulateRoom, type SeasonSimResult } from "../lib/engine/season";
 import { POS_COLOR } from "../lib/client/pos";
@@ -44,6 +45,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
   const [sim, setSim] = useState<Map<number, SimRow> | null>(null);
   const [simming, setSimming] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
 
   type SortKey = "value" | "starters" | "bench" | "vorp" | "win" | "p99";
   const SORTS: { key: SortKey; label: string; needsSim?: boolean }[] = [
@@ -126,7 +128,13 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
           {supers.map((s) => (
             <p key={s.label} className="rounded-lg bg-panel px-3 py-2 text-sm">
               <span className="font-mono text-xs uppercase tracking-wide text-ink-dim">{s.label}:</span>{" "}
-              <span style={{ color: POS_COLOR[s.player.pos] }}>{s.player.name}</span>{" "}
+              <button
+                onClick={() => setModalPlayer(s.player)}
+                className="hover:underline"
+                style={{ color: POS_COLOR[s.player.pos] }}
+              >
+                {s.player.name}
+              </button>{" "}
               <span className="text-ink-dim">
                 — pick {s.pickNo} by {s.slot === mySlot ? "you" : `slot ${s.slot}`}, {s.detail}
               </span>
@@ -188,6 +196,18 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
                 <span className="min-w-24 font-display text-xl font-bold uppercase">
                   {mine ? "You" : `Slot ${t.slot}`}
                 </span>
+                <span className="flex gap-2.5 font-mono text-xs">
+                  {(["QB", "RB", "WR", "TE", "K", "DST"] as const).map((pos) => {
+                    const n = t.roster.filter((p) => p.pos === pos).length;
+                    if (n === 0) return null;
+                    return (
+                      <span key={pos}>
+                        <span style={{ color: POS_COLOR[pos] }}>{pos}</span>{" "}
+                        <span className="text-ink">{n}</span>
+                      </span>
+                    );
+                  })}
+                </span>
                 <span className="font-mono text-sm text-ink-dim">
                   {t.starterProj} <span className="text-ink-faint">starters</span> · {t.benchProj}{" "}
                   <span className="text-ink-faint">bench</span> · {t.totalVorp}{" "}
@@ -211,7 +231,9 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
                         <span className="w-8 shrink-0 font-mono text-[11px]" style={{ color: POS_COLOR[p.pos] }}>
                           {p.pos}
                         </span>
-                        <span className="truncate">{p.name}</span>
+                        <button onClick={() => setModalPlayer(p)} className="truncate text-left hover:underline">
+                          {p.name}
+                        </button>
                         <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
                         {stacks.length > 0 && (
                           <span className="text-[11px] text-warn" title={`Stacked with ${stacks.map((s) => s.name).join(", ")}`}>
@@ -231,6 +253,29 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
           );
         })}
       </ol>
+
+      {modalPlayer && (
+        <PlayerModal
+          player={modalPlayer}
+          ctx={{
+            currentPick: config.teams * config.rounds,
+            nextPick: config.teams * config.rounds,
+            drift: {},
+            tierMatesLeft: board.players.filter(
+              (a) => a.pos === modalPlayer.pos && a.tier === modalPlayer.tier && a.id !== modalPlayer.id
+            ).length,
+          }}
+          config={config}
+          drafted
+          canUnmark={false}
+          readonly
+          wireItem={modalPlayer.news ? { ...modalPlayer.news, href: null } : null}
+          myTurn={false}
+          onMark={() => {}}
+          onUnmark={() => {}}
+          onClose={() => setModalPlayer(null)}
+        />
+      )}
     </main>
   );
 }

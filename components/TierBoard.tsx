@@ -113,24 +113,30 @@ function Column({
                   onMouseEnter={(e) => !drafted && onHoverStart(p, e.currentTarget)}
                   onMouseLeave={onHoverEnd}
                   title={`${p.name} — stats, news, verdict`}
-                  className={`flex min-w-0 flex-1 items-baseline gap-1.5 px-2 py-0.5 text-left text-[13px] leading-5 ${
+                  className={`min-w-0 flex-1 px-2 py-0.5 text-left text-[13px] leading-5 ${
                     drafted ? "text-ink-faint line-through" : "text-ink hover:bg-panel"
                   } ${mine ? "border-l-2 bg-panel" : "border-l-2 border-transparent"}`}
                   style={mine ? { borderLeftColor: color } : undefined}
                 >
-                  <span className="min-w-0 flex-1 truncate">
-                    {p.name} <InjuryBadge injury={p.injury} />
-                    {!drafted && trendingIds?.has(p.id) && (
-                      <span title="Trending — most-added on Sleeper (24h)"> 🔥</span>
-                    )}
-                    {!drafted && newsIds?.has(p.id) && (
-                      <span title={`News: ${newsIds.get(p.id)!.headline}`}> 📰</span>
-                    )}
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                    <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
+                    <span className="font-mono text-[11px] text-ink-dim">
+                      {Math.round(p.projPoints)}
+                    </span>
                   </span>
-                  <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
-                  <span className="font-mono text-[11px] text-ink-dim">
-                    {Math.round(p.projPoints)}
-                  </span>
+                  {/* Badges live on their own row — a long name never hides them */}
+                  {(p.injury || (!drafted && (trendingIds?.has(p.id) || newsIds?.has(p.id)))) && (
+                    <span className="flex items-center gap-1 pb-0.5 text-[11px] leading-4 no-underline [text-decoration:none]">
+                      <InjuryBadge injury={p.injury} />
+                      {!drafted && trendingIds?.has(p.id) && (
+                        <span title="Trending — most-added on Sleeper (24h)">🔥</span>
+                      )}
+                      {!drafted && newsIds?.has(p.id) && (
+                        <span title={`News: ${newsIds.get(p.id)!.headline}`}>📰</span>
+                      )}
+                    </span>
+                  )}
                 </button>
                 {!drafted && (
                   <button

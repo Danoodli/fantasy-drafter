@@ -72,7 +72,6 @@ export default function Page() {
       setConfig(null); // force setup, prefilled with the shared values
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfig(loadConfig());
   }, []);
 
