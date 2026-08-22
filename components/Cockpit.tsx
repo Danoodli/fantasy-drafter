@@ -24,6 +24,7 @@ import PlayerModal from "./PlayerModal";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
+import { loadSources, fetchTrendingIds } from "../lib/client/sources";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
 
@@ -61,6 +62,25 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
   const [endedEarly, setEndedEarly] = useState(false);
   const [boardQuery, setBoardQuery] = useState("");
+  const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
+
+  // Sleeper's most-added players (24h) — refreshed every 10 minutes.
+  useEffect(() => {
+    if (!loadSources().trending) return;
+    let cancelled = false;
+    const load = () =>
+      fetchTrendingIds()
+        .then((ids) => !cancelled && setTrendingIds(ids))
+        .catch(() => {
+          // offline — badges just don't show
+        });
+    load();
+    const timer = setInterval(load, 10 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -767,6 +787,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                 ? new Set(searchPlayers(boardQuery, board.players, 40).map((p) => p.id))
                 : null
             }
+            trendingIds={trendingIds}
             positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}
@@ -814,6 +835,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           config={config}
           drafted={draft.draftedIds.has(modalPlayer.id)}
           canUnmark={draft.isManuallyMarked(modalPlayer.id)}
+          trending={trendingIds.has(modalPlayer.id)}
           myTurn={myTurn}
           onMark={(p, mine) => mark(p, mine)}
           onUnmark={(p) => {

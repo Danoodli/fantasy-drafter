@@ -24,6 +24,10 @@ export interface ScoringSettings {
   rec_2pt: number;
   fum_lost: number;
   bonus_rec_te?: number; // TE premium, if the league uses it
+  /** Points per first down (PPFD leagues). Sleeper leagues carry these natively. */
+  rush_fd?: number;
+  rec_fd?: number;
+  pass_fd?: number;
 }
 
 /** A raw projected stat line, normalized from ESPN's stat-id map. */
@@ -40,6 +44,10 @@ export interface StatLine {
   recTD?: number;
   rec2pt?: number;
   fumblesLost?: number;
+  /** Projected first downs (Sleeper provides these; ESPN doesn't) — enables PPFD scoring. */
+  rushFd?: number;
+  recFd?: number;
+  passFd?: number;
 }
 
 export interface BoardPlayer {
@@ -51,11 +59,15 @@ export interface BoardPlayer {
   projPoints: number; // scored with the league's settings
   projImputed: boolean; // true when ESPN had no projection and we interpolated
   /**
-   * Raw projected stat line. Lets the client re-score the board with the
-   * real Sleeper league scoring at runtime without an ETL rebuild.
+   * Raw projected stat line (ESPN). Lets the client re-score the board with
+   * the real league scoring at runtime without an ETL rebuild.
    * Absent for K/DST (their projPoints come from ESPN's applied total).
    */
   stats?: StatLine;
+  /** Second projection source: Sleeper's raw stat line (includes first downs). */
+  statsSleeper?: StatLine;
+  /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */
+  adpSources?: { ffc: number; espn: number | null; sleeper: number | null };
   adp: number;
   adpStdev: number;
   adpHigh: number;
@@ -136,6 +148,8 @@ export interface LeagueConfig {
     bonusRecTe?: number; // extra points per TE reception (TE premium)
     passTd?: number; // 4 or 6
     passInt?: number; // -1 or -2
+    /** Points per rushing/receiving first down (PPFD). Uses Sleeper's projected first downs. */
+    ppfd?: number;
   };
 }
 

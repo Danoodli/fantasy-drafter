@@ -186,6 +186,92 @@ export async function fetchSleeperPlayerInfo(): Promise<SourceResult<Record<stri
   }
 }
 
+export interface SleeperProjection {
+  stats: {
+    passYds?: number;
+    passTD?: number;
+    passInt?: number;
+    rushYds?: number;
+    rushTD?: number;
+    receptions?: number;
+    recYds?: number;
+    recTD?: number;
+    fumblesLost?: number;
+    rushFd?: number;
+    recFd?: number;
+    passFd?: number;
+  };
+  adp: { standard: number | null; "half-ppr": number | null; ppr: number | null; "2qb": number | null };
+}
+
+/**
+ * Sleeper's season projections (undocumented, free, no auth): full raw stat
+ * lines INCLUDING projected first downs, plus their own ADP per format.
+ * Keyed by sleeper_id — our canonical id, so the join is exact. Reduced
+ * immediately; only the slim map is cached as the fixture.
+ */
+export async function fetchSleeperProjections(
+  season: number
+): Promise<SourceResult<Record<string, SleeperProjection>>> {
+  const key = "sleeper-projections.json";
+  const fixturePath = join(RAW_DIR, key);
+  try {
+    const url =
+      `https://api.sleeper.app/projections/nfl/${season}?season_type=regular` +
+      `&position[]=QB&position[]=RB&position[]=WR&position[]=TE&order_by=adp_half_ppr`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = (await res.json()) as {
+      player_id: string;
+      stats: Record<string, number | null>;
+    }[];
+    if (!Array.isArray(rows) || rows.length < 300) throw new Error(`only ${rows?.length} rows`);
+    const slim: Record<string, SleeperProjection> = {};
+    const adpOf = (v: number | null | undefined) => (v && v > 0 && v < 999 ? v : null);
+    for (const row of rows) {
+      const s = row.stats ?? {};
+      if (!row.player_id) continue;
+      slim[row.player_id] = {
+        stats: {
+          passYds: s.pass_yd ?? undefined,
+          passTD: s.pass_td ?? undefined,
+          passInt: s.pass_int ?? undefined,
+          rushYds: s.rush_yd ?? undefined,
+          rushTD: s.rush_td ?? undefined,
+          receptions: s.rec ?? undefined,
+          recYds: s.rec_yd ?? undefined,
+          recTD: s.rec_td ?? undefined,
+          fumblesLost: s.fum_lost ?? undefined,
+          rushFd: s.rush_fd ?? undefined,
+          recFd: s.rec_fd ?? undefined,
+          passFd: s.pass_fd ?? undefined,
+        },
+        adp: {
+          standard: adpOf(s.adp_std),
+          "half-ppr": adpOf(s.adp_half_ppr),
+          ppr: adpOf(s.adp_ppr),
+          "2qb": adpOf(s.adp_2qb),
+        },
+      };
+    }
+    mkdirSync(RAW_DIR, { recursive: true });
+    writeFileSync(fixturePath, JSON.stringify(slim));
+    const meta = readMeta();
+    const fetchedAt = new Date().toISOString();
+    meta[key] = { fetchedAt };
+    writeMeta(meta);
+    return { data: slim, fetchedAt, fromFixture: false };
+  } catch (err) {
+    if (!existsSync(fixturePath)) {
+      console.warn(`⚠️  sleeper projections: fetch failed (${err}) and no fixture — source skipped`);
+      return { data: {}, fetchedAt: "unknown", fromFixture: true };
+    }
+    const fetchedAt = readMeta()[key]?.fetchedAt ?? "unknown";
+    console.warn(`⚠️  sleeper projections: live fetch FAILED (${err}). Using fixture from ${fetchedAt}.`);
+    return { data: JSON.parse(readFileSync(fixturePath, "utf8")), fetchedAt, fromFixture: true };
+  }
+}
+
 export function fetchEcr() {
   return fetchWithFixture(
     "db_fpecr_latest.csv",

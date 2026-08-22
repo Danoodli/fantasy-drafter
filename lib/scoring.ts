@@ -41,7 +41,11 @@ export function scoreStatLine(stats: StatLine, s: ScoringSettings, isTE = false)
     (stats.recYds ?? 0) * s.rec_yd +
     (stats.recTD ?? 0) * s.rec_td +
     (stats.rec2pt ?? 0) * s.rec_2pt +
-    (stats.fumblesLost ?? 0) * s.fum_lost
+    (stats.fumblesLost ?? 0) * s.fum_lost +
+    // PPFD — only Sleeper stat lines carry projected first downs
+    (stats.rushFd ?? 0) * (s.rush_fd ?? 0) +
+    (stats.recFd ?? 0) * (s.rec_fd ?? 0) +
+    (stats.passFd ?? 0) * (s.pass_fd ?? 0)
   );
 }
 
@@ -69,6 +73,9 @@ export function scoringFromSleeper(
     rec_2pt: pick("rec_2pt", fallback.rec_2pt),
     fum_lost: pick("fum_lost", fallback.fum_lost),
     bonus_rec_te: pick("bonus_rec_te", 0) || undefined,
+    rush_fd: pick("rush_fd", 0) || undefined,
+    rec_fd: pick("rec_fd", 0) || undefined,
+    pass_fd: pick("pass_fd", 0) || undefined,
   };
 }
 

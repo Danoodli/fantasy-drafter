@@ -654,3 +654,43 @@ describe("share links", () => {
     expect(evil!.rosterSlots.QB).toBeLessThanOrEqual(6);
   });
 });
+
+describe("data-source preferences", () => {
+  it("switching ADP and projection sources actually changes the board", async () => {
+    const { rescoreBoard } = await import("../lib/client/rescore");
+    const scoring = SCORING_PRESETS.ppr;
+    const espnBoard = rescoreBoard(board, scoring, config, { projections: "espn", adp: "ffc", trending: true });
+    const slpBoard = rescoreBoard(board, scoring, config, { projections: "sleeper", adp: "sleeper", trending: true });
+    const pick = (b: Board, name: string) => b.players.find((p) => p.name === name)!;
+    const g1 = pick(espnBoard, "Jahmyr Gibbs");
+    const g2 = pick(slpBoard, "Jahmyr Gibbs");
+    expect(g1.adp).toBe(g1.adpSources!.ffc);
+    expect(g2.adp).toBe(g2.adpSources!.sleeper);
+    // Different projection models disagree somewhere on the board
+    const diffs = espnBoard.players.filter((p, i) => {
+      const other = slpBoard.players.find((q) => q.id === p.id)!;
+      return Math.abs(p.projPoints - other.projPoints) > 1 && i < 100;
+    });
+    expect(diffs.length).toBeGreaterThan(10);
+    // Blend sits between the two for a player where both sources exist
+    const blend = rescoreBoard(board, scoring, config, { projections: "blend", adp: "blend", trending: true });
+    const gb = pick(blend, "Jahmyr Gibbs");
+    const lo = Math.min(g1.projPoints, g2.projPoints) - 0.11;
+    const hi = Math.max(g1.projPoints, g2.projPoints) + 0.11;
+    expect(gb.projPoints).toBeGreaterThanOrEqual(lo);
+    expect(gb.projPoints).toBeLessThanOrEqual(hi);
+  });
+
+  it("PPFD scoring counts Sleeper's projected first downs at full weight under blend", async () => {
+    const { rescoreBoard } = await import("../lib/client/rescore");
+    const base = SCORING_PRESETS.ppr;
+    const ppfd = { ...base, rush_fd: 0.5, rec_fd: 0.5 };
+    const prefs = { projections: "blend" as const, adp: "ffc" as const, trending: true };
+    const without = rescoreBoard(board, base, config, prefs);
+    const withFd = rescoreBoard(board, ppfd, config, prefs);
+    const g0 = without.players.find((p) => p.name === "Jahmyr Gibbs")!;
+    const g1 = withFd.players.find((p) => p.name === "Jahmyr Gibbs")!;
+    const fd = (g1.statsSleeper!.rushFd ?? 0) + (g1.statsSleeper!.recFd ?? 0);
+    expect(g1.projPoints - g0.projPoints).toBeCloseTo(fd * 0.5, 0);
+  });
+});

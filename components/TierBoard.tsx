@@ -28,6 +28,8 @@ interface Props {
   highlightId?: string | null;
   /** Live search filter: only these ids render (null = everyone). */
   filterIds?: Set<string> | null;
+  /** Most-added players on Sleeper (24h) — the 🔥 badge. */
+  trendingIds?: Set<string>;
 }
 
 const DEPTH: Record<Position, number> = { QB: 18, RB: 36, WR: 36, TE: 16, K: 8, DST: 8 };
@@ -57,6 +59,7 @@ function Column({
   onOpen,
   highlightId,
   filterIds,
+  trendingIds,
   onHoverStart,
   onHoverEnd,
 }: Omit<Props, "positions" | "blurbFor"> & {
@@ -114,6 +117,9 @@ function Column({
                 >
                   <span className="min-w-0 flex-1 truncate">
                     {p.name} <InjuryBadge injury={p.injury} />
+                    {!drafted && trendingIds?.has(p.id) && (
+                      <span title="Trending — most-added on Sleeper (24h)"> 🔥</span>
+                    )}
                   </span>
                   <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
                   <span className="font-mono text-[11px] text-ink-dim">
@@ -186,6 +192,7 @@ function TierBoard(props: Props) {
           onOpen={props.onOpen}
           highlightId={props.highlightId}
           filterIds={props.filterIds}
+          trendingIds={props.trendingIds}
           onHoverStart={onHoverStart}
           onHoverEnd={onHoverEnd}
         />

@@ -13,8 +13,10 @@ import {
   fetchPlayerIds,
   fetchEcr,
   fetchSleeperPlayerInfo,
+  fetchSleeperProjections,
   type FfcPlayer,
   type SlimPlayerInfo,
+  type SleeperProjection,
   type SourceResult,
 } from "../lib/etl/fetchers";
 import {
@@ -66,6 +68,7 @@ interface EspnProj {
   team: string;
   stats: StatLine;
   appliedTotal: number;
+  adp: number | null; // ESPN's own ADP, from the ownership block
 }
 
 function defaultConfigFor(format: ScoringFormat): LeagueConfig {
@@ -103,6 +106,7 @@ interface EspnPlayerEntry {
     defaultPositionId: number;
     proTeamId: number;
     stats?: EspnStatEntry[];
+    ownership?: { averageDraftPosition?: number };
   };
 }
 
@@ -123,6 +127,10 @@ function parseEspn(raw: { players: unknown[] }): EspnProj[] {
       team: ESPN_TEAM[p.proTeamId] ?? "",
       stats: statLineFromEspn(projEntry.stats ?? {}),
       appliedTotal: projEntry.appliedTotal ?? 0,
+      adp:
+        p.ownership?.averageDraftPosition && p.ownership.averageDraftPosition > 0
+          ? Math.round(p.ownership.averageDraftPosition * 10) / 10
+          : null,
     });
   }
   return out;
@@ -158,7 +166,8 @@ function buildBoard(
   ecrRows: Record<string, string>[],
   ecrMeta: { fetchedAt: string; fromFixture: boolean },
   playerInfo: Record<string, SlimPlayerInfo>,
-  sos: SosTable
+  sos: SosTable,
+  sleeperProj: Record<string, SleeperProjection>
 ): Board {
   const warnings: string[] = [];
 
@@ -246,6 +255,7 @@ function buildBoard(
 
     const ecrRow = (ids.fantasypros && ecrByFp.get(ids.fantasypros)) || ecrByMerge.get(mergeName(f.name));
     const info = playerInfo[id];
+    const sp = pos === "K" || pos === "DST" ? undefined : sleeperProj[id];
 
     players.push({
       id,
@@ -269,6 +279,12 @@ function buildBoard(
       depthOrder: info?.depthOrder ?? null,
       sosSeason: sos[f.team]?.[pos]?.season ?? null,
       sosPlayoff: sos[f.team]?.[pos]?.playoff ?? null,
+      statsSleeper: sp?.stats,
+      adpSources: {
+        ffc: f.adp,
+        espn: proj?.adp ?? null,
+        sleeper: sp?.adp[format] ?? null,
+      },
       ids,
     });
   }
@@ -320,13 +336,15 @@ function buildBoard(
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const [idsRes, ecrRes, espnRes, playersRes, sosRes] = await Promise.all([
+  const [idsRes, ecrRes, espnRes, playersRes, sosRes, sleeperProjRes] = await Promise.all([
     fetchPlayerIds(),
     fetchEcr(),
     fetchEspnProjections(SEASON),
     fetchSleeperPlayerInfo(),
     fetchSos(SEASON, SEASON - 1),
+    fetchSleeperProjections(SEASON),
   ]);
+  console.log(`sleeper projections: ${Object.keys(sleeperProjRes.data).length} players`);
   console.log(`sos: ${Object.keys(sosRes.data).length} teams${sosRes.fromFixture ? " (fixture)" : ""}`);
   const cross = parseCsv(idsRes.data as string) as unknown as CrossRow[];
   const ecrRows = parseCsv(ecrRes.data as string);
@@ -368,7 +386,8 @@ async function main() {
       ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
       { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
       playersRes.data,
-      sosRes.data
+      sosRes.data,
+      sleeperProjRes.data
     );
     const path = join(OUT_DIR, `board-${format}.json`);
     writeFileSync(path, JSON.stringify(board));
@@ -383,7 +402,8 @@ async function main() {
         ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
         { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
         playersRes.data,
-        sosRes.data
+        sosRes.data,
+        sleeperProjRes.data
       );
       writeFileSync(join(OUT_DIR, "board-custom.json"), JSON.stringify(custom));
       console.log(`✓ board-custom.json — real league scoring applied`);

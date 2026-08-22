@@ -69,12 +69,17 @@ When the draft ends (or any time via the **Recap** header button), the recap scr
 
 Join a free Sleeper mock draft and run the app against it — that's the integration test. Then `pnpm backtest <that draft id> <your slot> zero-rb` to see what a different strategy would have produced from the same room.
 
-## Data sources (all free)
+## Data sources (all free, all switchable)
 
 - ADP + stdev: [Fantasy Football Calculator](https://fantasyfootballcalculator.com) (attribution required)
-- Projections (raw stat lines): ESPN's undocumented `kona_player_info` endpoint — wrapped in a fixture fallback since it can vanish without notice
+- Projections (raw stat lines): ESPN's undocumented `kona_player_info` endpoint — wrapped in a fixture fallback since it can vanish without notice — **and** Sleeper's projections endpoint (raw stat lines including projected first downs, which is what makes PPFD scoring possible)
+- Second/third ADP opinions: ESPN's ownership block and Sleeper's per-format ADP
 - Player ID crosswalk + expert consensus ranks: [DynastyProcess](https://github.com/dynastyprocess/data) (GPL-3.0; ECR mirror updates weekly)
-- Live draft + league truth: [Sleeper](https://docs.sleeper.com) (free, read-only, non-commercial)
+- Live draft + league truth, trending adds, injuries, depth charts: [Sleeper](https://docs.sleeper.com) (free, read-only, non-commercial)
+- Schedules + last-season weekly stats (matchup strength): [nflverse](https://github.com/nflverse)
+- Player news, Rotowire notes, last-season stat lines: ESPN's public athlete endpoint, fetched in-browser
+
+**Source toggles** (Setup → Advanced → Data sources): pick ESPN, Sleeper, or a blend for projections; FFC, Sleeper, ESPN, or a blend for ADP. Blended projections are the default — two independent models beat either alone. FFC stays the uncertainty model regardless: it's the only free source publishing per-player ADP spread, which powers the survival math. Everything else keyed/paid (FantasyPros, FantasyData, Fantasy Nerds) is deliberately excluded — no keys, no signups, ever.
 
 Raw responses are committed to `data/raw/` as the offline fallback; the refresh workflow (`.github/workflows/build-board.yml`) rebuilds them **three times a day** (morning after FFC's ADP refresh, midday, and pre-draft-time evening) and commits the result — Vercel redeploys automatically on push. No API keys, no accounts, no signups anywhere: every source is anonymous and free. The only setup is pushing this repo to GitHub (activates the schedule) and connecting Vercel's free hobby tier (activates auto-deploy). Update cadence by source: ADP daily, injuries/depth intraday, expert ranks weekly (Fridays, upstream limitation), schedule/matchup strength static until the season starts.
 

@@ -9,6 +9,7 @@ import { fetchDraftInfo, parseDraftId, fetchLeagueDrafts } from "../lib/draft/sl
 import { DEFAULT_CONFIG, BESTBALL_PRESETS } from "../lib/client/config";
 import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } from "../lib/client/presets";
 import { loadHistory, deleteDraft, type SavedDraft } from "../lib/client/history";
+import { loadSources, saveSources, DEFAULT_SOURCES, type SourcePrefs } from "../lib/client/sources";
 
 const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
   { value: "ppr", label: "PPR" },
@@ -38,11 +39,19 @@ export default function Setup({
   const [presetName, setPresetName] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
 
+  const [sources, setSources] = useState<SourcePrefs>(DEFAULT_SOURCES);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage hydration
     setPresets(loadPresets());
     setHistory(loadHistory());
+    setSources(loadSources());
   }, []);
+
+  function updateSources(next: SourcePrefs) {
+    setSources(next);
+    saveSources(next);
+  }
 
   function copyShare(cfg: LeagueConfig, id: string) {
     navigator.clipboard
@@ -318,6 +327,7 @@ export default function Setup({
               ["bonusRecTe", "TE premium", [["+0", 0], ["+0.5 / rec", 0.5], ["+1 / rec", 1]]],
               ["passTd", "Pass TD", [["4 pts", 4], ["6 pts", 6]]],
               ["passInt", "INT", [["−1", -1], ["−2", -2]]],
+              ["ppfd", "Per first down", [["+0", 0], ["+0.5", 0.5], ["+1", 1]]],
             ] as const
           ).map(([key, label, options]) => (
             <label key={key} className="text-sm text-ink-dim">
@@ -341,8 +351,9 @@ export default function Setup({
             </label>
           ))}
           <p className="col-span-2 -mt-1 text-xs text-ink-faint">
-            Tweaks re-score every projection from raw stat lines. Points-per-first-down isn&apos;t
-            supported — first-down projections aren&apos;t published anywhere free.
+            Tweaks re-score every projection from raw stat lines. First-down scoring (PPFD) uses
+            Sleeper&apos;s projected first downs — keep the projection source on Sleeper or Blend
+            for it to count.
           </p>
         </section>
       )}
@@ -402,6 +413,52 @@ export default function Setup({
         <p className="mt-2 text-xs text-ink-faint">
           These are the weekly lineup slots. Bench size is rounds minus starters, automatically.
         </p>
+
+        <div className="mt-4 border-t border-line pt-3">
+          <p className="text-sm font-medium text-ink-dim">Data sources</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-ink-dim">
+              Projections
+              <select
+                value={sources.projections}
+                onChange={(e) =>
+                  updateSources({ ...sources, projections: e.target.value as SourcePrefs["projections"] })
+                }
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2 text-sm"
+              >
+                <option value="blend">Blend ESPN + Sleeper (recommended)</option>
+                <option value="espn">ESPN only</option>
+                <option value="sleeper">Sleeper only</option>
+              </select>
+            </label>
+            <label className="text-xs text-ink-dim">
+              ADP (market prices)
+              <select
+                value={sources.adp}
+                onChange={(e) => updateSources({ ...sources, adp: e.target.value as SourcePrefs["adp"] })}
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2 text-sm"
+              >
+                <option value="ffc">Fantasy Football Calculator (recommended)</option>
+                <option value="sleeper">Sleeper</option>
+                <option value="espn">ESPN</option>
+                <option value="blend">Blend all three</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-sm text-ink-dim">
+            <input
+              type="checkbox"
+              checked={sources.trending}
+              onChange={(e) => updateSources({ ...sources, trending: e.target.checked })}
+            />
+            Show 🔥 on trending players (most-added on Sleeper, last 24h)
+          </label>
+          <p className="mt-1 text-xs text-ink-faint">
+            FFC stays the uncertainty model either way — it&apos;s the only source that publishes
+            per-player ADP spread, which powers the survival math. These apply everywhere, not per
+            league.
+          </p>
+        </div>
       </details>
 
       {/* Save & share this exact setup — no accounts, the link IS the config. */}

@@ -9,6 +9,7 @@ import type { Board, LeagueConfig, Strategy } from "../lib/types";
 import { loadConfig, saveConfig, clearConfig } from "../lib/client/config";
 import { SCORING_PRESETS, scoringFromSleeper } from "../lib/scoring";
 import { rescoreBoard, scoringDiffers } from "../lib/client/rescore";
+import { loadSources } from "../lib/client/sources";
 import { decodeConfig } from "../lib/client/presets";
 import type { SavedDraft } from "../lib/client/history";
 import Setup from "../components/Setup";
@@ -83,35 +84,37 @@ export default function Page() {
         const res = await fetch(`/data/board-${config.scoring}.json`);
         if (!res.ok) throw new Error(`board fetch: HTTP ${res.status}`);
         let b: Board = await res.json();
-        // Manual-mode scoring tweaks (TE premium, 6-pt pass TD, INT severity)
-        // re-score the board from raw stat lines, client-side.
+        // Resolve the scoring settings this league actually uses…
+        let settings = { ...SCORING_PRESETS[config.scoring] };
         const tweaks = config.scoringTweaks;
         if (config.platform === "manual" && tweaks) {
-          const settings = {
-            ...SCORING_PRESETS[config.scoring],
-            ...(tweaks.passTd != null ? { pass_td: tweaks.passTd } : {}),
-            ...(tweaks.passInt != null ? { pass_int: tweaks.passInt } : {}),
-            ...(tweaks.bonusRecTe ? { bonus_rec_te: tweaks.bonusRecTe } : {}),
-          };
-          if (scoringDiffers(settings, b.meta.scoring)) b = rescoreBoard(b, settings, config);
+          if (tweaks.passTd != null) settings.pass_td = tweaks.passTd;
+          if (tweaks.passInt != null) settings.pass_int = tweaks.passInt;
+          if (tweaks.bonusRecTe) settings.bonus_rec_te = tweaks.bonusRecTe;
+          if (tweaks.ppfd) {
+            settings.rush_fd = tweaks.ppfd;
+            settings.rec_fd = tweaks.ppfd;
+          }
         }
-        // Real league scoring beats the preset the board was built with.
         if (config.platform === "sleeper" && config.leagueId) {
           try {
             const lres = await fetch(`https://api.sleeper.app/v1/league/${config.leagueId}`);
             if (lres.ok) {
               const league = await lres.json();
-              const real = scoringFromSleeper(
-                league.scoring_settings ?? {},
-                SCORING_PRESETS[config.scoring]
-              );
-              if (scoringDiffers(real, b.meta.scoring)) {
-                b = rescoreBoard(b, real, config);
-              }
+              settings = scoringFromSleeper(league.scoring_settings ?? {}, settings);
             }
           } catch {
             // offline or mock draft — preset scoring stands
           }
+        }
+        // …then apply scoring + data-source preferences in one pass.
+        const prefs = loadSources();
+        if (
+          scoringDiffers(settings, b.meta.scoring) ||
+          prefs.projections !== "espn" ||
+          prefs.adp !== "ffc"
+        ) {
+          b = rescoreBoard(b, settings, config, prefs);
         }
         if (!cancelled) setBoard(b);
       } catch (err) {

@@ -19,6 +19,8 @@ interface Props {
   drafted: boolean;
   /** True when this player was marked manually — a mistype can be undone. */
   canUnmark: boolean;
+  /** Most-added on Sleeper in the last 24h. */
+  trending?: boolean;
   myTurn: boolean;
   onMark: (player: BoardPlayer, mine: boolean) => void;
   onUnmark: (player: BoardPlayer) => void;
@@ -43,7 +45,7 @@ function StatCell({ label, value }: { label: string; value: number | string | un
   );
 }
 
-export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, myTurn, onMark, onUnmark, onClose }: Props) {
+export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, trending, myTurn, onMark, onUnmark, onClose }: Props) {
   const [extras, setExtras] = useState<PlayerExtras | null | "loading">("loading");
   const blurb = playerBlurb(p, ctx);
   const color = POS_COLOR[p.pos];
@@ -102,6 +104,21 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
             {blurb.verdict} at pick {ctx.currentPick}
           </span>
           <span className="font-mono text-xs uppercase text-ink-dim">{blurb.risk}</span>
+          {trending && (
+            <span
+              className="font-mono text-xs text-warn"
+              title="Most-added on Sleeper in the last 24 hours"
+            >
+              🔥 trending
+            </span>
+          )}
+          {p.adpSources && (
+            <span className="ml-auto font-mono text-[10px] text-ink-faint">
+              ADP — FFC {p.adpSources.ffc.toFixed(0)}
+              {p.adpSources.sleeper != null && ` · SLP ${p.adpSources.sleeper.toFixed(0)}`}
+              {p.adpSources.espn != null && ` · ESPN ${p.adpSources.espn.toFixed(0)}`}
+            </span>
+          )}
         </div>
 
         {/* Two columns on desktop: engine read on the left, live news on the right. */}
