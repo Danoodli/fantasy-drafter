@@ -22,6 +22,8 @@ import Confetti, { type Burst } from "./Confetti";
 import Recap from "./Recap";
 import PlayerModal from "./PlayerModal";
 import { stackPartners } from "../lib/client/stacks";
+import { upsertDraft } from "../lib/client/history";
+import { searchPlayers } from "../lib/draft/fuzzy";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
 
@@ -58,6 +60,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [toast, setToast] = useState<{ text: string; undoable: boolean } | null>(null);
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
   const [endedEarly, setEndedEarly] = useState(false);
+  const [boardQuery, setBoardQuery] = useState("");
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -75,6 +78,42 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   // Recap opens itself when the draft ends; header button opens it any time.
   const [recapChoice, setRecapChoice] = useState<boolean | null>(null);
   const recapOpen = recapChoice ?? draftOver;
+
+  // Draft history: one stable session id per draft, refresh-safe (persisted),
+  // renewed on reset so back-to-back drafts of the same format don't collide.
+  const sessionIdRef = useRef<string | null>(null);
+  function currentSessionId(): string {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    const fingerprint = `${config.platform}:${config.draftId || "manual"}:${config.teams}x${config.rounds}:${config.myDraftSlot}`;
+    try {
+      const raw = localStorage.getItem("draft-cockpit-session-v1");
+      const saved = raw ? (JSON.parse(raw) as { fingerprint: string; id: string }) : null;
+      if (saved && saved.fingerprint === fingerprint) {
+        sessionIdRef.current = saved.id;
+        return saved.id;
+      }
+      const id = `${fingerprint}:${Date.now().toString(36)}`;
+      localStorage.setItem("draft-cockpit-session-v1", JSON.stringify({ fingerprint, id }));
+      sessionIdRef.current = id;
+      return id;
+    } catch {
+      const id = `${fingerprint}:mem`;
+      sessionIdRef.current = id;
+      return id;
+    }
+  }
+  function renewSession() {
+    sessionIdRef.current = null;
+    try {
+      localStorage.removeItem("draft-cockpit-session-v1");
+    } catch {
+      // ignore
+    }
+  }
+  useEffect(() => {
+    if (draft.picks.length < 3) return; // don't record empty fiddling
+    upsertDraft(currentSessionId(), config, draft.picks, draft.tradedPicks, draftOver);
+  }); // runs after each render; upsert is cheap and idempotent per state
   const myTurn = draft.myPicks[0] === draft.currentPick;
   const planningPick = draft.myPicks[0] ?? draft.currentPick;
 
@@ -364,6 +403,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   if (window.confirm("Clear every manually marked pick and restart?")) {
                     draft.reset();
                     setEndedEarly(false);
+                    renewSession(); // the next draft gets its own history entry
                     showToast("Draft reset.");
                   }
                 }}
@@ -588,6 +628,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             players={board.players}
             draftedIds={draft.draftedIds}
             onMark={(p) => mark(p)}
+            onQueryChange={setBoardQuery}
           />
 
           {/* Look-ahead: what's probably still there at my pick after this one */}
@@ -721,6 +762,11 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             highlightId={myTurn && top ? top.player.id : null}
             onOpen={setModalPlayer}
             blurbFor={(p) => blurbCtx.for(p)}
+            filterIds={
+              boardQuery.trim()
+                ? new Set(searchPlayers(boardQuery, board.players, 40).map((p) => p.id))
+                : null
+            }
             positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}

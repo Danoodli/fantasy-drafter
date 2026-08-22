@@ -9,9 +9,45 @@ import type { Board, LeagueConfig, Strategy } from "../lib/types";
 import { loadConfig, saveConfig, clearConfig } from "../lib/client/config";
 import { SCORING_PRESETS, scoringFromSleeper } from "../lib/scoring";
 import { rescoreBoard, scoringDiffers } from "../lib/client/rescore";
+import { decodeConfig } from "../lib/client/presets";
+import type { SavedDraft } from "../lib/client/history";
 import Setup from "../components/Setup";
 import Cockpit from "../components/Cockpit";
+import Recap from "../components/Recap";
 import strategiesJson from "../config/strategies.json";
+
+/** Recap of a saved draft: loads the board that config needs, then renders. */
+function HistoryRecap({ draft, onClose }: { draft: SavedDraft; onClose: () => void }) {
+  const [board, setBoard] = useState<Board | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/data/board-${draft.config.scoring}.json`)
+      .then((r) => r.json())
+      .then((b) => !cancelled && setBoard(b))
+      .catch(() => !cancelled && setBoard(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.config.scoring]);
+  if (!board) {
+    return (
+      <main className="grid min-h-dvh place-items-center">
+        <p className="font-mono text-sm text-ink-dim">Loading board…</p>
+      </main>
+    );
+  }
+  return (
+    <Recap
+      board={board}
+      config={draft.config}
+      picks={draft.picks}
+      tradedPicks={draft.tradedPicks ?? []}
+      mySlot={draft.mySlot}
+      draftOver
+      onClose={onClose}
+    />
+  );
+}
 
 const strategies = strategiesJson as Strategy[];
 
@@ -19,10 +55,22 @@ export default function Page() {
   const [config, setConfig] = useState<LeagueConfig | null | "unset">("unset");
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shared, setShared] = useState<LeagueConfig | null>(null);
+  const [viewingDraft, setViewingDraft] = useState<SavedDraft | null>(null);
 
   useEffect(() => {
-    // localStorage is only readable after mount — the one-time hydration
-    // setState here is intentional.
+    // A shared link carries the whole config in the URL — decode it, show
+    // setup prefilled, and clean the address bar. Otherwise hydrate the
+    // saved config. (One-time localStorage/URL read after mount.)
+    const param = new URLSearchParams(window.location.search).get("c");
+    const decoded = param ? decodeConfig(param) : null;
+    if (decoded) {
+      window.history.replaceState(null, "", window.location.pathname);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShared(decoded);
+      setConfig(null); // force setup, prefilled with the shared values
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfig(loadConfig());
   }, []);
@@ -78,14 +126,21 @@ export default function Page() {
     };
   }, [config]);
 
+  if (viewingDraft) {
+    return <HistoryRecap draft={viewingDraft} onClose={() => setViewingDraft(null)} />;
+  }
+
   if (config === "unset") return null;
 
   if (!config) {
     return (
       <Setup
+        initialConfig={shared}
+        onViewDraft={setViewingDraft}
         onDone={(c) => {
           saveConfig(c);
           setConfig(c);
+          setShared(null);
         }}
       />
     );

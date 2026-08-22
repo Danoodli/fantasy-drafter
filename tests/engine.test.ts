@@ -630,3 +630,27 @@ describe("post-draft recap", () => {
     expect(sups.find((s) => s.label === "Steal of the draft")).toBeDefined();
   });
 });
+
+describe("share links", () => {
+  it("config round-trips through the URL encoding and survives garbage", async () => {
+    const { encodeConfig, decodeConfig } = await import("../lib/client/presets");
+    const cfg: LeagueConfig = {
+      ...config,
+      leagueType: "bestball",
+      rounds: 18,
+      rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
+      scoringTweaks: { bonusRecTe: 0.5, passTd: 6 },
+    };
+    const decoded = decodeConfig(encodeConfig(cfg));
+    expect(decoded).toEqual(cfg);
+    expect(decodeConfig("not-base64!!!")).toBeNull();
+    // Mangled numbers get clamped, not trusted
+    const evil = decodeConfig(
+      Buffer.from(JSON.stringify({ teams: 9999, rounds: -5, rosterSlots: { QB: 99 } }), "utf8")
+        .toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+    );
+    expect(evil!.teams).toBeLessThanOrEqual(24);
+    expect(evil!.rounds).toBeGreaterThanOrEqual(4);
+    expect(evil!.rosterSlots.QB).toBeLessThanOrEqual(6);
+  });
+});

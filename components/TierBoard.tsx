@@ -26,6 +26,8 @@ interface Props {
   blurbFor?: (p: BoardPlayer) => PlayerBlurb;
   /** The recommended player when it's my turn — glows so I find him fast. */
   highlightId?: string | null;
+  /** Live search filter: only these ids render (null = everyone). */
+  filterIds?: Set<string> | null;
 }
 
 const DEPTH: Record<Position, number> = { QB: 18, RB: 36, WR: 36, TE: 16, K: 8, DST: 8 };
@@ -54,6 +56,7 @@ function Column({
   onMark,
   onOpen,
   highlightId,
+  filterIds,
   onHoverStart,
   onHoverEnd,
 }: Omit<Props, "positions" | "blurbFor"> & {
@@ -62,7 +65,7 @@ function Column({
   onHoverEnd: () => void;
 }) {
   const group = players
-    .filter((p) => p.pos === pos)
+    .filter((p) => p.pos === pos && (!filterIds || filterIds.has(p.id)))
     .sort((a, b) => b.projPoints - a.projPoints)
     .slice(0, DEPTH[pos]);
   const color = POS_COLOR[pos];
@@ -182,6 +185,7 @@ function TierBoard(props: Props) {
           onMark={props.onMark}
           onOpen={props.onOpen}
           highlightId={props.highlightId}
+          filterIds={props.filterIds}
           onHoverStart={onHoverStart}
           onHoverEnd={onHoverEnd}
         />

@@ -75,7 +75,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
       aria-label={`${p.name} details`}
     >
       <div
-        className="w-full max-w-lg rounded-xl border-l-4 border border-line bg-panel p-5 shadow-2xl"
+        className="w-full max-w-3xl rounded-xl border-l-4 border border-line bg-panel p-5 shadow-2xl"
         style={{ borderLeftColor: color }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -103,48 +103,36 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           </span>
           <span className="font-mono text-xs uppercase text-ink-dim">{blurb.risk}</span>
         </div>
-        <ul className="mt-2 space-y-1 text-sm text-ink">
-          {blurb.lines.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
 
-        {/* 2026 projection */}
-        <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-ink-dim">
-          2026 projection · {Math.round(p.projPoints)} pts · VORP {Math.round(p.vorp)}
-        </p>
-        <div className="mt-1.5 grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-          <StatCell label="Pass yds" value={s?.passYds} />
-          <StatCell label="Pass TD" value={s?.passTD} />
-          <StatCell label="INT" value={s?.passInt} />
-          <StatCell label="Rush yds" value={s?.rushYds} />
-          <StatCell label="Rush TD" value={s?.rushTD} />
-          <StatCell label="Rec" value={s?.receptions} />
-          <StatCell label="Rec yds" value={s?.recYds} />
-          <StatCell label="Rec TD" value={s?.recTD} />
-          <StatCell label="ADP" value={p.adp.toFixed(1)} />
-          <StatCell label="ADP range" value={`${p.adpHigh}–${p.adpLow}`} />
-          <StatCell label="ECR" value={p.ecr != null ? p.ecr.toFixed(0) : undefined} />
-          {p.sosPlayoff != null && (
-            <StatCell label="Playoff SOS" value={`${Math.round(p.sosPlayoff * 100)}%`} />
-          )}
-        </div>
+        {/* Two columns on desktop: engine read on the left, live news on the right. */}
+        <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          <div>
+            <ul className="space-y-1 text-sm text-ink">
+              {blurb.lines.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
 
-        {/* Live extras */}
-        {extras === "loading" && (
-          <p className="mt-4 font-mono text-xs text-ink-faint">Loading news…</p>
-        )}
-        {extras && extras !== "loading" && (
-          <>
-            {extras.rotowire && (
-              <div className="mt-4 rounded bg-field p-3">
-                <p className="text-sm font-semibold">{extras.rotowire.headline}</p>
-                <p className="mt-1 line-clamp-4 text-[13px] leading-snug text-ink-dim">
-                  {extras.rotowire.story}
-                </p>
-              </div>
-            )}
-            {extras.lastSeason && (
+            <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-ink-dim">
+              2026 projection · {Math.round(p.projPoints)} pts · VORP {Math.round(p.vorp)}
+            </p>
+            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+              <StatCell label="Pass yds" value={s?.passYds} />
+              <StatCell label="Pass TD" value={s?.passTD} />
+              <StatCell label="INT" value={s?.passInt} />
+              <StatCell label="Rush yds" value={s?.rushYds} />
+              <StatCell label="Rush TD" value={s?.rushTD} />
+              <StatCell label="Rec" value={s?.receptions} />
+              <StatCell label="Rec yds" value={s?.recYds} />
+              <StatCell label="Rec TD" value={s?.recTD} />
+              <StatCell label="ADP" value={p.adp.toFixed(1)} />
+              <StatCell label="ADP range" value={`${p.adpHigh}–${p.adpLow}`} />
+              <StatCell label="ECR" value={p.ecr != null ? p.ecr.toFixed(0) : undefined} />
+              {p.sosPlayoff != null && (
+                <StatCell label="Playoff SOS" value={`${Math.round(p.sosPlayoff * 100)}%`} />
+              )}
+            </div>
+            {extras && extras !== "loading" && extras.lastSeason && (
               <div className="mt-3">
                 <p className="font-mono text-[10px] uppercase tracking-widest text-ink-dim">
                   {extras.lastSeason.title}
@@ -156,41 +144,59 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
                 </div>
               </div>
             )}
-            {extras.news.length > 0 && (
-              <ul className="mt-3 space-y-1">
-                {extras.news.map((n, i) => (
-                  <li key={i} className="text-[13px] leading-snug">
-                    {n.href ? (
-                      <a href={n.href} target="_blank" rel="noreferrer" className="text-wr hover:underline">
-                        {n.headline}
-                      </a>
-                    ) : (
-                      n.headline
-                    )}
-                    {n.published && (
-                      <span className="ml-1.5 font-mono text-[10px] text-ink-faint">
-                        {new Date(n.published).toLocaleDateString()}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+          </div>
+
+          <div>
+            {extras === "loading" && (
+              <p className="font-mono text-xs text-ink-faint">Loading news…</p>
             )}
-          </>
-        )}
-        {extras === null && (
-          <p className="mt-4 text-[13px] text-ink-faint">
-            No live news available.{" "}
-            <a
-              className="text-wr hover:underline"
-              href={`https://www.google.com/search?q=${encodeURIComponent(p.name + " fantasy news")}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Search news ↗
-            </a>
-          </p>
-        )}
+            {extras && extras !== "loading" && (
+              <>
+                {extras.rotowire && (
+                  <div className="rounded bg-field p-3">
+                    <p className="text-sm font-semibold">{extras.rotowire.headline}</p>
+                    <p className="mt-1 line-clamp-5 text-[13px] leading-snug text-ink-dim">
+                      {extras.rotowire.story}
+                    </p>
+                  </div>
+                )}
+                {extras.news.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {extras.news.map((n, i) => (
+                      <li key={i} className="text-[13px] leading-snug">
+                        {n.href ? (
+                          <a href={n.href} target="_blank" rel="noreferrer" className="text-wr hover:underline">
+                            {n.headline}
+                          </a>
+                        ) : (
+                          n.headline
+                        )}
+                        {n.published && (
+                          <span className="ml-1.5 font-mono text-[10px] text-ink-faint">
+                            {new Date(n.published).toLocaleDateString()}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            {extras === null && (
+              <p className="text-[13px] text-ink-faint">
+                No live news available.{" "}
+                <a
+                  className="text-wr hover:underline"
+                  href={`https://www.google.com/search?q=${encodeURIComponent(p.name + " fantasy news")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Search news ↗
+                </a>
+              </p>
+            )}
+          </div>
+        </div>
 
         <div className="mt-5 flex gap-2">
           {!drafted && (

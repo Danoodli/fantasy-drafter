@@ -17,13 +17,19 @@ interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
   onMark: (player: BoardPlayer) => void;
+  /** Fires as the query changes so the tier board can live-filter with it. */
+  onQueryChange?: (query: string) => void;
 }
 
 const SearchBox = forwardRef<SearchBoxHandle, Props>(function SearchBox(
-  { players, draftedIds, onMark },
+  { players, draftedIds, onMark, onQueryChange },
   ref
 ) {
-  const [query, setQuery] = useState("");
+  const [query, setQueryRaw] = useState("");
+  const setQuery = (q: string) => {
+    setQueryRaw(q);
+    onQueryChange?.(q);
+  };
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }));
