@@ -89,7 +89,7 @@ export function connectWireStream(
               },
             ],
             players,
-            36
+            48
           );
           if (matched.size > 0) onNews(matched);
         } catch {
