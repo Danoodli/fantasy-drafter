@@ -1,8 +1,13 @@
-name: Nightly board build
+name: Board refresh
 
 on:
   schedule:
-    - cron: "20 9 * * *" # 09:20 UTC daily — after FFC's daily ADP refresh
+    # Three refreshes a day, all free. ADP moves daily; injuries and depth
+    # charts move intraday — the evening run is the one that matters before
+    # draft night. Sources refuse nothing: all anonymous, no keys.
+    - cron: "20 9 * * *" # 09:20 UTC — after FFC's daily ADP refresh
+    - cron: "20 16 * * *" # 16:20 UTC — midday injury/depth updates
+    - cron: "20 23 * * *" # 23:20 UTC — pre-draft-night (evening US)
   workflow_dispatch: {}
 
 permissions:

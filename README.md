@@ -57,6 +57,10 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 | `pnpm backtest <draft_id> <slot> [strategy] [scoring]` | replay a real Sleeper draft with the engine in your slot; compare rosters |
 | `pnpm simulate <draft_id> [slot] [scoring] [--sims=500] [--bestball]` | run every roster in a drafted room through hundreds of simulated seasons; report win rates and ceiling percentiles |
 
+## Post-draft recap
+
+When the draft ends (or any time via the **Recap** header button), the recap screen shows every roster in the room ranked by projected value, letter-grades each team, calls out the steal and the biggest reach of the draft, and can simulate 300 full seasons in the browser — win rates and p50/p99 ceilings per roster, with your team highlighted.
+
 ## Validating and tuning
 
 Join a free Sleeper mock draft and run the app against it — that's the integration test. Then `pnpm backtest <that draft id> <your slot> zero-rb` to see what a different strategy would have produced from the same room.
@@ -68,7 +72,7 @@ Join a free Sleeper mock draft and run the app against it — that's the integra
 - Player ID crosswalk + expert consensus ranks: [DynastyProcess](https://github.com/dynastyprocess/data) (GPL-3.0; ECR mirror updates weekly)
 - Live draft + league truth: [Sleeper](https://docs.sleeper.com) (free, read-only, non-commercial)
 
-Raw responses are committed to `data/raw/` as the offline fallback; the nightly workflow (`.github/workflows/build-board.yml`) refreshes them.
+Raw responses are committed to `data/raw/` as the offline fallback; the refresh workflow (`.github/workflows/build-board.yml`) rebuilds them **three times a day** (morning after FFC's ADP refresh, midday, and pre-draft-time evening) and commits the result — Vercel redeploys automatically on push. No API keys, no accounts, no signups anywhere: every source is anonymous and free. The only setup is pushing this repo to GitHub (activates the schedule) and connecting Vercel's free hobby tier (activates auto-deploy). Update cadence by source: ADP daily, injuries/depth intraday, expert ranks weekly (Fridays, upstream limitation), schedule/matchup strength static until the season starts.
 
 ## Deploying
 

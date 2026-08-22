@@ -19,6 +19,7 @@ import TierBoard from "./TierBoard";
 import SearchBox, { type SearchBoxHandle } from "./SearchBox";
 import InjuryBadge from "./InjuryBadge";
 import Confetti, { type Burst } from "./Confetti";
+import Recap from "./Recap";
 import { playerBlurb } from "../lib/engine/reasons";
 
 interface Props {
@@ -66,6 +67,9 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
   const totalPicks = config.teams * config.rounds;
   const draftOver = draft.currentPick > totalPicks;
+  // Recap opens itself when the draft ends; header button opens it any time.
+  const [recapChoice, setRecapChoice] = useState<boolean | null>(null);
+  const recapOpen = recapChoice ?? draftOver;
   const myTurn = draft.myPicks[0] === draft.currentPick;
   const planningPick = draft.myPicks[0] ?? draft.currentPick;
 
@@ -192,6 +196,20 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     return view;
   }, [draft.myRoster, config]);
 
+  if (recapOpen) {
+    return (
+      <Recap
+        board={board}
+        config={config}
+        picks={draft.picks}
+        tradedPicks={draft.tradedPicks}
+        mySlot={config.myDraftSlot ?? 1}
+        draftOver={draftOver}
+        onClose={() => setRecapChoice(false)}
+      />
+    );
+  }
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-4 pb-4 pt-3 lg:h-dvh">
       {/* Status bar */}
@@ -238,6 +256,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               Dials
             </button>
           )}
+          <button
+            onClick={() => setRecapChoice(true)}
+            title="Room standings, grades, and season simulation"
+            className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
+          >
+            Recap
+          </button>
           <button
             onClick={() => { draft.undo(); showToast("Undone."); }}
             disabled={!draft.canUndo}

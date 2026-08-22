@@ -603,3 +603,30 @@ describe("construction floors (the zero-TE bug)", () => {
     expect(requiredFloor("K", bestballConfig)).toBe(0); // no K in format
   });
 });
+
+describe("post-draft recap", () => {
+  it("ranks rosters, grades them, and finds steals and reaches", async () => {
+    const { buildRecap, gradeFor, superlatives } = await import("../lib/engine/recap");
+    const byId = new Map(board.players.map((p) => [p.id, p]));
+    // Draft the top of the board in ADP order, but let adpOrder[30] FALL:
+    // everyone skips him until pick 61 — the steal of the draft.
+    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    const faller = adpOrder[30];
+    const pool = adpOrder.filter((p) => p.id !== faller.id);
+    const picks = pool.slice(0, 60).map((p, i) => ({
+      playerId: p.id, playerName: p.name, pos: p.pos,
+      pickNo: i + 1, round: Math.ceil((i + 1) / 12), draftSlot: 0,
+      isKeeper: false, byMe: false,
+    }));
+    picks.push({ playerId: faller.id, playerName: faller.name, pos: faller.pos,
+      pickNo: 61, round: 6, draftSlot: 0, isKeeper: false, byMe: false });
+    const recap = buildRecap(picks, byId, config, []);
+    expect(recap).toHaveLength(12);
+    expect(recap[0].score).toBeGreaterThanOrEqual(recap[11].score);
+    expect(recap.every((t) => t.roster.length >= 5)).toBe(true);
+    expect(gradeFor(0, 12)).toBe("A+");
+    expect(gradeFor(11, 12)).toBe("D");
+    const sups = superlatives(picks, byId, 12, []);
+    expect(sups.find((s) => s.label === "Steal of the draft")).toBeDefined();
+  });
+});
