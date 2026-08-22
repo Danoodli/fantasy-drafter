@@ -57,6 +57,10 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 | `pnpm backtest <draft_id> <slot> [strategy] [scoring]` | replay a real Sleeper draft with the engine in your slot; compare rosters |
 | `pnpm simulate <draft_id> [slot] [scoring] [--sims=500] [--bestball]` | run every roster in a drafted room through hundreds of simulated seasons; report win rates and ceiling percentiles |
 
+## Player cards and draft controls
+
+Click any player name anywhere — tier board, alternates, planner, your roster, even the big answer — for the full decision card: verdict and math-derived reasons, the 2026 projected stat line, ADP/ECR/schedule data, a live Rotowire note, last-season stats, and recent headlines (ESPN's public endpoint, fetched in-browser). Mark players gone via search, the answer buttons, the row's hover ✕, or from the card — and undo anything: the toast has an Undo button, ⌘Z works, and any manually-marked player's card offers "Put him back." The ⋯ menu holds draft controls: auto-complete the rest of the draft (engine for you, ADP for the room), end early, resume, or reset.
+
 ## Post-draft recap
 
 When the draft ends (or any time via the **Recap** header button), the recap screen shows every roster in the room ranked by projected value, letter-grades each team, calls out the steal and the biggest reach of the draft, and can simulate 300 full seasons in the browser — win rates and p50/p99 ceilings per roster, with your team highlighted.
