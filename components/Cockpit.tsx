@@ -21,6 +21,7 @@ import InjuryBadge from "./InjuryBadge";
 import Confetti, { type Burst } from "./Confetti";
 import Recap from "./Recap";
 import PlayerModal from "./PlayerModal";
+import { stackPartners } from "../lib/client/stacks";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
 
@@ -520,10 +521,15 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   {top.player.name}
                 </button>
               </h2>
-              <p className="mt-2 flex items-center gap-1.5 font-mono text-sm text-ink-dim">
+              <p className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-sm text-ink-dim">
                 <span style={{ color: posColor }}>{top.player.pos}</span> · {top.player.team} · bye{" "}
                 {top.player.bye ?? "—"} · {Math.round(top.player.projPoints)} proj
                 <InjuryBadge injury={top.player.injury} />
+                {stackPartners(top.player, draft.myRoster).map((s) => (
+                  <span key={s.id} className="rounded bg-warn/15 px-1.5 font-mono text-[10px] text-warn" title={`Same-team stack with ${s.name}`}>
+                    ⚡ stacks w/ {s.name.split(" ").slice(-1)[0]}
+                  </span>
+                ))}
               </p>
               <p className="mt-3 text-[15px] leading-snug text-ink">{top.reason}</p>
               <div className="relative">
@@ -562,6 +568,11 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                       </span>
                       <span className="ml-2 font-mono text-xs text-ink-dim">
                         {r.player.pos} · {r.player.team} <InjuryBadge injury={r.player.injury} />
+                        {stackPartners(r.player, draft.myRoster).length > 0 && (
+                          <span className="ml-1 text-warn" title={`Stacks with ${stackPartners(r.player, draft.myRoster).map((s) => s.name).join(", ")}`}>
+                            ⚡
+                          </span>
+                        )}
                       </span>
                       <span className="block text-sm text-ink-dim">{r.reason}</span>
                     </span>
@@ -597,6 +608,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                         className="truncate text-left hover:underline"
                       >
                         {best.p.name}{" "}
+                        <span className="font-mono text-[10px] text-ink-faint">{best.p.team}</span>{" "}
                         <span className="font-mono text-[11px] text-ink-faint">
                           {Math.round(best.s * 100)}%
                         </span>
@@ -606,7 +618,8 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                           onClick={() => setModalPlayer(likely.p)}
                           className="ml-auto truncate text-right text-ink-dim hover:underline"
                         >
-                          likely: {likely.p.name}
+                          likely: {likely.p.name}{" "}
+                          <span className="font-mono text-[10px] text-ink-faint">{likely.p.team}</span>
                         </button>
                       )}
                     </li>
@@ -642,17 +655,26 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   })}
                 </ul>
                 <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
-                  {draft.myRoster.map((player, i) => (
-                    <li key={i} className="truncate text-sm">
-                      <button
-                        onClick={() => setModalPlayer(player)}
-                        className="truncate hover:underline"
-                        style={{ color: POS_COLOR[player.pos] }}
-                      >
-                        {player.name}
-                      </button>
-                    </li>
-                  ))}
+                  {draft.myRoster.map((player, i) => {
+                    const stacks = stackPartners(player, draft.myRoster);
+                    return (
+                      <li key={i} className="flex items-baseline gap-1 truncate text-sm">
+                        <button
+                          onClick={() => setModalPlayer(player)}
+                          className="truncate hover:underline"
+                          style={{ color: POS_COLOR[player.pos] }}
+                        >
+                          {player.name}
+                        </button>
+                        <span className="font-mono text-[10px] text-ink-faint">{player.team}</span>
+                        {stacks.length > 0 && (
+                          <span className="text-[11px] text-warn" title={`Stacked with ${stacks.map((s) => s.name).join(", ")}`}>
+                            ⚡
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </>
             ) : (
@@ -661,13 +683,24 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   <li key={i} className="flex items-baseline gap-2 text-sm">
                     <span className="w-9 shrink-0 font-mono text-[11px] text-ink-faint">{slot}</span>
                     {player ? (
-                      <button
-                        onClick={() => setModalPlayer(player)}
-                        className="truncate text-left hover:underline"
-                        style={{ color: POS_COLOR[player.pos] }}
-                      >
-                        {player.name}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setModalPlayer(player)}
+                          className="truncate text-left hover:underline"
+                          style={{ color: POS_COLOR[player.pos] }}
+                        >
+                          {player.name}
+                        </button>
+                        <span className="font-mono text-[10px] text-ink-faint">{player.team}</span>
+                        {stackPartners(player, draft.myRoster).length > 0 && (
+                          <span
+                            className="text-[11px] text-warn"
+                            title={`Stacked with ${stackPartners(player, draft.myRoster).map((s) => s.name).join(", ")}`}
+                          >
+                            ⚡
+                          </span>
+                        )}
+                      </>
                     ) : (
                       <span className="text-ink-faint">—</span>
                     )}

@@ -11,6 +11,7 @@ import type { Board, DraftPick, LeagueConfig, TradedPick } from "../lib/types";
 import { buildRecap, gradeFor, superlatives, type TeamRecap } from "../lib/engine/recap";
 import { simulateRoom, type SeasonSimResult } from "../lib/engine/season";
 import { POS_COLOR } from "../lib/client/pos";
+import { stackPartners } from "../lib/client/stacks";
 
 interface Props {
   board: Board;
@@ -43,7 +44,17 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
   const [sim, setSim] = useState<Map<number, SimRow> | null>(null);
   const [simming, setSimming] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [sortBySim, setSortBySim] = useState(false);
+
+  type SortKey = "value" | "starters" | "bench" | "vorp" | "win" | "p99";
+  const SORTS: { key: SortKey; label: string; needsSim?: boolean }[] = [
+    { key: "value", label: "Draft value" },
+    { key: "starters", label: "Starters" },
+    { key: "bench", label: "Bench" },
+    { key: "vorp", label: "VORP" },
+    { key: "win", label: "Win %", needsSim: true },
+    { key: "p99", label: "p99 ceiling", needsSim: true },
+  ];
+  const [sortKey, setSortKey] = useState<SortKey>("value");
 
   function runSim() {
     setSimming(true);
@@ -62,15 +73,25 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
       const map = new Map<number, SimRow>();
       ordered.forEach((t, i) => map.set(t.slot, { winRate: winRate[i], result: results[i] }));
       setSim(map);
-      setSortBySim(true);
+      setSortKey("win");
       setSimming(false);
     }, 30);
   }
 
   const rows: TeamRecap[] = useMemo(() => {
-    if (!sortBySim || !sim) return teams;
-    return [...teams].sort((a, b) => (sim.get(b.slot)?.winRate ?? 0) - (sim.get(a.slot)?.winRate ?? 0));
-  }, [teams, sim, sortBySim]);
+    const metric = (t: TeamRecap): number => {
+      const s = sim?.get(t.slot);
+      switch (sortKey) {
+        case "starters": return t.starterProj;
+        case "bench": return t.benchProj;
+        case "vorp": return t.totalVorp;
+        case "win": return s?.winRate ?? 0;
+        case "p99": return s?.result.p99 ?? 0;
+        default: return t.score;
+      }
+    };
+    return [...teams].sort((a, b) => metric(b) - metric(a));
+  }, [teams, sim, sortKey]);
 
   const myRank = rows.findIndex((t) => t.slot === mySlot);
 
@@ -113,6 +134,25 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
           ))}
         </section>
       )}
+
+      {/* Sort — grades follow whichever lens you pick */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Sort standings">
+        <span className="font-mono text-xs uppercase tracking-wide text-ink-faint">Rank by</span>
+        {SORTS.map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setSortKey(s.key)}
+            disabled={s.needsSim && !sim}
+            aria-pressed={sortKey === s.key}
+            title={s.needsSim && !sim ? "Run the simulation first" : undefined}
+            className={`rounded px-2 py-1 text-xs font-medium ${
+              sortKey === s.key ? "bg-panel-2 text-ink" : "bg-panel text-ink-dim hover:text-ink"
+            } disabled:opacity-35`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
 
       {sim && (
         <p className="mt-3 text-sm text-ink-dim">
@@ -164,17 +204,26 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
               </button>
               {open && (
                 <ul className="mx-4 grid grid-cols-2 gap-x-6 gap-y-0.5 rounded-b-lg bg-field px-4 py-3 sm:grid-cols-3">
-                  {t.roster.map((p) => (
-                    <li key={p.id} className="flex items-baseline gap-2 text-sm">
-                      <span className="w-8 shrink-0 font-mono text-[11px]" style={{ color: POS_COLOR[p.pos] }}>
-                        {p.pos}
-                      </span>
-                      <span className="truncate">{p.name}</span>
-                      <span className="ml-auto font-mono text-[11px] text-ink-faint">
-                        {Math.round(p.projPoints)}
-                      </span>
-                    </li>
-                  ))}
+                  {t.roster.map((p) => {
+                    const stacks = stackPartners(p, t.roster);
+                    return (
+                      <li key={p.id} className="flex items-baseline gap-2 text-sm">
+                        <span className="w-8 shrink-0 font-mono text-[11px]" style={{ color: POS_COLOR[p.pos] }}>
+                          {p.pos}
+                        </span>
+                        <span className="truncate">{p.name}</span>
+                        <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
+                        {stacks.length > 0 && (
+                          <span className="text-[11px] text-warn" title={`Stacked with ${stacks.map((s) => s.name).join(", ")}`}>
+                            ⚡
+                          </span>
+                        )}
+                        <span className="ml-auto font-mono text-[11px] text-ink-faint">
+                          {Math.round(p.projPoints)}
+                        </span>
+                      </li>
+                    );
+                  })}
                   {t.roster.length === 0 && <li className="text-sm text-ink-faint">No matched picks yet.</li>}
                 </ul>
               )}
