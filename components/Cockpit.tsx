@@ -30,6 +30,7 @@ import { fetchWireNews, mergeNews, DEFAULT_WIRE_HANDLES } from "../lib/client/bs
 import { connectWireStream } from "../lib/client/wireStream";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
+import Tour, { tourSeen, type TourStep } from "./Tour";
 import { simulateRoom } from "../lib/engine/season";
 
 interface Props {
@@ -57,6 +58,54 @@ function customStrategy(p: CustomStrategyParams, bestball: boolean): Strategy {
 
 const SLOT_ORDER: (keyof LeagueConfig["rosterSlots"])[] = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
 
+const TOUR_STEPS: TourStep[] = [
+  {
+    target: '[data-tour="answer"]',
+    title: "The answer",
+    body: "Who to take, computed live: projections, tier cliffs, survival odds, your roster needs, and this room's tendencies. The reason is right under the name. The big button confirms — Enter works too. Click the name for the full player card.",
+  },
+  {
+    target: '[data-tour="alternates"]',
+    title: "Two ways to disagree",
+    body: "Ranked alternates with a reason to take them INSTEAD — safer floor, different position, or he'll still be there later. Click one for his full card.",
+  },
+  {
+    target: '[data-tour="search"]',
+    title: "Mark picks fast",
+    body: "Type a few letters ('ceedee' works), hit Enter — he's off the board. Press / to focus from anywhere. Typing also live-filters the board. Every mark has Undo on the toast, and ⌘Z works.",
+  },
+  {
+    target: '[data-tour="board"]',
+    title: "The tier board",
+    body: "Every draftable player, tiered within position — the gaps are the cliffs. Click a name for stats, news, and a verdict; hover half a second for the quick card; the ✕ marks him gone. Badges: injury, 🔥 trending, 📰 breaking news, ▲▼ ADP movement. Filter with the chips, collapse sections by clicking their headers.",
+  },
+  {
+    target: '[data-tour="planner"]',
+    title: "Look ahead",
+    body: "What each position probably offers at your NEXT pick, with survival odds — this is how you decide who can wait a round.",
+  },
+  {
+    target: '[data-tour="roster"]',
+    title: "Your roster + live win odds",
+    body: "Your build so far — ⚡ marks same-team QB stacks. From your third pick, the win%% here re-simulates 200 seasons after every pick and shows how the number moved.",
+  },
+  {
+    target: '[data-tour="strategy"]',
+    title: "Strategies are dials",
+    body: "Zero RB, Hero RB, Tournament Ceiling for best ball, and more — same engine, different parameters. Pick Custom for sliders (risk, stacking, ADP discipline).",
+  },
+  {
+    target: '[data-tour="recap"]',
+    title: "Standings & recap",
+    body: "Room standings any time: grades, position counts, steal and reach of the draft, 300-season win simulations, and a shareable PNG card for the group chat. Opens automatically when the draft ends.",
+  },
+  {
+    target: '[data-tour="controls"]',
+    title: "Draft controls",
+    body: "Auto-complete the rest (engine picks for you, ADP for the room), end early to see the recap, resume, or reset. Great for testing strategies.",
+  },
+];
+
 export default function Cockpit({ board, config, strategies, onReconfigure }: Props) {
   const draft = useDraft(board, config);
   const [strategyId, setStrategyId] = useState(config.strategy);
@@ -70,6 +119,14 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
   const [winProb, setWinProb] = useState<{ pct: number; delta: number | null } | null>(null);
   const prevWinRef = useRef<number | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // First visit: start the feature tour after the board settles.
+  useEffect(() => {
+    if (tourSeen()) return;
+    const t = setTimeout(() => setTourOpen(true), 900);
+    return () => clearTimeout(t);
+  }, []);
 
   // Live win probability: after each of my picks, quietly re-simulate the
   // room (200 seasons, ~0.5s, async) and show how the number moved.
@@ -418,6 +475,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
         <div className="ml-auto flex items-center gap-2">
           <label className="sr-only" htmlFor="strategy">Strategy</label>
           <select
+            data-tour="strategy"
             id="strategy"
             value={strategyId}
             onChange={(e) => setStrategyId(e.target.value)}
@@ -438,13 +496,22 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             </button>
           )}
           <button
+            onClick={() => setTourOpen(true)}
+            title="Replay the feature tour"
+            aria-label="Replay the feature tour"
+            className="rounded border border-line bg-panel px-2 py-1.5 font-mono text-sm text-ink-dim hover:text-ink"
+          >
+            ?
+          </button>
+          <button
+            data-tour="recap"
             onClick={() => setRecapChoice(true)}
             title="Room standings, grades, and season simulation"
             className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
           >
             Recap
           </button>
-          <details className="relative">
+          <details data-tour="controls" className="relative">
             <summary
               className="cursor-pointer list-none rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
               title="Draft controls"
@@ -613,6 +680,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             </div>
           ) : top ? (
             <div
+              data-tour="answer"
               className={`rounded-lg border-l-4 bg-panel p-5 ${myTurn ? "on-the-clock" : ""}`}
               style={{ borderLeftColor: posColor, ["--pulse-color" as string]: posColor }}
             >
@@ -692,7 +760,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
           {/* Alternates — disagree quickly */}
           {alternates.length > 0 && !draftOver && (
-            <ol className="stagger space-y-2">
+            <ol data-tour="alternates" className="stagger space-y-2">
               {alternates.map((r, i) => (
                 <li key={r.player.id}>
                   <button
@@ -723,6 +791,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           )}
 
           {/* Manual entry — always available, even in Sleeper mode */}
+          <div data-tour="search">
           <SearchBox
             ref={searchRef}
             players={board.players}
@@ -730,10 +799,11 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             onMark={(p) => mark(p)}
             onQueryChange={setBoardQuery}
           />
+          </div>
 
           {/* Look-ahead: what's probably still there at my pick after this one */}
           {planner && (
-            <div className="lift rounded-lg bg-panel p-3">
+            <div data-tour="planner" className="lift rounded-lg bg-panel p-3">
               <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
                 At your pick {planner.n2}
               </p>
@@ -771,7 +841,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           )}
 
           {/* My roster */}
-          <div className="rounded-lg bg-panel p-3">
+          <div data-tour="roster" className="rounded-lg bg-panel p-3">
             <p className="flex items-baseline gap-2 font-mono text-xs uppercase tracking-widest text-ink-dim">
               My roster{bestball ? " · best ball construction" : ""}
               {winProb && !draftOver && (
@@ -863,7 +933,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
         </section>
 
         {/* Tier board */}
-        <section className="min-h-0 min-w-0 flex-1" aria-label="Tier board">
+        <section data-tour="board" className="min-h-0 min-w-0 flex-1" aria-label="Tier board">
           <TierBoard
             players={board.players}
             draftedIds={draft.draftedIds}
@@ -885,6 +955,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           />
         </section>
       </div>
+
+      {tourOpen && (
+        <Tour
+          steps={TOUR_STEPS}
+          onClose={() => setTourOpen(false)}
+        />
+      )}
 
       {/* Toast — undo right where the mistake happened */}
       {toast && (
