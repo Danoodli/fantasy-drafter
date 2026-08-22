@@ -25,6 +25,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:board
+        env:
+          # Optional: live FantasyPros consensus ranks. Set via
+          # `gh secret set FANTASYPROS_API_KEY` — absent, the build falls
+          # back to the DynastyProcess weekly mirror.
+          FANTASYPROS_API_KEY: ${{ secrets.FANTASYPROS_API_KEY }}
       - name: Commit refreshed board + fixtures
         run: |
           git config user.name "board-bot"

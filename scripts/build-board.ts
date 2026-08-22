@@ -28,6 +28,7 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
+import { fetchFantasyProsEcr, loadEnvLocal, type FpRank } from "../lib/etl/fantasypros";
 import type {
   Board,
   BoardPlayer,
@@ -167,7 +168,8 @@ function buildBoard(
   ecrMeta: { fetchedAt: string; fromFixture: boolean },
   playerInfo: Record<string, SlimPlayerInfo>,
   sos: SosTable,
-  sleeperProj: Record<string, SleeperProjection>
+  sleeperProj: Record<string, SleeperProjection>,
+  fp: { ranks: FpRank[]; experts: number } | null
 ): Board {
   const warnings: string[] = [];
 
@@ -198,6 +200,13 @@ function buildBoard(
     if (r.page_type !== "redraft-overall") continue;
     if (r.id && r.id !== "NA") ecrByFp.set(r.id, r);
     ecrByMerge.set(mergeName(r.player), r);
+  }
+  // Live FantasyPros ranks (daily, format-specific) beat the weekly mirror.
+  const fpById = new Map<string, FpRank>();
+  const fpByMerge = new Map<string, FpRank>();
+  for (const r of fp?.ranks ?? []) {
+    fpById.set(r.fpId, r);
+    fpByMerge.set(mergeName(r.name), r);
   }
 
   const players: BoardPlayer[] = [];
@@ -254,6 +263,8 @@ function buildBoard(
     }
 
     const ecrRow = (ids.fantasypros && ecrByFp.get(ids.fantasypros)) || ecrByMerge.get(mergeName(f.name));
+    const fpRank =
+      (ids.fantasypros && fpById.get(ids.fantasypros)) || fpByMerge.get(mergeName(f.name));
     const info = playerInfo[id];
     const sp = pos === "K" || pos === "DST" ? undefined : sleeperProj[id];
 
@@ -270,8 +281,8 @@ function buildBoard(
       adpStdev: f.stdev,
       adpHigh: f.high,
       adpLow: f.low,
-      ecr: ecrRow ? Number(ecrRow.ecr) : null,
-      ecrStdev: ecrRow ? Number(ecrRow.sd) : null,
+      ecr: fpRank ? fpRank.ecr : ecrRow ? Number(ecrRow.ecr) : null,
+      ecrStdev: fpRank ? fpRank.ecrStdev : ecrRow ? Number(ecrRow.sd) : null,
       vorp: 0,
       vols: 0,
       tier: 0,
@@ -323,6 +334,15 @@ function buildBoard(
         { name: "Fantasy Football Calculator ADP", fetchedAt: ffc.fetchedAt, fromFixture: ffc.fromFixture },
         { name: "ESPN projections", fetchedAt: espnFetchedAt, fromFixture: espnFromFixture },
         { name: "DynastyProcess ECR + IDs", fetchedAt: ecrMeta.fetchedAt, fromFixture: ecrMeta.fromFixture },
+        ...(fp
+          ? [
+              {
+                name: `FantasyPros consensus (${fp.experts} experts, live)`,
+                fetchedAt: new Date().toISOString(),
+                fromFixture: false,
+              },
+            ]
+          : []),
       ],
       scoring,
       warnings,
@@ -334,6 +354,7 @@ function buildBoard(
 // ---------------------------------------------------------------------------
 
 async function main() {
+  loadEnvLocal(); // FANTASYPROS_API_KEY, if the user has one
   mkdirSync(OUT_DIR, { recursive: true });
 
   const [idsRes, ecrRes, espnRes, playersRes, sosRes, sleeperProjRes] = await Promise.all([
@@ -381,13 +402,18 @@ async function main() {
   let totalWarnings = 0;
   for (const format of FORMATS) {
     const ffc = await fetchFfcAdp(format, 12, SEASON);
+    const fp = await fetchFantasyProsEcr(SEASON, format);
+    if (fp) console.log(`fantasypros: live ${format} consensus from ${fp.experts} experts`);
+    else if (!process.env.FANTASYPROS_API_KEY)
+      console.log("fantasypros: no FANTASYPROS_API_KEY — using DynastyProcess weekly ECR");
     const board = buildBoard(
       format, SCORING_PRESETS[format], defaultConfigFor(format),
       ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
       { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
       playersRes.data,
       sosRes.data,
-      sleeperProjRes.data
+      sleeperProjRes.data,
+      fp
     );
     const path = join(OUT_DIR, `board-${format}.json`);
     writeFileSync(path, JSON.stringify(board));
@@ -403,7 +429,8 @@ async function main() {
         { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
         playersRes.data,
         sosRes.data,
-        sleeperProjRes.data
+        sleeperProjRes.data,
+        fp
       );
       writeFileSync(join(OUT_DIR, "board-custom.json"), JSON.stringify(custom));
       console.log(`✓ board-custom.json — real league scoring applied`);
