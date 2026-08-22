@@ -1,0 +1,23 @@
+{
+  "db_fpecr_latest.csv": {
+    "fetchedAt": "2026-08-22T07:00:17.349Z"
+  },
+  "db_playerids.csv": {
+    "fetchedAt": "2026-08-22T07:00:17.380Z"
+  },
+  "espn-kona.json": {
+    "fetchedAt": "2026-08-22T07:00:17.864Z"
+  },
+  "ffc-standard.json": {
+    "fetchedAt": "2026-08-22T07:00:17.978Z"
+  },
+  "ffc-half-ppr.json": {
+    "fetchedAt": "2026-08-22T07:00:18.017Z"
+  },
+  "ffc-ppr.json": {
+    "fetchedAt": "2026-08-22T07:00:18.050Z"
+  },
+  "ffc-2qb.json": {
+    "fetchedAt": "2026-08-22T07:00:18.083Z"
+  }
+}

@@ -1,0 +1,29 @@
+name: Nightly board build
+
+on:
+  schedule:
+    - cron: "20 9 * * *" # 09:20 UTC daily — after FFC's daily ADP refresh
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-board:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:board
+      - name: Commit refreshed board + fixtures
+        run: |
+          git config user.name "board-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/data data/raw
+          git diff --cached --quiet || git commit -m "chore: nightly board refresh"
+          git push
