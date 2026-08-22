@@ -15,6 +15,7 @@ import type { SavedDraft } from "../lib/client/history";
 import Setup from "../components/Setup";
 import Cockpit from "../components/Cockpit";
 import Recap from "../components/Recap";
+import Portfolio from "../components/Portfolio";
 import strategiesJson from "../config/strategies.json";
 
 /** Recap of a saved draft: loads the board that config needs, then renders. */
@@ -58,6 +59,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [shared, setShared] = useState<LeagueConfig | null>(null);
   const [viewingDraft, setViewingDraft] = useState<SavedDraft | null>(null);
+  const [viewingPortfolio, setViewingPortfolio] = useState(false);
 
   useEffect(() => {
     // A shared link carries the whole config in the URL — decode it, show
@@ -128,6 +130,10 @@ export default function Page() {
     };
   }, [config]);
 
+  if (viewingPortfolio) {
+    return <Portfolio onClose={() => setViewingPortfolio(false)} />;
+  }
+
   if (viewingDraft) {
     return <HistoryRecap draft={viewingDraft} onClose={() => setViewingDraft(null)} />;
   }
@@ -139,6 +145,7 @@ export default function Page() {
       <Setup
         initialConfig={shared}
         onViewDraft={setViewingDraft}
+        onViewPortfolio={() => setViewingPortfolio(true)}
         onDone={(c) => {
           saveConfig(c);
           setConfig(c);

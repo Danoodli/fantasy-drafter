@@ -23,11 +23,13 @@ export default function Setup({
   onDone,
   initialConfig,
   onViewDraft,
+  onViewPortfolio,
 }: {
   onDone: (config: LeagueConfig) => void;
   /** A config decoded from a shared link — prefills everything. */
   initialConfig?: LeagueConfig | null;
   onViewDraft: (draft: SavedDraft) => void;
+  onViewPortfolio: () => void;
 }) {
   const [mode, setMode] = useState<"sleeper" | "manual">(initialConfig?.platform ?? "sleeper");
   const [draftInput, setDraftInput] = useState("");
@@ -537,7 +539,16 @@ export default function Setup({
 
       {history.length > 0 && (
         <section className="rounded-lg bg-panel p-4">
-          <p className="text-sm font-medium text-ink-dim">Previous drafts</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-ink-dim">Previous drafts</p>
+            <button
+              onClick={onViewPortfolio}
+              className="rounded bg-panel-2 px-3 py-1.5 text-xs font-semibold text-rb hover:brightness-110"
+              title="Player exposure, stacks, and team concentration across every saved draft"
+            >
+              Portfolio →
+            </button>
+          </div>
           <ul className="mt-2 space-y-1.5">
             {history.map((d) => (
               <li key={d.id} className="flex items-center gap-2 text-sm">

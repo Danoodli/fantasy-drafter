@@ -121,6 +121,17 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
         {/* Drawer grab handle (mobile only) */}
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line sm:hidden" aria-hidden />
         <div className="flex items-start justify-between gap-3">
+          {p.ids.espn && (
+            /* eslint-disable-next-line @next/next/no-img-element -- remote CDN, no next/image config needed */
+            <img
+              src={`https://a.espncdn.com/i/headshots/nfl/players/full/${p.ids.espn}.png`}
+              alt=""
+              width={84}
+              height={62}
+              className="rise-in -my-1 hidden h-[62px] w-[84px] shrink-0 rounded-lg bg-field object-cover sm:block"
+              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+            />
+          )}
           <div className="min-w-0">
             <h2
               className="break-words font-display text-3xl font-bold uppercase leading-none sm:text-4xl"
@@ -190,6 +201,9 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
               <StatCell label="ECR" value={p.ecr != null ? p.ecr.toFixed(0) : undefined} />
               {p.sosPlayoff != null && (
                 <StatCell label="Playoff SOS" value={`${Math.round(p.sosPlayoff * 100)}%`} />
+              )}
+              {p.adpTrend != null && (
+                <StatCell label="3-day ADP" value={`${p.adpTrend > 0 ? "▲" : "▼"}${Math.abs(p.adpTrend).toFixed(0)}`} />
               )}
             </div>
             {extras && extras !== "loading" && extras.lastSeason && (

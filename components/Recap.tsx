@@ -13,6 +13,7 @@ import { buildRecap, gradeFor, superlatives, type TeamRecap } from "../lib/engin
 import { simulateRoom, type SeasonSimResult } from "../lib/engine/season";
 import { POS_COLOR } from "../lib/client/pos";
 import { stackPartners } from "../lib/client/stacks";
+import { shareCard } from "../lib/client/shareCard";
 
 interface Props {
   board: Board;
@@ -107,6 +108,31 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
           {picks.length} picks in · you {myRank >= 0 ? `rank ${myRank + 1} of ${config.teams}` : "—"}
         </p>
         <div className="ml-auto flex gap-2">
+          <button
+            onClick={async () => {
+              try {
+              const meIdx = rows.findIndex((t) => t.slot === mySlot);
+              const me = rows[meIdx];
+              if (!me) return;
+              const steal = supers.find((s) => s.slot === mySlot);
+              await shareCard({
+                title: `slot ${mySlot} · ${config.teams}tm ${config.scoring}${config.leagueType === "bestball" ? " best ball" : ""}`,
+                grade: gradeFor(meIdx, rows.length),
+                rank: meIdx + 1,
+                teams: rows.length,
+                winPct: sim?.get(mySlot)?.winRate ?? null,
+                roster: me.roster,
+                note: steal ? `${steal.label}: ${steal.player.name} — ${steal.detail}` : null,
+              });
+              } catch (err) {
+                console.error("share card failed:", err);
+              }
+            }}
+            className="btn-shimmer rounded border border-line bg-panel px-4 py-2 text-sm text-ink hover:bg-panel-2"
+            title="Render your recap as a PNG for the group chat"
+          >
+            Share card
+          </button>
           <button
             onClick={runSim}
             disabled={simming}

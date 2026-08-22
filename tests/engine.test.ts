@@ -736,3 +736,44 @@ describe("news merging (wire + articles + baked)", () => {
     expect(merged.size).toBe(2);
   });
 });
+
+describe("adp trends", () => {
+  it("records snapshots, trims old days, computes rises and falls", async () => {
+    const { recordSnapshot, computeTrends } = await import("../lib/etl/adpTrend");
+    let h = {};
+    for (let d = 1; d <= 14; d++) h = recordSnapshot(h, `2026-08-${String(d).padStart(2, "0")}`, { a: 50 });
+    expect(Object.keys(h).length).toBeLessThanOrEqual(10); // trimmed
+    const history = {
+      "2026-08-18": { riser: 60, faller: 30, flat: 45 },
+      "2026-08-21": { riser: 55, faller: 33, flat: 45 },
+    };
+    const trends = computeTrends(history, "2026-08-21", { riser: 50, faller: 38, flat: 44 });
+    expect(trends.riser).toBe(10); // 60 -> 50, rising
+    expect(trends.faller).toBe(-8); // 30 -> 38, falling
+    expect(trends.flat).toBeUndefined(); // under minDelta
+  });
+});
+
+describe("portfolio exposure", () => {
+  it("counts exposure, stacks, and team concentration across drafts", async () => {
+    const { computePortfolio } = await import("../lib/client/portfolio");
+    const qb = board.players.find((p) => p.pos === "QB")!;
+    const wr = board.players.find((p) => p.pos === "WR" && p.team === qb.team) ??
+      { ...board.players.find((p) => p.pos === "WR")!, team: qb.team };
+    const byId = new Map(board.players.map((p) => [p.id, p]));
+    byId.set(wr.id, wr as BoardPlayer);
+    const mkDraft = (id: string) => ({
+      id, name: id, config, mySlot: 1, tradedPicks: [], completed: true, savedAt: "2026-08-22",
+      picks: [
+        { playerId: qb.id, playerName: qb.name, pos: qb.pos, pickNo: 1, round: 1, draftSlot: 1, isKeeper: false, byMe: true },
+        { playerId: wr.id, playerName: wr.name, pos: wr.pos, pickNo: 25, round: 3, draftSlot: 1, isKeeper: false, byMe: true },
+      ],
+    });
+    const pf = computePortfolio([mkDraft("d1"), mkDraft("d2")], byId);
+    expect(pf.totalDrafts).toBe(2);
+    expect(pf.players[0].count).toBe(2);
+    expect(pf.players[0].pct).toBe(1);
+    expect(pf.stacks[0].count).toBe(2); // QB + same-team WR both drafts
+    expect(pf.teams[0].count).toBe(2); // 2+ players same team, both drafts
+  });
+});

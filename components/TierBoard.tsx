@@ -137,9 +137,17 @@ function Column({
                     </span>
                   </span>
                   {/* Badges live on their own row — a long name never hides them */}
-                  {(p.injury || (!drafted && (trendingIds?.has(p.id) || newsIds?.has(p.id)))) && (
+                  {(p.injury || p.adpTrend != null || (!drafted && (trendingIds?.has(p.id) || newsIds?.has(p.id)))) && (
                     <span className="flex items-center gap-1 pb-0.5 text-[11px] leading-4 no-underline [text-decoration:none]">
                       <InjuryBadge injury={p.injury} />
+                      {p.adpTrend != null && (
+                        <span
+                          className={`font-mono text-[10px] ${p.adpTrend > 0 ? "text-rb" : "text-qb"}`}
+                          title={`ADP ${p.adpTrend > 0 ? "riser" : "faller"}: drafted ${Math.abs(p.adpTrend).toFixed(0)} picks ${p.adpTrend > 0 ? "earlier" : "later"} than a few days ago`}
+                        >
+                          {p.adpTrend > 0 ? "▲" : "▼"}{Math.abs(p.adpTrend).toFixed(0)}
+                        </span>
+                      )}
                       {!drafted && trendingIds?.has(p.id) && (
                         <span className="flame" title="Trending — most-added on Sleeper (24h)">🔥</span>
                       )}

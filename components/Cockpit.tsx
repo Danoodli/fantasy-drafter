@@ -30,6 +30,7 @@ import { fetchWireNews, mergeNews, DEFAULT_WIRE_HANDLES } from "../lib/client/bs
 import { connectWireStream } from "../lib/client/wireStream";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner } from "../lib/draft/snake";
+import { simulateRoom } from "../lib/engine/season";
 
 interface Props {
   board: Board;
@@ -67,6 +68,32 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [boardQuery, setBoardQuery] = useState("");
   const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
   const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
+  const [winProb, setWinProb] = useState<{ pct: number; delta: number | null } | null>(null);
+  const prevWinRef = useRef<number | null>(null);
+
+  // Live win probability: after each of my picks, quietly re-simulate the
+  // room (200 seasons, ~0.5s, async) and show how the number moved.
+  useEffect(() => {
+    if (draft.myRoster.length < 3) return;
+    const rosterCount = draft.myRoster.length;
+    const t = setTimeout(() => {
+      const byId = new Map(board.players.map((p) => [p.id, p]));
+      const rosters: BoardPlayer[][] = Array.from({ length: config.teams }, () => []);
+      for (const pick of draft.picks) {
+        const pl = byId.get(pick.playerId);
+        if (!pl) continue;
+        const owner = pickOwner(pick.pickNo, config.teams, draft.tradedPicks);
+        rosters[owner - 1]?.push(pl);
+      }
+      const { winRate } = simulateRoom(rosters, config, 200, Date.now() & 0x7fffffff);
+      const mine = winRate[(config.myDraftSlot ?? 1) - 1] ?? 0;
+      setWinProb({ pct: mine, delta: prevWinRef.current != null ? mine - prevWinRef.current : null });
+      prevWinRef.current = mine;
+      void rosterCount;
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sim only when MY roster grows
+  }, [draft.myRoster.length]);
 
   // Live signals, refreshed every 10 minutes: Sleeper's most-added players,
   // ESPN's breaking headlines, and the Bluesky insider wire (Rapoport, Yates,
@@ -603,6 +630,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   </button>
                 </div>
               )}
+              {top.player.ids.espn && (
+                /* eslint-disable-next-line @next/next/no-img-element -- remote CDN */
+                <img
+                  src={`https://a.espncdn.com/i/headshots/nfl/players/full/${top.player.ids.espn}.png`}
+                  alt=""
+                  width={110}
+                  height={80}
+                  className="rise-in float-right -mr-1 -mt-1 h-20 w-auto rounded-lg bg-field/60 object-cover"
+                  key={`img-${top.player.id}`}
+                  onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                />
+              )}
               <p
                 className={`font-mono text-xs uppercase tracking-widest ${myTurn ? "font-semibold" : "text-ink-dim"}`}
                 style={myTurn ? { color: posColor } : undefined}
@@ -733,8 +772,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
           {/* My roster */}
           <div className="rounded-lg bg-panel p-3">
-            <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
+            <p className="flex items-baseline gap-2 font-mono text-xs uppercase tracking-widest text-ink-dim">
               My roster{bestball ? " · best ball construction" : ""}
+              {winProb && !draftOver && (
+                <span className="ml-auto normal-case tracking-normal" title="Share of 200 simulated seasons your current roster outscores the room">
+                  <span className="text-rb">win {(winProb.pct * 100).toFixed(1)}%</span>
+                  {winProb.delta != null && Math.abs(winProb.delta) >= 0.0005 && (
+                    <span className={winProb.delta > 0 ? "text-rb" : "text-qb"}>
+                      {" "}{winProb.delta > 0 ? "▲" : "▼"}{Math.abs(winProb.delta * 100).toFixed(1)}
+                    </span>
+                  )}
+                </span>
+              )}
             </p>
             {bestball ? (
               <>

@@ -28,6 +28,7 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
+import { updateAdpTrends } from "../lib/etl/adpTrend";
 import {
   fetchFantasyProsData,
   fetchFantasyProsNews,
@@ -332,6 +333,13 @@ function buildBoard(
   }
 
   players.sort((a, b) => a.adp - b.adp);
+
+  // ADP movement vs the rolling snapshot history (needs a day or two of
+  // builds before arrows appear — the workflow provides that automatically).
+  const adpsById: Record<string, number> = {};
+  for (const p of players) adpsById[p.id] = p.adp;
+  const trends = updateAdpTrends(format, adpsById);
+  for (const p of players) p.adpTrend = trends[p.id] ?? null;
 
   return {
     meta: {

@@ -157,6 +157,15 @@ export function playerBlurb(p: BoardPlayer, ctx: BlurbContext): PlayerBlurb {
   const s = Math.round(survivalProb(p, ctx.nextPick, ctx.drift) * 100);
   lines.push(`${s}% he survives to your pick ${ctx.nextPick}.`);
 
+  // Market momentum
+  if (p.adpTrend != null && Math.abs(p.adpTrend) >= 5) {
+    lines.push(
+      p.adpTrend > 0
+        ? `Rising — drafted ${Math.abs(p.adpTrend).toFixed(0)} picks earlier than a few days ago.`
+        : `Falling — drafted ${Math.abs(p.adpTrend).toFixed(0)} picks later than a few days ago.`
+    );
+  }
+
   // Schedule
   if (p.sosPlayoff != null) {
     if (p.sosPlayoff >= 0.72) lines.push("Soft playoff schedule (weeks 15-17).");

@@ -70,6 +70,8 @@ export interface BoardPlayer {
   statsFp?: StatLine;
   /** Build-time news blurb (FantasyPros, keyed builds) — merged with live feeds client-side. */
   news?: { headline: string; published: string } | null;
+  /** ADP movement vs ~3 days ago, in picks. POSITIVE = rising (drafted earlier). */
+  adpTrend?: number | null;
   /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */
   adpSources?: { ffc: number; espn: number | null; sleeper: number | null };
   adp: number;
