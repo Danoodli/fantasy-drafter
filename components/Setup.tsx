@@ -143,7 +143,7 @@ export default function Setup({
   const ready = config.myDraftSlot != null && (mode === "manual" || config.draftId);
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-6 px-6 py-12">
+    <main className="stagger mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-6 px-6 py-12">
       <header>
         <h1 className="font-display text-5xl font-bold uppercase tracking-tight">
           Draft Cockpit
@@ -523,7 +523,7 @@ export default function Setup({
       <button
         onClick={() => onDone(config)}
         disabled={!ready}
-        className="rounded-lg bg-rb py-4 font-display text-2xl font-bold uppercase tracking-wide text-field disabled:opacity-30"
+        className="btn-shimmer rounded-lg bg-rb py-4 font-display text-2xl font-bold uppercase tracking-wide text-field disabled:opacity-30"
       >
         Open the cockpit
       </button>

@@ -34,7 +34,6 @@ interface Props {
   newsIds?: Map<string, { headline: string }>;
 }
 
-const DEPTH: Record<Position, number> = { QB: 18, RB: 36, WR: 36, TE: 16, K: 8, DST: 8 };
 const HOVER_DELAY_MS = 500;
 
 const VERDICT_COLOR: Record<string, string> = {
@@ -63,17 +62,21 @@ function Column({
   filterIds,
   trendingIds,
   newsIds,
+  collapsed,
+  onToggleCollapse,
   onHoverStart,
   onHoverEnd,
 }: Omit<Props, "positions" | "blurbFor"> & {
   pos: Position;
+  collapsed: boolean;
+  onToggleCollapse: (pos: Position) => void;
   onHoverStart: (p: BoardPlayer, el: HTMLElement) => void;
   onHoverEnd: () => void;
 }) {
+  // Every board player at the position — the column scrolls, nothing hides.
   const group = players
     .filter((p) => p.pos === pos && (!filterIds || filterIds.has(p.id)))
-    .sort((a, b) => b.projPoints - a.projPoints)
-    .slice(0, DEPTH[pos]);
+    .sort((a, b) => b.projPoints - a.projPoints);
   const color = POS_COLOR[pos];
   const rows = group.map((p, i) => ({
     p,
@@ -81,13 +84,21 @@ function Column({
   }));
 
   return (
-    <div className="w-44 shrink-0">
-      <div
-        className="sticky top-0 z-10 border-b-2 bg-field px-2 pb-1 pt-2 font-display text-lg font-bold uppercase"
+    // Mobile: full-width stacked. Desktop: fixed peripheral columns.
+    <div className="w-full sm:w-44 sm:shrink-0">
+      <button
+        onClick={() => onToggleCollapse(pos)}
+        aria-expanded={!collapsed}
+        title={collapsed ? `Show ${pos}s` : `Collapse ${pos}s`}
+        className="sticky top-0 z-10 flex w-full items-baseline gap-2 border-b-2 bg-field px-2 pb-1 pt-2 text-left font-display text-lg font-bold uppercase"
         style={{ color, borderColor: color }}
       >
         {pos}
-      </div>
+        <span className="font-mono text-[10px] font-normal text-ink-faint">
+          {collapsed ? `${group.length} hidden ▸` : "▾"}
+        </span>
+      </button>
+      {!collapsed && (
       <ul>
         {rows.map(({ p, tierBreak }) => {
           const drafted = draftedIds.has(p.id);
@@ -113,7 +124,7 @@ function Column({
                   onMouseEnter={(e) => !drafted && onHoverStart(p, e.currentTarget)}
                   onMouseLeave={onHoverEnd}
                   title={`${p.name} — stats, news, verdict`}
-                  className={`min-w-0 flex-1 px-2 py-0.5 text-left text-[13px] leading-5 ${
+                  className={`row-nudge min-w-0 flex-1 px-2 py-0.5 text-left text-[13px] leading-5 ${
                     drafted ? "text-ink-faint line-through" : "text-ink hover:bg-panel"
                   } ${mine ? "border-l-2 bg-panel" : "border-l-2 border-transparent"}`}
                   style={mine ? { borderLeftColor: color } : undefined}
@@ -130,10 +141,10 @@ function Column({
                     <span className="flex items-center gap-1 pb-0.5 text-[11px] leading-4 no-underline [text-decoration:none]">
                       <InjuryBadge injury={p.injury} />
                       {!drafted && trendingIds?.has(p.id) && (
-                        <span title="Trending — most-added on Sleeper (24h)">🔥</span>
+                        <span className="flame" title="Trending — most-added on Sleeper (24h)">🔥</span>
                       )}
                       {!drafted && newsIds?.has(p.id) && (
-                        <span title={`News: ${newsIds.get(p.id)!.headline}`}>📰</span>
+                        <span className="news-flap badge-pop" title={`News: ${newsIds.get(p.id)!.headline}`}>📰</span>
                       )}
                     </span>
                   )}
@@ -153,12 +164,35 @@ function Column({
           );
         })}
       </ul>
+      )}
     </div>
   );
 }
 
 function TierBoard(props: Props) {
   const positions = props.positions ?? POS_ORDER;
+  // Position filter chips: null = all. Click selects; click again removes;
+  // empty selection snaps back to all.
+  const [selected, setSelected] = useState<Set<Position> | null>(null);
+  const shown = positions.filter((pos) => !selected || selected.has(pos));
+  const toggle = (pos: Position) => {
+    setSelected((prev) => {
+      const next = new Set(prev ?? []);
+      if (prev?.has(pos)) next.delete(pos);
+      else next.add(pos);
+      return next.size === 0 || next.size === positions.length ? null : next;
+    });
+  };
+  // Collapsed sections: tap a position header to fold it away (gold on
+  // mobile, where columns stack).
+  const [collapsedSet, setCollapsedSet] = useState<Set<Position>>(new Set());
+  const toggleCollapse = (pos: Position) =>
+    setCollapsedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(pos)) next.delete(pos);
+      else next.add(pos);
+      return next;
+    });
   const [hover, setHover] = useState<HoverState | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -189,27 +223,65 @@ function TierBoard(props: Props) {
   }, [props.highlightId]);
 
   return (
-    <div
-      ref={containerRef}
-      className="tier-scroll relative flex h-full gap-2 overflow-x-auto overflow-y-auto pb-4"
-    >
-      {positions.map((pos) => (
-        <Column
-          key={pos}
-          pos={pos}
-          players={props.players}
-          draftedIds={props.draftedIds}
-          myIds={props.myIds}
-          onMark={props.onMark}
-          onOpen={props.onOpen}
-          highlightId={props.highlightId}
-          filterIds={props.filterIds}
-          trendingIds={props.trendingIds}
-          newsIds={props.newsIds}
-          onHoverStart={onHoverStart}
-          onHoverEnd={onHoverEnd}
-        />
-      ))}
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Position filter chips — like every good draft room */}
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter positions">
+        <button
+          onClick={() => setSelected(null)}
+          aria-pressed={selected === null}
+          className={`rounded-full px-2.5 py-0.5 font-mono text-xs font-semibold ${
+            selected === null ? "bg-ink text-field" : "bg-panel text-ink-dim hover:text-ink"
+          }`}
+        >
+          All
+        </button>
+        {positions.map((pos) => {
+          const active = selected?.has(pos) ?? false;
+          return (
+            <button
+              key={pos}
+              onClick={() => toggle(pos)}
+              aria-pressed={active}
+              className={`rounded-full px-2.5 py-0.5 font-mono text-xs font-semibold ${
+                active ? "text-field" : "bg-panel hover:brightness-125"
+              }`}
+              style={active ? { background: POS_COLOR[pos] } : { color: POS_COLOR[pos] }}
+            >
+              {pos}
+            </button>
+          );
+        })}
+        {selected !== null && (
+          <button onClick={() => setSelected(null)} className="text-xs text-ink-faint hover:text-ink">
+            reset
+          </button>
+        )}
+      </div>
+
+      <div
+        ref={containerRef}
+        className="tier-scroll relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4 sm:flex-row sm:gap-2 sm:overflow-x-auto"
+      >
+        {shown.map((pos) => (
+          <Column
+            key={pos}
+            pos={pos}
+            players={props.players}
+            draftedIds={props.draftedIds}
+            myIds={props.myIds}
+            onMark={props.onMark}
+            onOpen={props.onOpen}
+            highlightId={props.highlightId}
+            filterIds={props.filterIds}
+            trendingIds={props.trendingIds}
+            newsIds={props.newsIds}
+            collapsed={collapsedSet.has(pos)}
+            onToggleCollapse={toggleCollapse}
+            onHoverStart={onHoverStart}
+            onHoverEnd={onHoverEnd}
+          />
+        ))}
+      </div>
       {hover && (
         <div
           role="tooltip"
@@ -249,3 +321,4 @@ function TierBoard(props: Props) {
 }
 
 export default memo(TierBoard);
+// (tooltip renders inside the scroll container; chips row sits above it)

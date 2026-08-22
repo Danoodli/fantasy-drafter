@@ -43,9 +43,13 @@ const VERDICT_COLOR: Record<string, string> = {
 function StatCell({ label, value }: { label: string; value: number | string | undefined }) {
   if (value == null) return null;
   return (
-    <div className="rounded bg-field px-2 py-1.5 text-center">
-      <p className="font-mono text-base text-ink">{typeof value === "number" ? Math.round(value) : value}</p>
-      <p className="font-mono text-[9px] uppercase tracking-wide text-ink-faint">{label}</p>
+    <div className="min-w-0 rounded bg-field px-1.5 py-1.5 text-center">
+      <p className="truncate font-mono text-base text-ink">
+        {typeof value === "number" ? Math.round(value) : value}
+      </p>
+      <p className="break-words font-mono text-[9px] uppercase leading-tight tracking-wide text-ink-faint">
+        {label}
+      </p>
     </div>
   );
 }
@@ -93,15 +97,18 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
       {/* Mobile: full-width bottom drawer, native-sheet feel.
           Desktop: centered card sized to the screen, not a fixed px width. */}
       <div
-        className="drawer-panel max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border border-line border-l-4 bg-panel p-5 shadow-2xl sm:max-h-[88dvh] sm:w-[min(94vw,72rem)] sm:rounded-xl"
+        className="drawer-panel max-h-[92dvh] w-full max-w-full overflow-y-auto overflow-x-hidden rounded-t-2xl border border-line border-l-4 bg-panel p-4 shadow-2xl sm:max-h-[88dvh] sm:w-[min(94vw,72rem)] sm:rounded-xl sm:p-5"
         style={{ borderLeftColor: color }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drawer grab handle (mobile only) */}
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line sm:hidden" aria-hidden />
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="font-display text-4xl font-bold uppercase leading-none" style={{ color }}>
+          <div className="min-w-0">
+            <h2
+              className="break-words font-display text-3xl font-bold uppercase leading-none sm:text-4xl"
+              style={{ color }}
+            >
               {p.name}
             </h2>
             <p className="mt-1.5 flex items-center gap-1.5 font-mono text-sm text-ink-dim">
@@ -114,7 +121,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           </button>
         </div>
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <span
             className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field"
             style={{ background: VERDICT_COLOR[blurb.verdict] }}
@@ -139,9 +146,10 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           )}
         </div>
 
-        {/* Two columns on desktop: engine read on the left, live news on the right. */}
-        <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-          <div>
+        {/* Two columns on desktop: engine read on the left, live news on the right.
+            min-w-0 everywhere — nothing may ever exceed the viewport. */}
+        <div className="mt-3 grid min-w-0 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <div className="min-w-0">
             <ul className="space-y-1 text-sm text-ink">
               {blurb.lines.map((line, i) => (
                 <li key={i}>{line}</li>
@@ -151,7 +159,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
             <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-ink-dim">
               2026 projection · {Math.round(p.projPoints)} pts · VORP {Math.round(p.vorp)}
             </p>
-            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+            <div className="stagger mt-1.5 grid grid-cols-4 gap-1.5">
               <StatCell label="Pass yds" value={s?.passYds} />
               <StatCell label="Pass TD" value={s?.passTD} />
               <StatCell label="INT" value={s?.passInt} />
@@ -172,7 +180,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
                 <p className="font-mono text-[10px] uppercase tracking-widest text-ink-dim">
                   {extras.lastSeason.title}
                 </p>
-                <div className="tier-scroll mt-1 flex gap-1.5 overflow-x-auto">
+                <div className="stagger tier-scroll mt-1 flex gap-1.5 overflow-x-auto">
                   {extras.lastSeason.labels.map((label, i) => (
                     <StatCell key={i} label={label} value={extras.lastSeason!.values[i]} />
                   ))}
@@ -181,14 +189,14 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
             )}
           </div>
 
-          <div>
+          <div className="min-w-0">
             {/* The breaking item behind the 📰 badge — wire post or headline */}
             {wireItem && (
-              <div className="mb-3 rounded border-l-2 border-warn bg-warn/10 p-3">
+              <div className="mb-3 min-w-0 rounded border-l-2 border-warn bg-warn/10 p-3">
                 <p className="font-mono text-[10px] uppercase tracking-widest text-warn">
                   📰 Breaking · {agoLabel}
                 </p>
-                <p className="mt-1 text-sm leading-snug text-ink">{wireItem.headline}</p>
+                <p className="mt-1 break-words text-sm leading-snug text-ink">{wireItem.headline}</p>
                 {wireItem.href && (
                   <a
                     href={wireItem.href}

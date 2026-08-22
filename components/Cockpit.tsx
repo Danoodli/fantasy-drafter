@@ -506,7 +506,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               style={{ color: draft.live ? "var(--color-live)" : "var(--color-warn)" }}
             >
               <span
-                className="inline-block h-2 w-2 rounded-full"
+                className="ping-dot inline-block h-2 w-2 rounded-full"
                 style={{ background: "currentColor" }}
                 aria-hidden
               />
@@ -590,7 +590,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               style={{ borderLeftColor: posColor, ["--pulse-color" as string]: posColor }}
             >
               {snipe && (
-                <div className="mb-3 flex items-start justify-between gap-2 rounded bg-warn/15 px-3 py-2 text-sm text-warn">
+                <div className="shake-in mb-3 flex items-start justify-between gap-2 rounded bg-warn/15 px-3 py-2 text-sm text-warn">
                   <span>
                     Sniped — <strong>{snipe}</strong> is gone. New pick below.
                   </span>
@@ -615,7 +615,8 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                 <button
                   onClick={() => setModalPlayer(top.player)}
                   title={`${top.player.name} — stats, news, verdict`}
-                  className="text-left uppercase decoration-2 underline-offset-8 hover:underline"
+                  className="name-in text-left uppercase decoration-2 underline-offset-8 hover:underline"
+                  key={top.player.id}
                   style={{ color: posColor }}
                 >
                   {top.player.name}
@@ -635,7 +636,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               <div className="relative">
                 <button
                   onClick={() => mark(top.player, myTurn)}
-                  className="mt-4 w-full rounded-lg py-4 font-display text-3xl font-bold uppercase tracking-wide text-field transition-transform active:scale-[0.98]"
+                  className="btn-shimmer mt-4 w-full rounded-lg py-4 font-display text-3xl font-bold uppercase tracking-wide text-field"
                   style={{ background: posColor }}
                 >
                   {myTurn ? `Draft ${top.player.name.split(" ").slice(-1)[0]}` : "Mark him gone"}
@@ -652,13 +653,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
           {/* Alternates — disagree quickly */}
           {alternates.length > 0 && !draftOver && (
-            <ol className="space-y-2">
+            <ol className="stagger space-y-2">
               {alternates.map((r, i) => (
                 <li key={r.player.id}>
                   <button
                     onClick={() => setModalPlayer(r.player)}
                     title={`${r.player.name} — stats, news, verdict`}
-                    className="flex w-full items-baseline gap-3 rounded-lg border-l-4 bg-panel px-4 py-2.5 text-left hover:bg-panel-2"
+                    className="lift flex w-full items-baseline gap-3 rounded-lg border-l-4 bg-panel px-4 py-2.5 text-left hover:bg-panel-2"
                     style={{ borderLeftColor: POS_COLOR[r.player.pos] }}
                   >
                     <span className="font-mono text-xs text-ink-faint">{i + 2}</span>
@@ -693,7 +694,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
 
           {/* Look-ahead: what's probably still there at my pick after this one */}
           {planner && (
-            <div className="rounded-lg bg-panel p-3">
+            <div className="lift rounded-lg bg-panel p-3">
               <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">
                 At your pick {planner.n2}
               </p>
@@ -840,7 +841,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       {toast && (
         <div
           role="status"
-          className="fixed bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-panel-2 px-4 py-2 text-sm shadow-xl"
+          className="toast-in fixed bottom-5 left-1/2 flex items-center gap-3 rounded-lg bg-panel-2 px-4 py-2 text-sm shadow-xl"
         >
           {toast.text}
           {toast.undoable && draft.canUndo && (

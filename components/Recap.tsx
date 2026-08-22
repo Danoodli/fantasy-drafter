@@ -170,7 +170,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
         </p>
       )}
 
-      <ol className="mt-4 space-y-2">
+      <ol className="stagger mt-4 space-y-2">
         {rows.map((t, i) => {
           const mine = t.slot === mySlot;
           const s = sim?.get(t.slot);
@@ -181,13 +181,13 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
               <button
                 onClick={() => setExpanded(open ? null : t.slot)}
                 aria-expanded={open}
-                className={`flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg px-4 py-3 text-left ${
+                className={`lift flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg px-4 py-3 text-left ${
                   mine ? "bg-panel-2 ring-1 ring-wr/60" : "bg-panel hover:bg-panel-2"
                 }`}
               >
                 <span className="w-6 font-mono text-lg text-ink-faint">{i + 1}</span>
                 <span
-                  className={`rounded px-1.5 font-mono text-sm font-bold ${
+                  className={`badge-pop rounded px-1.5 font-mono text-sm font-bold ${
                     grade.startsWith("A") ? "text-rb" : grade.startsWith("D") ? "text-qb" : "text-ink"
                   }`}
                 >
