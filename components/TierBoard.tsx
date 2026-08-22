@@ -16,7 +16,10 @@ interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
   myIds: Set<string>;
+  /** Quick-mark via the row's hover ✕ — the fast path during a pick run. */
   onMark: (player: BoardPlayer) => void;
+  /** Open the full player card (stats, news, verdict) — the row click. */
+  onOpen: (player: BoardPlayer) => void;
   /** Columns to show — best-ball formats drop K/DST. Defaults to all. */
   positions?: Position[];
   /** Verdict card content for a player, computed by the cockpit. */
@@ -49,6 +52,7 @@ function Column({
   draftedIds,
   myIds,
   onMark,
+  onOpen,
   highlightId,
   onHoverStart,
   onHoverEnd,
@@ -90,31 +94,40 @@ function Column({
                   <span className="h-px flex-1 bg-line" aria-hidden />
                 </div>
               )}
-              <button
-                onClick={() => !drafted && onMark(p)}
-                disabled={drafted}
-                data-rec={isRec || undefined}
-                onMouseEnter={(e) => !drafted && onHoverStart(p, e.currentTarget)}
-                onMouseLeave={onHoverEnd}
-                title={drafted ? undefined : `Mark ${p.name} drafted`}
-                className={`flex w-full items-baseline gap-1.5 px-2 py-0.5 text-left text-[13px] leading-5 ${
-                  drafted ? "text-ink-faint line-through" : "text-ink hover:bg-panel"
-                } ${mine ? "border-l-2 bg-panel" : "border-l-2 border-transparent"} ${
-                  isRec ? "rec-glow" : ""
-                }`}
-                style={{
-                  ...(mine ? { borderLeftColor: color } : {}),
-                  ...(isRec ? { ["--pulse-color" as string]: color } : {}),
-                }}
+              <div
+                className={`group flex items-stretch ${isRec ? "rec-glow" : ""}`}
+                style={isRec ? { ["--pulse-color" as string]: color } : undefined}
               >
-                <span className="min-w-0 flex-1 truncate">
-                  {p.name} <InjuryBadge injury={p.injury} />
-                </span>
-                <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
-                <span className="font-mono text-[11px] text-ink-dim">
-                  {Math.round(p.projPoints)}
-                </span>
-              </button>
+                <button
+                  onClick={() => onOpen(p)}
+                  data-rec={isRec || undefined}
+                  onMouseEnter={(e) => !drafted && onHoverStart(p, e.currentTarget)}
+                  onMouseLeave={onHoverEnd}
+                  title={`${p.name} — stats, news, verdict`}
+                  className={`flex min-w-0 flex-1 items-baseline gap-1.5 px-2 py-0.5 text-left text-[13px] leading-5 ${
+                    drafted ? "text-ink-faint line-through" : "text-ink hover:bg-panel"
+                  } ${mine ? "border-l-2 bg-panel" : "border-l-2 border-transparent"}`}
+                  style={mine ? { borderLeftColor: color } : undefined}
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {p.name} <InjuryBadge injury={p.injury} />
+                  </span>
+                  <span className="font-mono text-[10px] text-ink-faint">{p.team}</span>
+                  <span className="font-mono text-[11px] text-ink-dim">
+                    {Math.round(p.projPoints)}
+                  </span>
+                </button>
+                {!drafted && (
+                  <button
+                    onClick={() => onMark(p)}
+                    title={`Mark ${p.name} drafted`}
+                    aria-label={`Mark ${p.name} drafted`}
+                    className="px-1 font-mono text-[11px] text-ink-faint opacity-0 hover:text-warn focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </li>
           );
         })}
@@ -167,6 +180,7 @@ function TierBoard(props: Props) {
           draftedIds={props.draftedIds}
           myIds={props.myIds}
           onMark={props.onMark}
+          onOpen={props.onOpen}
           highlightId={props.highlightId}
           onHoverStart={onHoverStart}
           onHoverEnd={onHoverEnd}

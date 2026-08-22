@@ -20,7 +20,9 @@ import SearchBox, { type SearchBoxHandle } from "./SearchBox";
 import InjuryBadge from "./InjuryBadge";
 import Confetti, { type Burst } from "./Confetti";
 import Recap from "./Recap";
-import { playerBlurb } from "../lib/engine/reasons";
+import PlayerModal from "./PlayerModal";
+import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
+import { pickOwner } from "../lib/draft/snake";
 
 interface Props {
   board: Board;
@@ -52,7 +54,9 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const [strategyId, setStrategyId] = useState(config.strategy);
   const [custom, setCustom] = useState<CustomStrategyParams | null>(null);
   const [showDials, setShowDials] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; undoable: boolean } | null>(null);
+  const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
+  const [endedEarly, setEndedEarly] = useState(false);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -66,7 +70,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   }, [strategyId, strategies, custom, bestball]);
 
   const totalPicks = config.teams * config.rounds;
-  const draftOver = draft.currentPick > totalPicks;
+  const draftOver = draft.currentPick > totalPicks || endedEarly;
   // Recap opens itself when the draft ends; header button opens it any time.
   const [recapChoice, setRecapChoice] = useState<boolean | null>(null);
   const recapOpen = recapChoice ?? draftOver;
@@ -127,14 +131,64 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       setSnipe(null);
       setBurst({ key: Date.now(), color: POS_COLOR[player.pos] });
     }
-    showToast(mine ? `Drafted ${player.name}.` : `${player.name} is off the board.`);
+    showToast(mine ? `Drafted ${player.name}.` : `${player.name} is off the board.`, true);
   }
 
-  function showToast(text: string) {
-    setToast(text);
+  function showToast(text: string, undoable = false) {
+    setToast({ text, undoable });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
+    toastTimer.current = setTimeout(() => setToast(null), undoable ? 4500 : 2200);
   }
+
+  /** Fill the rest of the draft: engine picks for me, ADP for the room. */
+  function autoComplete() {
+    const drafted = new Set(draft.draftedIds);
+    const roster = [...draft.myRoster];
+    const additions: BoardPlayer[] = [];
+    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    for (let pickNo = draft.currentPick; pickNo <= totalPicks; pickNo++) {
+      const owner = pickOwner(pickNo, config.teams, draft.tradedPicks);
+      let choice: BoardPlayer | undefined;
+      if (owner === (config.myDraftSlot ?? 1)) {
+        const out = recommend({
+          board: board.players,
+          draftedIds: drafted,
+          myRoster: roster,
+          currentPick: pickNo,
+          myPicks: draft.myPicks.filter((n) => n >= pickNo),
+          config,
+          strategy,
+          drift: draft.drift,
+          opponentCounts: draft.opponentCounts,
+        });
+        choice = out.recommendations[0]?.player;
+        if (choice) roster.push(choice);
+      } else {
+        choice = adpOrder.find((p) => !drafted.has(p.id));
+      }
+      if (choice) {
+        drafted.add(choice.id);
+        additions.push(choice);
+      }
+    }
+    draft.markMany(additions);
+    showToast(`Auto-completed ${additions.length} picks.`);
+  }
+
+  const blurbCtx: BlurbContext & { for: (p: BoardPlayer) => ReturnType<typeof playerBlurb> } = {
+    currentPick: draft.currentPick,
+    nextPick: draft.myPicks.find((n) => n > draft.currentPick) ?? draft.currentPick + config.teams,
+    drift: draft.drift,
+    tierMatesLeft: 0,
+    for(p: BoardPlayer) {
+      return playerBlurb(p, {
+        ...this,
+        tierMatesLeft: board.players.filter(
+          (a) => a.pos === p.pos && a.tier === p.tier && a.id !== p.id && !draft.draftedIds.has(a.id)
+        ).length,
+      });
+    },
+  };
 
   // Keyboard: / focuses search, Enter drafts the pick, ⌘Z undoes.
   useEffect(() => {
@@ -263,6 +317,62 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           >
             Recap
           </button>
+          <details className="relative">
+            <summary
+              className="cursor-pointer list-none rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
+              title="Draft controls"
+            >
+              ⋯
+            </summary>
+            <div className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl">
+              <button
+                onClick={(e) => {
+                  (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                  if (window.confirm("Auto-complete the rest of the draft? (Reset clears it if you change your mind.)"))
+                    autoComplete();
+                }}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
+              >
+                Auto-complete draft
+                <span className="block text-xs text-ink-faint">Engine picks for you, ADP for the room</span>
+              </button>
+              <button
+                onClick={(e) => {
+                  (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                  setEndedEarly(true);
+                }}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
+              >
+                End draft now
+                <span className="block text-xs text-ink-faint">Jump to the recap as-is</span>
+              </button>
+              {endedEarly && (
+                <button
+                  onClick={(e) => {
+                    (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                    setEndedEarly(false);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
+                >
+                  Resume draft
+                </button>
+              )}
+              <button
+                onClick={(e) => {
+                  (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                  if (window.confirm("Clear every manually marked pick and restart?")) {
+                    draft.reset();
+                    setEndedEarly(false);
+                    showToast("Draft reset.");
+                  }
+                }}
+                className="block w-full px-3 py-2 text-left text-sm text-warn hover:bg-panel"
+              >
+                Reset draft
+                <span className="block text-xs text-ink-faint">Clears all manual picks</span>
+              </button>
+            </div>
+          </details>
           <button
             onClick={() => { draft.undo(); showToast("Undone."); }}
             disabled={!draft.canUndo}
@@ -272,7 +382,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             Undo
           </button>
           <button
-            onClick={onReconfigure}
+            onClick={() => {
+              // Leaving setup mid-draft orphans the marked picks — make sure.
+              if (
+                draft.picks.length > 0 &&
+                !draftOver &&
+                !window.confirm(
+                  `Leave this draft? ${draft.picks.length} picks are on the board — a new league setup starts fresh.`
+                )
+              )
+                return;
+              onReconfigure();
+            }}
             title="Change league or tournament format"
             className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
           >
@@ -389,11 +510,15 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   ? `You're on the clock — pick ${planningPick}`
                   : `Plan for your pick ${planningPick} · ${picksUntilMe === 1 ? "you're next" : `${picksUntilMe} picks away`}`}
               </p>
-              <h2
-                className="mt-1 font-display text-6xl font-bold uppercase leading-[0.95] tracking-tight sm:text-7xl"
-                style={{ color: posColor }}
-              >
-                {top.player.name}
+              <h2 className="mt-1 font-display text-6xl font-bold uppercase leading-[0.95] tracking-tight sm:text-7xl">
+                <button
+                  onClick={() => setModalPlayer(top.player)}
+                  title={`${top.player.name} — stats, news, verdict`}
+                  className="text-left uppercase decoration-2 underline-offset-8 hover:underline"
+                  style={{ color: posColor }}
+                >
+                  {top.player.name}
+                </button>
               </h2>
               <p className="mt-2 flex items-center gap-1.5 font-mono text-sm text-ink-dim">
                 <span style={{ color: posColor }}>{top.player.pos}</span> · {top.player.team} · bye{" "}
@@ -425,7 +550,8 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               {alternates.map((r, i) => (
                 <li key={r.player.id}>
                   <button
-                    onClick={() => mark(r.player, myTurn)}
+                    onClick={() => setModalPlayer(r.player)}
+                    title={`${r.player.name} — stats, news, verdict`}
                     className="flex w-full items-baseline gap-3 rounded-lg border-l-4 bg-panel px-4 py-2.5 text-left hover:bg-panel-2"
                     style={{ borderLeftColor: POS_COLOR[r.player.pos] }}
                   >
@@ -466,16 +592,22 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                       <span className="w-7 shrink-0 font-mono text-[11px]" style={{ color: POS_COLOR[pos] }}>
                         {pos}
                       </span>
-                      <span className="truncate">
+                      <button
+                        onClick={() => setModalPlayer(best.p)}
+                        className="truncate text-left hover:underline"
+                      >
                         {best.p.name}{" "}
                         <span className="font-mono text-[11px] text-ink-faint">
                           {Math.round(best.s * 100)}%
                         </span>
-                      </span>
+                      </button>
                       {likely && likely.p.id !== best.p.id && (
-                        <span className="ml-auto truncate text-right text-ink-dim">
+                        <button
+                          onClick={() => setModalPlayer(likely.p)}
+                          className="ml-auto truncate text-right text-ink-dim hover:underline"
+                        >
                           likely: {likely.p.name}
-                        </span>
+                        </button>
                       )}
                     </li>
                   ) : null
@@ -511,8 +643,14 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                 </ul>
                 <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
                   {draft.myRoster.map((player, i) => (
-                    <li key={i} className="truncate text-sm" style={{ color: POS_COLOR[player.pos] }}>
-                      {player.name}
+                    <li key={i} className="truncate text-sm">
+                      <button
+                        onClick={() => setModalPlayer(player)}
+                        className="truncate hover:underline"
+                        style={{ color: POS_COLOR[player.pos] }}
+                      >
+                        {player.name}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -523,9 +661,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
                   <li key={i} className="flex items-baseline gap-2 text-sm">
                     <span className="w-9 shrink-0 font-mono text-[11px] text-ink-faint">{slot}</span>
                     {player ? (
-                      <span className="truncate" style={{ color: POS_COLOR[player.pos] }}>
+                      <button
+                        onClick={() => setModalPlayer(player)}
+                        className="truncate text-left hover:underline"
+                        style={{ color: POS_COLOR[player.pos] }}
+                      >
                         {player.name}
-                      </span>
+                      </button>
                     ) : (
                       <span className="text-ink-faint">—</span>
                     )}
@@ -544,17 +686,8 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             myIds={myIds}
             onMark={(p) => mark(p)}
             highlightId={myTurn && top ? top.player.id : null}
-            blurbFor={(p) =>
-              playerBlurb(p, {
-                currentPick: draft.currentPick,
-                nextPick: draft.myPicks.find((n) => n > draft.currentPick) ?? draft.currentPick + config.teams,
-                drift: draft.drift,
-                tierMatesLeft: board.players.filter(
-                  (a) =>
-                    a.pos === p.pos && a.tier === p.tier && a.id !== p.id && !draft.draftedIds.has(a.id)
-                ).length,
-              })
-            }
+            onOpen={setModalPlayer}
+            blurbFor={(p) => blurbCtx.for(p)}
             positions={(["RB", "WR", "QB", "TE", "K", "DST"] as Position[]).filter(
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}
@@ -562,14 +695,54 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
         </section>
       </div>
 
-      {/* Toast */}
+      {/* Toast — undo right where the mistake happened */}
       {toast && (
         <div
           role="status"
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 rounded-lg bg-panel-2 px-4 py-2 text-sm shadow-xl"
+          className="fixed bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-panel-2 px-4 py-2 text-sm shadow-xl"
         >
-          {toast}
+          {toast.text}
+          {toast.undoable && draft.canUndo && (
+            <button
+              onClick={() => {
+                draft.undo();
+                showToast("Undone.");
+              }}
+              className="font-semibold text-wr hover:underline"
+            >
+              Undo
+            </button>
+          )}
         </div>
+      )}
+
+      {/* Player detail */}
+      {modalPlayer && (
+        <PlayerModal
+          player={modalPlayer}
+          ctx={{
+            currentPick: blurbCtx.currentPick,
+            nextPick: blurbCtx.nextPick,
+            drift: blurbCtx.drift,
+            tierMatesLeft: board.players.filter(
+              (a) =>
+                a.pos === modalPlayer.pos &&
+                a.tier === modalPlayer.tier &&
+                a.id !== modalPlayer.id &&
+                !draft.draftedIds.has(a.id)
+            ).length,
+          }}
+          config={config}
+          drafted={draft.draftedIds.has(modalPlayer.id)}
+          canUnmark={draft.isManuallyMarked(modalPlayer.id)}
+          myTurn={myTurn}
+          onMark={(p, mine) => mark(p, mine)}
+          onUnmark={(p) => {
+            draft.unmark(p.id);
+            showToast(`${p.name} is back on the board.`);
+          }}
+          onClose={() => setModalPlayer(null)}
+        />
       )}
 
       <footer className="mt-3 border-t border-line pt-2 text-[11px] text-ink-faint">

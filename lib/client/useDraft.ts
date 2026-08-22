@@ -59,8 +59,16 @@ export interface DraftApi {
   draftInfo: SleeperDraftInfo | null;
   onClockSlot: number;
   markDrafted: (player: BoardPlayer) => void;
+  /** Append many manual picks at once, in order (auto-complete). */
+  markMany: (players: BoardPlayer[]) => void;
   undo: () => void;
   canUndo: boolean;
+  /** True if this player left the board via a manual mark (so it can be undone). */
+  isManuallyMarked: (playerId: string) => boolean;
+  /** Put a specific manually-marked player back in the pool. */
+  unmark: (playerId: string) => void;
+  /** Clear every manual pick — restart a manual/test draft. */
+  reset: () => void;
   lastPickFlash: number; // bump counter for UI flash on new picks
 }
 
@@ -263,8 +271,40 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     []
   );
 
+  const markMany = useCallback((players: BoardPlayer[]) => {
+    setManualPicks((prev) => {
+      const have = new Set(prev.map((p) => p.playerId));
+      const additions = players
+        .filter((p) => !have.has(p.id))
+        .map((player) => ({
+          playerId: player.id,
+          playerName: player.name,
+          pos: player.pos,
+          pickNo: 0, // recomputed at merge time
+          round: 0,
+          draftSlot: 0,
+          isKeeper: false,
+          byMe: false,
+        }));
+      return [...prev, ...additions];
+    });
+  }, []);
+
   const undo = useCallback(() => {
     setManualPicks((prev) => prev.slice(0, -1));
+  }, []);
+
+  const isManuallyMarked = useCallback(
+    (playerId: string) => manualPicks.some((p) => p.playerId === playerId),
+    [manualPicks]
+  );
+
+  const unmark = useCallback((playerId: string) => {
+    setManualPicks((prev) => prev.filter((p) => p.playerId !== playerId));
+  }, []);
+
+  const reset = useCallback(() => {
+    setManualPicks([]);
   }, []);
 
   return {
@@ -282,8 +322,12 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     draftInfo,
     onClockSlot: pickOwner(Math.min(currentPick, teams * rounds), teams, tradedPicks),
     markDrafted,
+    markMany,
     undo,
     canUndo: manualPicks.length > 0,
+    isManuallyMarked,
+    unmark,
+    reset,
     lastPickFlash,
   };
 }

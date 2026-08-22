@@ -50,11 +50,14 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
     // Let the spinner paint before the ~1s of math.
     setTimeout(() => {
       const ordered = [...teams].sort((a, b) => a.slot - b.slot);
+      // Fresh seed per run: simulations should feel like simulations.
+      // (The engine stays seeded — determinism lives in the tests.)
+      const seed = Date.now() & 0x7fffffff;
       const { winRate, results } = simulateRoom(
         ordered.map((t) => t.roster),
         config,
         SIMS,
-        42
+        seed
       );
       const map = new Map<number, SimRow>();
       ordered.forEach((t, i) => map.set(t.slot, { winRate: winRate[i], result: results[i] }));
