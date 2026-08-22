@@ -9,13 +9,20 @@
 import type { BoardPlayer } from "../types";
 import { matchNewsToPlayers, type NewsItem, type PlayerNews } from "./espnNews";
 
-/** Default wire — editable in Setup → Advanced → Data sources. */
+/**
+ * Default wire — every handle verified ACTIVE (posted within days) on
+ * 2026-08-22. Editable in Setup → Advanced → Data sources: add handles or
+ * delete lines to drop defaults. Notable dormant accounts deliberately
+ * excluded: Field Yates (324d silent), Jordan Schultz (498d), the Schefter
+ * mirror (dead) — Schefter/Garafolo news arrives via the aggregator bot.
+ */
 export const DEFAULT_WIRE_HANDLES = [
-  "rapsheet.bsky.social", // Ian Rapoport, NFL Network (native)
-  "fieldyates.bsky.social", // Field Yates, ESPN fantasy (native)
-  "schultzreport.bsky.social", // Jordan Schultz, FOX (native)
-  "rotoworld-fb.bsky.social", // Rotoworld player news bot
-  "nflnewsreposterbot.bsky.social", // aggregates national insiders
+  "rapsheet.bsky.social", // Ian Rapoport — NFL Network national insider
+  "tompelissero.bsky.social", // Tom Pelissero — NFL Network insider
+  "profootballtalk.bsky.social", // ProFootballTalk — high-volume breaking NFL news
+  "matthewberry.bsky.social", // Matthew Berry — fantasy news + analysis
+  "rotoworld-fb.bsky.social", // Rotoworld — per-player fantasy news bot
+  "nflnewsreposterbot.bsky.social", // aggregator reposting national insiders (Schefter et al.)
 ];
 
 interface BskyFeedItem {

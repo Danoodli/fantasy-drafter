@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG, BESTBALL_PRESETS } from "../lib/client/config";
 import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } from "../lib/client/presets";
 import { loadHistory, deleteDraft, type SavedDraft } from "../lib/client/history";
 import { loadSources, saveSources, DEFAULT_SOURCES, type SourcePrefs } from "../lib/client/sources";
+import { DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
 
 const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
   { value: "ppr", label: "PPR" },
@@ -464,10 +465,11 @@ export default function Setup({
           </label>
           {sources.wire && (
             <label className="mt-1 block text-xs text-ink-dim">
-              Wire handles (one per line; blank = the default insiders)
+              Wire handles — one per line. Add reporters or delete lines to drop them.
+              (Clearing everything restores the defaults.)
               <textarea
-                rows={3}
-                value={sources.wireHandles.join("\n")}
+                rows={6}
+                value={(sources.wireHandles.length ? sources.wireHandles : DEFAULT_WIRE_HANDLES).join("\n")}
                 onChange={(e) =>
                   updateSources({
                     ...sources,
@@ -477,7 +479,6 @@ export default function Setup({
                       .filter(Boolean),
                   })
                 }
-                placeholder={"rapsheet.bsky.social\nfieldyates.bsky.social\nrotoworld-fb.bsky.social"}
                 className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
               />
             </label>
