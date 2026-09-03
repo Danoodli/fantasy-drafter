@@ -1,29 +1,29 @@
 {
   "db_fpecr_latest.csv": {
-    "fetchedAt": "2026-09-03T13:39:13.131Z"
+    "fetchedAt": "2026-09-03T19:19:46.926Z"
   },
   "db_playerids.csv": {
-    "fetchedAt": "2026-09-03T13:39:13.109Z"
+    "fetchedAt": "2026-09-03T19:19:47.076Z"
   },
   "espn-kona.json": {
-    "fetchedAt": "2026-09-03T13:39:14.166Z"
+    "fetchedAt": "2026-09-03T19:19:47.498Z"
   },
   "ffc-standard.json": {
-    "fetchedAt": "2026-09-03T13:39:48.136Z"
+    "fetchedAt": "2026-09-03T19:20:12.224Z"
   },
   "ffc-half-ppr.json": {
-    "fetchedAt": "2026-09-03T13:39:48.204Z"
+    "fetchedAt": "2026-09-03T19:20:12.299Z"
   },
   "ffc-ppr.json": {
-    "fetchedAt": "2026-09-03T13:39:48.333Z"
+    "fetchedAt": "2026-09-03T19:20:12.397Z"
   },
   "ffc-2qb.json": {
-    "fetchedAt": "2026-09-03T13:39:48.389Z"
+    "fetchedAt": "2026-09-03T19:20:12.666Z"
   },
   "sleeper-players-slim.json": {
-    "fetchedAt": "2026-09-03T13:39:13.318Z"
+    "fetchedAt": "2026-09-03T19:19:47.020Z"
   },
   "sleeper-projections.json": {
-    "fetchedAt": "2026-09-03T13:39:13.055Z"
+    "fetchedAt": "2026-09-03T19:19:46.838Z"
   }
 }
