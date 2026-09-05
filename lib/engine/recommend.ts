@@ -4,7 +4,7 @@
 import type { BoardPlayer, EngineOutput, EngineState, Position, Recommendation, Strategy, LeagueConfig } from "../types";
 import { survivalProb } from "./survival";
 import { vona, expectedBestAtPick } from "./vona";
-import { coverageValue } from "./coverage";
+import { coverageValue, REG_SEASON_WEEKS } from "./coverage";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
 import { buildReason, buildAlternateReason } from "./reasons";
 import { slotOnClock, pickOwner } from "../draft/snake";
@@ -241,9 +241,18 @@ function makeLineupValueFn(
   config: LeagueConfig
 ): (p: BoardPlayer, need: number) => number {
   const expBest = new Map<Position, number>();
+  // Waiver level: the best player expected to go UNDRAFTED at each position,
+  // as a weekly rate. Redraft insurance is only worth its margin over that —
+  // a backup who barely beats the streaming option is not worth a roster spot.
+  const lastPick = config.teams * config.rounds;
+  const waiverPerWeek = new Map<Position, number>();
   for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
     const atPos = available.filter((p) => p.pos === pos);
     expBest.set(pos, atPos.length ? expectedBestAtPick(atPos, nextPick, drift) : 0);
+    waiverPerWeek.set(
+      pos,
+      atPos.length ? expectedBestAtPick(atPos, lastPick + 1, drift) / (REG_SEASON_WEEKS - 1) : 0
+    );
   }
   return (p, need) => {
     if (need >= STARTER_NEED_MIN) {
@@ -256,7 +265,7 @@ function makeLineupValueFn(
     // bench need weight. The first version of this model returned raw VORP
     // here — the steep RB curve made an 8th RB outbid a 3rd WR and produced
     // 7-RB / 2-WR rosters with no bye cover at all.
-    return coverageValue(p, roster, config);
+    return coverageValue(p, roster, config, waiverPerWeek.get(p.pos) ?? 0);
   };
 }
 

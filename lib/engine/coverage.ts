@@ -73,15 +73,22 @@ export function coverageSlotWeeks(
   return total;
 }
 
-/** Insurance value in projected points: slot-weeks covered × his weekly rate. */
+/**
+ * Insurance value in projected points: slot-weeks covered × his weekly rate
+ * ABOVE `replacementPerWeek`. In redraft the alternative to a rostered backup
+ * is a waiver pickup, so pass the wire's expected weekly rate at his position;
+ * a TE2 who barely beats the streaming option is worth little, while a WR3 on
+ * a 2-WR roster still is. Best ball has no wire — pass 0 (the default).
+ */
 export function coverageValue(
   candidate: BoardPlayer,
   roster: BoardPlayer[],
-  config: LeagueConfig
+  config: LeagueConfig,
+  replacementPerWeek = 0
 ): number {
   const weeks = coverageSlotWeeks(candidate.pos, candidate.bye, roster, config);
   const perWeek = Math.max(0, candidate.projPoints) / (REG_SEASON_WEEKS - 1);
-  return Math.max(0, weeks * perWeek);
+  return Math.max(0, weeks * Math.max(0, perWeek - replacementPerWeek));
 }
 
 /**

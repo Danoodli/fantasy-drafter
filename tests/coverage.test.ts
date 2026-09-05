@@ -97,6 +97,16 @@ describe("coverageValue", () => {
     expect(good).toBeGreaterThan(weak);
   });
 
+  it("nets out what the waiver wire offers, and floors at zero", () => {
+    const roster = [p("TE", 6)];
+    const full = coverageValue(p("TE", 9, 140), roster, config);          // best ball: no wire
+    const streamed = coverageValue(p("TE", 9, 140), roster, config, 6.5); // redraft: wire pays ~6.5/wk
+    expect(streamed).toBeLessThan(full);
+    expect(streamed).toBeGreaterThan(0);
+    // A backup no better than the wire is worth nothing.
+    expect(coverageValue(p("TE", 9, 100), roster, config, 6.5)).toBe(0);
+  });
+
   it("is never negative", () => {
     const roster = Array.from({ length: 8 }, (_, i) => p("RB", i + 4));
     expect(coverageValue(p("RB", 12, 40), roster, config)).toBeGreaterThanOrEqual(0);
