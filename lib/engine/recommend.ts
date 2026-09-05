@@ -10,7 +10,7 @@ import type {
   Strategy,
 } from "../types";
 import { survivalProb } from "./survival";
-import { vona } from "./vona";
+import { vona, expectedBestAtPick } from "./vona";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
 import { buildReason, buildAlternateReason } from "./reasons";
 import { slotOnClock, pickOwner } from "../draft/snake";
@@ -32,6 +32,15 @@ const BYE_STACK_PENALTY = [0, 1, 3, 7, 12, 18];
 const STACK_BONUS = 8;
 /** Late-round bonus for the direct backup of an RB I already roster. */
 const HANDCUFF_BONUS = 6;
+/** needWeight at or above this means the player fills a starting or flex slot. */
+const STARTER_NEED_MIN = 0.85;
+/**
+ * "lineup" value model: share of a starter's value that comes from VONA
+ * (board-adaptive: what taking him now adds over waiting for my next pick)
+ * versus VOLS (absolute quality against the league's last starter). Pure VONA
+ * is myopic — with a one-pick horizon a TE1 looks like an RB1.
+ */
+const LINEUP_VONA_WEIGHT = 0.5;
 /** Injuries that remove a player from recommendations entirely. */
 const INJURY_EXCLUDE = new Set(["IR", "PUP", "Sus", "NA", "COV", "DNR"]);
 /** Soft projected-value multiplier by draft-day injury status. */
@@ -108,12 +117,25 @@ export function needWeight(
     (a, fp) => a + Math.max(0, (counts[fp] ?? 0) - (rosterSlots[fp] ?? 0)),
     0
   );
-  if (flexEligible.includes(pos) && surplus < flexSlots) return 0.85;
+  if (flexEligible.includes(pos) && surplus < flexSlots) return STARTER_NEED_MIN;
   // Bench depth
   const depth = have - starters - (flexEligible.includes(pos) ? 1 : 0);
-  const benchBase = pos === "RB" || pos === "WR" ? 0.55 : 0.3;
-  return benchBase * Math.pow(0.6, Math.max(0, depth));
+  const benchBase = pos === "RB" || pos === "WR" ? BENCH_INSURANCE.skill : BENCH_INSURANCE.other;
+  return benchBase * Math.pow(BENCH_INSURANCE.decay, Math.max(0, depth));
 }
+
+/**
+ * Redraft bench weights. A bench player only scores when a starter at his
+ * position misses time, so his value is insurance, not production: roughly
+ * P(he starts) x (points over what I'd otherwise plug in).
+ *
+ * These used to be 0.55 / 0.30 with 0.6 decay. Against RB VORP that runs
+ * 2-3x WR VORP, that let a 5th bench RB (0.55 x 110 = 60) outbid a WR3 headed
+ * for the FLEX (0.85 x 40 = 34) -- the 2024/2025 season backtests showed
+ * "balanced" drafting 6.8 RBs and 2.2 WRs into a 2-RB/2-WR/FLEX lineup, and
+ * losing to a plain ADP bot in 2024. First bench spot ~25%, then halving.
+ */
+export const BENCH_INSURANCE = { skill: 0.25, other: 0.12, decay: 0.5 };
 
 function blendedValue(p: BoardPlayer, strategy: Strategy): number {
   return strategy.baselineBlend * p.vorp + (1 - strategy.baselineBlend) * p.vols;
@@ -190,6 +212,42 @@ function applyNeed(value: number, need: number): number {
   return value >= 0 ? value * need : value * (2 - need);
 }
 
+/**
+ * "lineup" value model (redraft). Measures a player by what he does for MY
+ * roster instead of by league-wide scarcity:
+ *
+ * - A starter (open starting or flex slot) is worth what taking him now adds
+ *   over the best I can expect at his position at my next pick (VONA), blended
+ *   with his quality against the league's last starter (VOLS). Two players who
+ *   would fill the same FLEX slot with the same projection are worth the same,
+ *   whatever their positions' replacement levels look like.
+ * - A bench player only scores when a starter sits, and then he replaces
+ *   replacement level — so his value is VORP, scaled by needWeight's
+ *   insurance factor downstream.
+ *
+ * The blend model priced Javonte Williams (217 proj) 84 value-points above
+ * Keenan Allen (213 proj) for the same FLEX slot, because RB58 projects 80 and
+ * WR58 projects 161. That is why "balanced" drafted 6.8 RBs and 2.2 WRs.
+ */
+function makeLineupValueFn(
+  available: BoardPlayer[],
+  nextPick: number,
+  drift: Partial<Record<Position, number>>
+): (p: BoardPlayer, need: number) => number {
+  const expBest = new Map<Position, number>();
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
+    const atPos = available.filter((p) => p.pos === pos);
+    expBest.set(pos, atPos.length ? expectedBestAtPick(atPos, nextPick, drift) : 0);
+  }
+  return (p, need) => {
+    if (need >= STARTER_NEED_MIN) {
+      const vonaNow = p.projPoints - (expBest.get(p.pos) ?? 0);
+      return LINEUP_VONA_WEIGHT * vonaNow + (1 - LINEUP_VONA_WEIGHT) * p.vols + sosAdjust(p, false);
+    }
+    return p.vorp + sosAdjust(p, false);
+  };
+}
+
 interface Scored {
   player: BoardPlayer;
   quickScore: number;
@@ -202,7 +260,8 @@ function quickScoreAll(
   strategy: Strategy,
   myCounts: Partial<Record<Position, number>>,
   round: number,
-  valueFn: (p: BoardPlayer) => number
+  valueFn: (p: BoardPlayer) => number,
+  lineupValue?: (p: BoardPlayer, need: number) => number
 ): Scored[] {
   const { currentPick } = state;
   const stacking = strategy.stacking ?? 0;
@@ -226,7 +285,8 @@ function quickScoreAll(
     const mult = positionMultiplier(strategy, p.pos, round);
     const need = needWeight(p.pos, myCounts, state);
     const injuryMult = p.injury ? INJURY_PENALTY[p.injury] ?? 1 : 1;
-    let base = applyNeed(valueFn(p) * mult * injuryMult, need);
+    const raw = lineupValue ? lineupValue(p, need) : valueFn(p);
+    let base = applyNeed(raw * mult * injuryMult, need);
     const urg = urgencyOf(p.pos);
     if (urg > 1) {
       // Multiplicative when the player has value, additive floor so a weak
@@ -372,13 +432,18 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
 
   const bestball = config.leagueType === "bestball";
   const valueFn = makeValueFn(board, strategy, bestball);
+  const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
+  // Best ball keeps its market-curve model; "lineup" is a redraft concept.
+  const lineupValue =
+    !bestball && strategy.valueModel === "lineup"
+      ? makeLineupValueFn(available, nextPick, drift)
+      : undefined;
   const pool = hardFilter(available, state, myCounts, round);
-  const scored = quickScoreAll(pool, state, strategy, myCounts, round, valueFn).sort(
+  const scored = quickScoreAll(pool, state, strategy, myCounts, round, valueFn, lineupValue).sort(
     (a, b) => b.quickScore - a.quickScore
   );
   const candidates = scored.slice(0, MC_CANDIDATES);
 
-  const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
   const horizon = myPicks.filter((n) => n > currentPick).slice(0, 2);
   const simEnd = horizon[horizon.length - 1] ?? currentPick;
 
@@ -394,7 +459,9 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
     pos: a.pos,
     adp: a.adp + (drift[a.pos] ?? 0),
     stdev: a.adpStdev,
-    value: Math.max(0, valueFn(a)),
+    // Under the lineup model the sim's greedy future picks are valued by
+    // starter quality (VOLS), not RB-inflated replacement scarcity.
+    value: Math.max(0, lineupValue ? a.vols : valueFn(a)),
   }));
   const nextRound = slotOnClock(nextPick, config.teams).round;
   const myPosWeight = (pos: Position, counts: Partial<Record<Position, number>>) =>

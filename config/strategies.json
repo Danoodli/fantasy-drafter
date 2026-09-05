@@ -2,12 +2,18 @@
   {
     "id": "balanced",
     "label": "Balanced",
-    "blurb": "Best value, position-neutral. The control.",
+    "blurb": "Best overall roster. Values starters by what they add to your lineup versus waiting, bench by insurance \u2014 adapts to the board as it empties. The control.",
     "lambda": 0.5,
     "baselineBlend": 0.5,
+    "valueModel": "lineup",
     "adpDiscipline": 0.5,
     "positionMultipliers": {},
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "zero-rb",
@@ -17,11 +23,31 @@
     "baselineBlend": 0.4,
     "adpDiscipline": 0.6,
     "positionMultipliers": {
-      "1-5": { "RB": 0.55, "WR": 1.3, "TE": 1.0, "QB": 0.7 },
-      "6-9": { "RB": 1.15, "WR": 1.0, "TE": 1.0, "QB": 0.9 },
-      "10-15": { "RB": 1.35, "WR": 0.9, "TE": 0.95, "QB": 1.0 }
+      "1-5": {
+        "RB": 0.55,
+        "WR": 1.3,
+        "TE": 1.0,
+        "QB": 0.7
+      },
+      "6-9": {
+        "RB": 1.15,
+        "WR": 1.0,
+        "TE": 1.0,
+        "QB": 0.9
+      },
+      "10-15": {
+        "RB": 1.35,
+        "WR": 0.9,
+        "TE": 0.95,
+        "QB": 1.0
+      }
     },
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "robust-rb",
@@ -31,11 +57,31 @@
     "baselineBlend": 0.65,
     "adpDiscipline": 0.5,
     "positionMultipliers": {
-      "1-4": { "RB": 1.3, "WR": 0.75, "TE": 0.9, "QB": 0.7 },
-      "5-9": { "RB": 0.9, "WR": 1.2, "TE": 1.05, "QB": 0.95 },
-      "10-15": { "RB": 0.9, "WR": 1.05, "TE": 1.0, "QB": 1.0 }
+      "1-4": {
+        "RB": 1.3,
+        "WR": 0.75,
+        "TE": 0.9,
+        "QB": 0.7
+      },
+      "5-9": {
+        "RB": 0.9,
+        "WR": 1.2,
+        "TE": 1.05,
+        "QB": 0.95
+      },
+      "10-15": {
+        "RB": 0.9,
+        "WR": 1.05,
+        "TE": 1.0,
+        "QB": 1.0
+      }
     },
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "hero-rb",
@@ -45,11 +91,31 @@
     "baselineBlend": 0.55,
     "adpDiscipline": 0.55,
     "positionMultipliers": {
-      "1-2": { "RB": 1.25, "WR": 1.0, "TE": 0.9, "QB": 0.7 },
-      "3-7": { "RB": 0.6, "WR": 1.25, "TE": 1.05, "QB": 0.9 },
-      "8-15": { "RB": 1.25, "WR": 0.95, "TE": 0.95, "QB": 1.0 }
+      "1-2": {
+        "RB": 1.25,
+        "WR": 1.0,
+        "TE": 0.9,
+        "QB": 0.7
+      },
+      "3-7": {
+        "RB": 0.6,
+        "WR": 1.25,
+        "TE": 1.05,
+        "QB": 0.9
+      },
+      "8-15": {
+        "RB": 1.25,
+        "WR": 0.95,
+        "TE": 0.95,
+        "QB": 1.0
+      }
     },
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "late-qb",
@@ -59,10 +125,25 @@
     "baselineBlend": 0.5,
     "adpDiscipline": 0.5,
     "positionMultipliers": {
-      "1-8": { "QB": 0.45, "RB": 1.05, "WR": 1.05, "TE": 1.0 },
-      "9-15": { "QB": 1.2, "RB": 1.0, "WR": 1.0, "TE": 1.0 }
+      "1-8": {
+        "QB": 0.45,
+        "RB": 1.05,
+        "WR": 1.05,
+        "TE": 1.0
+      },
+      "9-15": {
+        "QB": 1.2,
+        "RB": 1.0,
+        "WR": 1.0,
+        "TE": 1.0
+      }
     },
-    "positionCaps": { "QB": 1, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 1,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "bpa",
@@ -72,7 +153,12 @@
     "baselineBlend": 0.5,
     "adpDiscipline": 0.3,
     "positionMultipliers": {},
-    "positionCaps": { "QB": 3, "TE": 3, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 3,
+      "TE": 3,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "upside",
@@ -82,7 +168,12 @@
     "baselineBlend": 0.5,
     "adpDiscipline": 0.35,
     "positionMultipliers": {},
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "tournament-ceiling",
@@ -93,7 +184,12 @@
     "adpDiscipline": 0.35,
     "stacking": 1.0,
     "positionMultipliers": {},
-    "positionCaps": { "QB": 3, "TE": 3, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 3,
+      "TE": 3,
+      "K": 1,
+      "DST": 1
+    }
   },
   {
     "id": "safe-floor",
@@ -103,6 +199,11 @@
     "baselineBlend": 0.5,
     "adpDiscipline": 0.75,
     "positionMultipliers": {},
-    "positionCaps": { "QB": 2, "TE": 2, "K": 1, "DST": 1 }
+    "positionCaps": {
+      "QB": 2,
+      "TE": 2,
+      "K": 1,
+      "DST": 1
+    }
   }
 ]

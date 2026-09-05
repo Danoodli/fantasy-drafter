@@ -213,6 +213,17 @@ export interface Strategy {
    * pass-catchers (and vice versa) — correlated ceilings win tournaments.
    */
   stacking?: number;
+  /**
+   * How a player's draft value is measured in redraft (best ball has its own
+   * market-curve model either way).
+   * - "blend" (default): baselineBlend·VORP + (1−baselineBlend)·VOLS for every
+   *   player, starter or bench.
+   * - "lineup": starters by what they add to MY lineup versus waiting for my
+   *   next pick (VONA + VOLS); bench by insurance (VORP × P(he starts)).
+   *   Adapts to the board as it empties — position runs and tier cliffs raise
+   *   VONA where they happen.
+   */
+  valueModel?: "blend" | "lineup";
 }
 
 // ---------------------------------------------------------------------------
