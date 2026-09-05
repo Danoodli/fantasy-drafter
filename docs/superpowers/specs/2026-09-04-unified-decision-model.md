@@ -34,6 +34,12 @@ One unit (expected points my completed roster scores this season), one uncertain
 
 **No static rules remain in the engine.** The only hard constraints are format legality: a player on IR/PUP/suspension is not draftable, positions the league does not roster are not draftable, and when remaining picks equal unfilled *starting* slots the engine fills them. Depth floors (2 QB / 3 RB / 3 WR) move out of the engine and into the backtest as an acceptance gate: if the emergent behavior ever violates them, that is a model bug to fix, not a rule to add.
 
+## Live and league-aware
+
+The recommendation is recomputed from scratch on every board change — there is no ranked queue that "falls to #3" when #1 and #2 go. Each recompute rebuilds the completion model from the live room: every opponent's actual roster (from the draft feed), the live ADP drift, and the remaining pool.
+
+Opponents are modeled **with the same objective I use for myself**. An opponent's next pick is the earliest player in market (effective-ADP) order whose expected lineup gain *for that opponent's roster* is meaningful — i.e., the best available player they actually need. A team holding 5 RB and 0 WR is predicted to take a WR; a team with every starter filled is predicted to take the best player left. This replaces the fixed position caps, so "what will be left at my next pick" reflects how the league is panning out, pick by pick.
+
 ## The outcome model (calibrated, not guessed)
 
 Fit from the committed 2024 and 2025 snapshots by `pnpm calibrate` into `config/outcome-model.json` (data the engine imports, re-fit each season). Measured 2026-09-04, drafted skill players (ADP ≤ 180) with a real projection:
@@ -79,6 +85,10 @@ Measured by `pnpm backtest:season` with the waiver-aware yardstick, 12 rooms × 
 7. **Live:** one Sleeper mock by the user; roster has a bench at QB/RB/WR.
 
 Ship = flip `valueModel` default to `unified`, delete the dead heuristics, update docs. Until then the model lives behind `valueModel: "unified"` and is compared A/B in the harness.
+
+## Deferred: more data (user-funded, human in the loop)
+
+The user is willing to spend up to ~$20 and to hand-export CSVs (especially historical datasets) if a *measured* hole in the model can be closed with data the free APIs don't expose — per-player injury history and age curves, multiple projection sources for past seasons, weekly snap/target shares, real draft-room pick logs. This phase starts only after the unified model ships and its gates pass; the backtest's residuals and the objective-calibration ρ are how a proposed dataset earns its place. The engine stays $0 at runtime regardless.
 
 ## Out of scope (named so they are not forgotten)
 

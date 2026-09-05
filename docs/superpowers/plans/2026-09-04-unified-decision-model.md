@@ -861,7 +861,9 @@ git commit -m "Roster valuation: season lineup points with waiver fill, paired M
 - Consumes: `makeRng`, `gaussian` (from `./outcome`), `positionGainTable` (Task 3), `FLEX_SHARE`.
 - Produces:
   - `interface CompletionPlayer { id: string; pos: Position; adp: number; stdev: number; bye: number | null; weeklyRate: number /* rate × avail */ }`
-  - `interface CompletionShared { players: CompletionPlayer[]; myRoster: CompletionPlayer[]; opponentCounts: Record<number, Partial<Record<Position, number>>>; schedule: { pickNo: number; slot: number; mine: boolean }[]; teams: number; rounds: number; config: LeagueConfig; waiver: WaiverLine; params: OutcomeParams }`
+  - `type RosterShape = { pos: Position; bye: number | null }[]`
+  - `interface CompletionShared { players: CompletionPlayer[]; myRoster: CompletionPlayer[]; opponentRosters: Record<number, RosterShape> /* slot → what they hold */; schedule: { pickNo: number; slot: number; mine: boolean }[]; teams: number; rounds: number; config: LeagueConfig; waiver: WaiverLine; params: OutcomeParams }`
+  - `opponentChoice(candidates: CompletionPlayer[], roster: RosterShape, params, config, waiver): number` — index into `candidates` (given in market order) of the pick a need-aware drafter makes
   - `completeRosters(shared: CompletionShared, candidateIdx: number[], iterations: number, seed: number): number[][][]` — `[ci][it]` = indices into `shared.players` of my future picks in order.
 
 - [ ] **Step 1: Write the failing tests**
@@ -871,7 +873,7 @@ git commit -m "Roster valuation: season lineup points with waiver fill, paired M
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { completeRosters, type CompletionPlayer, type CompletionShared } from "../lib/engine/completion";
+import { completeRosters, opponentChoice, type CompletionPlayer, type CompletionShared } from "../lib/engine/completion";
 import type { OutcomeParams } from "../lib/engine/outcomeModel";
 import type { LeagueConfig, Position } from "../lib/types";
 
@@ -880,6 +882,7 @@ const config: LeagueConfig = {
   platform: "manual", leagueId: "", draftId: "", myDraftSlot: 5, teams: 12, rounds: 15, scoring: "ppr", leagueType: "redraft",
   rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 }, flexEligible: ["RB", "WR", "TE"], strategy: "balanced",
 };
+const waiver = { QB: 12, RB: 6, WR: 7, TE: 5, K: 7, DST: 6 };
 // A synthetic pool: 30 of each skill position with ADP spread 1..120, K/DST late.
 function pool(): CompletionPlayer[] {
   const out: CompletionPlayer[] = [];
@@ -897,11 +900,31 @@ const schedule = (from: number, to: number, mine: number[]) => Array.from({ leng
   return { pickNo, slot: r % 2 === 1 ? idx + 1 : 12 - idx, mine: mine.includes(pickNo) };
 });
 
+describe("opponentChoice — the room is modeled with my own objective", () => {
+  const players = pool();
+  it("a team with 5 RB and 0 WR takes a WR even when an RB is earlier in market order", () => {
+    const cands = players.filter((p) => p.pos === "RB" || p.pos === "WR").slice(8, 18); // RB/WR alternating, RB first
+    const roster = Array.from({ length: 5 }, (_, i) => ({ pos: "RB" as Position, bye: 4 + i }));
+    expect(cands[0].pos).toBe("RB");
+    expect(cands[opponentChoice(cands, roster, params, config, waiver)].pos).toBe("WR");
+  });
+  it("an empty roster takes the earliest market player (no position bias)", () => {
+    const cands = players.slice(0, 10);
+    expect(opponentChoice(cands, [], params, config, waiver)).toBe(0);
+  });
+  it("never takes a kicker while a skill starter is open", () => {
+    const cands = [players.find((p) => p.pos === "K")!, ...players.filter((p) => p.pos === "WR").slice(20, 25)];
+    const roster = [{ pos: "QB" as Position, bye: 5 }, { pos: "RB" as Position, bye: 6 }, { pos: "RB" as Position, bye: 7 }, { pos: "TE" as Position, bye: 8 }];
+    expect(cands[opponentChoice(cands, roster, params, config, waiver)].pos).toBe("WR");
+  });
+});
+
 describe("completeRosters", () => {
   const players = pool();
+  const opponentRosters: Record<number, { pos: Position; bye: number | null }[]> = {};
+  for (let s = 1; s <= 12; s++) opponentRosters[s] = [];
   const shared: CompletionShared = {
-    players, myRoster: [], opponentCounts: {}, schedule: schedule(6, 44, [20, 29, 44]), teams: 12, rounds: 15, config,
-    waiver: { QB: 12, RB: 6, WR: 7, TE: 5, K: 7, DST: 6 }, params,
+    players, myRoster: [], opponentRosters, schedule: schedule(6, 44, [20, 29, 44]), teams: 12, rounds: 15, config, waiver, params,
   };
   it("returns one future-pick list per candidate per iteration, with no duplicates and no candidate", () => {
     const res = completeRosters(shared, [0, 1], 40, 3);
@@ -917,7 +940,7 @@ describe("completeRosters", () => {
     const a = completeRosters(shared, [0, 3], 25, 8), b = completeRosters(shared, [0, 3], 25, 8);
     expect(a).toEqual(b);
   });
-  it("fills open starting slots before adding depth, and never picks K/DST while starters are open", () => {
+  it("fills my open starting slots before adding depth, and never picks K/DST while starters are open", () => {
     const res = completeRosters(shared, [0], 60, 5);
     for (const picks of res[0]) {
       const poss = picks.map((i) => players[i].pos);
@@ -925,10 +948,15 @@ describe("completeRosters", () => {
       expect(poss).not.toContain("DST");
     }
   });
-  it("opponents take top-of-ADP players, so my later picks come from deeper in the pool", () => {
+  it("opponents take top-of-market players, so my later picks come from deeper in the pool", () => {
     const res = completeRosters(shared, [0], 60, 2);
     const firstFuture = res[0].map((picks) => players[picks[0]].adp);
-    expect(Math.min(...firstFuture)).toBeGreaterThan(8); // ~14 opponent picks happen before pick 20
+    expect(Math.min(...firstFuture)).toBeGreaterThan(8);
+  });
+  it("a WR-starved room leaves me more RBs at my next pick than a balanced room", () => {
+    const starved = { ...shared, opponentRosters: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, Array.from({ length: 4 }, (_, k) => ({ pos: "RB" as Position, bye: 4 + k }))])) };
+    const rbShare = (res: number[][][]) => res[0].flat().filter((i) => players[i].pos === "RB").length / res[0].flat().length;
+    expect(rbShare(completeRosters(starved, [0], 80, 4))).toBeGreaterThan(rbShare(completeRosters(shared, [0], 80, 4)));
   });
 });
 ```
@@ -945,12 +973,14 @@ Run: `npx vitest run tests/completion.test.ts` — Expected: FAIL, module not fo
 // if I take candidate c now?
 //
 // Per iteration, every remaining player gets one effective draft position
-// (adp + stdev·N(0,1)); opponents take the earliest available under simple
-// roster-need caps; between opponent runs, I fill my own future picks
-// greedily by expected lineup gain on the roster-so-far. One opponent walk per
-// iteration is shared by all candidates (opponents do not react to my pick);
-// each candidate replays it, skipping itself and its own earlier picks.
-// Pure and seeded.
+// (adp + stdev·N(0,1)) — the market. Each opponent takes the earliest player
+// in that order whose expected lineup gain FOR THEIR ROSTER is meaningful:
+// the best available player they need, judged by the same objective I use
+// for myself. Between opponent runs, I fill my own future picks greedily by
+// expected lineup gain on my roster-so-far. One opponent walk per iteration
+// is shared by all candidates (opponents do not react to my pick); each
+// candidate replays it, skipping itself and its own earlier picks.
+// Pure and seeded. No position caps, no pacing rules.
 
 import type { LeagueConfig, Position } from "../types";
 import { makeRng } from "./montecarlo";
@@ -958,11 +988,11 @@ import { gaussian } from "./outcome";
 import { positionGainTable, type WaiverLine } from "./rosterValue";
 import type { OutcomeParams } from "./outcomeModel";
 
-const POS_LIST: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
-const POS_INDEX: Record<Position, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
-/** Opponent roster-count ceilings: beyond these a position is skipped. */
-const OPP_CAP = [3, 8, 9, 3, 1, 1];
-/** How many top-of-board survivors my greedy pick considers. */
+/** How far down the market order a drafter looks for a player he needs. */
+const OPP_SCAN = 10;
+/** A position counts as a need when its gain is at least this share of the best gain on offer. */
+const NEED_SHARE = 0.5;
+/** How many top-of-market survivors my own greedy pick considers. */
 const GREEDY_SCAN = 60;
 
 export interface CompletionPlayer {
@@ -975,11 +1005,14 @@ export interface CompletionPlayer {
   weeklyRate: number;
 }
 
+export type RosterShape = { pos: Position; bye: number | null }[];
+
 export interface CompletionShared {
   /** available players, any order */
   players: CompletionPlayer[];
   myRoster: CompletionPlayer[];
-  opponentCounts: Record<number, Partial<Record<Position, number>>>;
+  /** slot (1-indexed) → what that team already holds */
+  opponentRosters: Record<number, RosterShape>;
   /** picks after the current one, ascending, mine flagged */
   schedule: { pickNo: number; slot: number; mine: boolean }[];
   teams: number;
@@ -987,6 +1020,27 @@ export interface CompletionShared {
   config: LeagueConfig;
   waiver: WaiverLine;
   params: OutcomeParams;
+}
+
+/**
+ * The pick a need-aware drafter makes from `candidates` (market order):
+ * the earliest whose gain for `roster` is within NEED_SHARE of the best gain
+ * on offer. Falls back to the earliest when nothing stands out.
+ */
+export function opponentChoice(
+  candidates: CompletionPlayer[],
+  roster: RosterShape,
+  params: OutcomeParams,
+  config: LeagueConfig,
+  waiver: WaiverLine
+): number {
+  if (candidates.length === 0) return -1;
+  const table = positionGainTable(roster, params, config, waiver);
+  const gains = candidates.map((c) => table[c.pos](c.weeklyRate));
+  const best = Math.max(...gains);
+  if (best <= 0) return 0;
+  for (let j = 0; j < candidates.length; j++) if (gains[j] >= NEED_SHARE * best) return j;
+  return 0;
 }
 
 export function completeRosters(
@@ -1001,24 +1055,16 @@ export function completeRosters(
   if (n === 0 || myPickCount === 0) return out;
 
   const rng = makeRng(seed);
-  const pos = new Int8Array(n);
   const adp = new Float64Array(n);
   const stdev = new Float64Array(n);
   shared.players.forEach((p, i) => {
-    pos[i] = POS_INDEX[p.pos];
     adp[i] = p.adp;
     stdev[i] = Math.max(1.5, p.stdev);
   });
-  const baseOpp = new Int16Array((shared.teams + 1) * 6);
-  for (const [slot, counts] of Object.entries(shared.opponentCounts)) {
-    for (const [p, c] of Object.entries(counts)) baseOpp[Number(slot) * 6 + POS_INDEX[p as Position]] = c ?? 0;
-  }
-  const lastTwoRoundsStart = (shared.rounds - 2) * shared.teams;
 
   const x = new Float64Array(n);
   const order = new Int32Array(n);
   const walkTaken = new Uint8Array(n);
-  const oppCounts = new Int16Array(baseOpp.length);
   const seq: number[] = [];
 
   for (let it = 0; it < iterations; it++) {
@@ -1026,27 +1072,31 @@ export function completeRosters(
     for (let i = 0; i < n; i++) order[i] = i;
     order.sort((a, b) => x[a] - x[b]);
 
-    // Shared opponent walk: for each opponent pick, the earliest available
-    // player its roster can still use (K/DST only in the last two rounds).
+    // Shared opponent walk: each opponent takes what its roster needs.
     walkTaken.fill(0);
-    oppCounts.set(baseOpp);
     seq.length = 0;
     const oppBeforeMine: number[] = [];
+    const rosters: Record<number, RosterShape> = {};
+    for (const [slot, r] of Object.entries(shared.opponentRosters)) rosters[Number(slot)] = r.slice();
     let oppSteps = 0;
     for (const step of shared.schedule) {
       if (step.mine) { oppBeforeMine.push(oppSteps); continue; }
-      const early = step.pickNo <= lastTwoRoundsStart;
-      const cBase = step.slot * 6;
-      let picked = -1, fallback = -1;
-      for (let j = 0; j < n; j++) {
+      const cands: CompletionPlayer[] = [];
+      const candIdx: number[] = [];
+      for (let j = 0; j < n && cands.length < OPP_SCAN; j++) {
         const i = order[j];
         if (walkTaken[i]) continue;
-        const pi = pos[i];
-        if (oppCounts[cBase + pi] >= OPP_CAP[pi] || (early && pi >= 4)) { if (fallback < 0) fallback = i; continue; }
-        picked = i; break;
+        cands.push(shared.players[i]);
+        candIdx.push(i);
       }
-      if (picked < 0) picked = fallback;
-      if (picked >= 0) { walkTaken[picked] = 1; oppCounts[cBase + pos[picked]]++; seq.push(picked); oppSteps++; }
+      if (cands.length === 0) break;
+      const roster = rosters[step.slot] ?? (rosters[step.slot] = []);
+      const k = opponentChoice(cands, roster, shared.params, shared.config, shared.waiver);
+      const picked = candIdx[k];
+      walkTaken[picked] = 1;
+      roster.push({ pos: shared.players[picked].pos, bye: shared.players[picked].bye });
+      seq.push(picked);
+      oppSteps++;
     }
     // Replacements for when a candidate or one of my picks collides with the walk.
     for (let j = 0, added = 0; j < n && added < myPickCount + 2; j++) {
@@ -1058,7 +1108,7 @@ export function completeRosters(
       const cIdx = candidateIdx[ci];
       const taken = new Uint8Array(n);
       taken[cIdx] = 1;
-      const rosterSoFar: { pos: Position; bye: number | null }[] = [
+      const rosterSoFar: RosterShape = [
         ...shared.myRoster.map((p) => ({ pos: p.pos, bye: p.bye })),
         { pos: shared.players[cIdx].pos, bye: shared.players[cIdx].bye },
       ];
@@ -1069,14 +1119,14 @@ export function completeRosters(
           if (taken[e]) continue;
           taken[e] = 1; consumed++;
         }
-        // My pick: best expected lineup gain among top-of-board survivors.
+        // My pick: best expected lineup gain among top-of-market survivors.
         const gain = positionGainTable(rosterSoFar, shared.params, shared.config, shared.waiver);
         let best = -1, bestGain = -Infinity;
         for (let j = 0, seen = 0; j < n && seen < GREEDY_SCAN; j++) {
           const i = order[j];
           if (taken[i]) continue;
           seen++;
-          const g = gain[POS_LIST[pos[i]]](shared.players[i].weeklyRate);
+          const g = gain[shared.players[i].pos](shared.players[i].weeklyRate);
           if (g > bestGain) { bestGain = g; best = i; }
         }
         if (best < 0) break;
@@ -1092,13 +1142,13 @@ export function completeRosters(
 
 - [ ] **Step 4: Run tests**
 
-Run: `npx vitest run tests/completion.test.ts` — Expected: PASS (4 tests). The K/DST test passes because with any starting slot open, `positionGainTable` gives K/DST a small gain (rate ≈ wire) while an open RB/WR/QB/TE slot yields ~16 × several points.
+Run: `npx vitest run tests/completion.test.ts` — Expected: PASS (8 tests). K/DST tests pass because with any starting slot open, `positionGainTable` gives K/DST a small gain (rate ≈ wire) while an open RB/WR/QB/TE slot yields ~16 × several points; the WR-starved-room test passes because need-aware opponents take WRs, leaving RBs.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add lib/engine/completion.ts tests/completion.test.ts
-git commit -m "Roster completion: shared opponent walk plus greedy future picks by expected lineup gain"
+git commit -m "Roster completion: need-aware opponents (modeled with my own objective) plus greedy future picks"
 ```
 
 ---
@@ -1108,6 +1158,7 @@ git commit -m "Roster completion: shared opponent walk plus greedy future picks 
 **Files:**
 - Modify: `lib/types.ts` (Strategy, EngineState, Recommendation)
 - Modify: `lib/engine/recommend.ts`
+- Modify: `lib/client/useDraft.ts` (expose `opponentRosters` from live picks), `components/Cockpit.tsx` (pass it to `recommend`), `lib/engine/replay.ts` (pass bot rosters)
 - Modify: `config/strategies.json` (set `"valueModel": "unified"` and `"lambdaBestBall"` on `balanced` only, for A/B)
 - Test: `tests/engine.test.ts` (new `describe("unified model")`), `tests/perf.test.ts` (add a unified-model timing)
 
@@ -1127,6 +1178,8 @@ In `lib/types.ts`:
 // EngineState: add
   /** Outcome-model parameters; defaults to config/outcome-model.json. Tests and the backtest inject alternatives. */
   outcome?: import("./engine/outcomeModel").OutcomeParams;
+  /** What every other team holds, by draft slot — so opponents are modeled by need, not by ADP alone. */
+  opponentRosters?: Record<number, { pos: Position; bye: number | null }[]>;
 // Recommendation: add
   /** Unified model: expected season lineup points of the completed roster if I take him now. */
   expectedPoints?: number;
@@ -1209,6 +1262,25 @@ describe("unified model (fluid, no static rules)", () => {
   it("is deterministic", () => {
     const a = recommend(st()), b = recommend(st());
     expect(a.recommendations.map((r) => r.player.id)).toEqual(b.recommendations.map((r) => r.player.id));
+  });
+
+  it("re-evaluates the whole board when the room changes — opponents' rosters move my pick", () => {
+    // Same board, same my-roster, pick 31. Room A: every opponent holds 2 RB / 0 WR.
+    // Room B: every opponent holds 0 RB / 2 WR. Need-aware opponents will take WRs in A
+    // and RBs in B before my next pick, so what I should take now differs.
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const drafted = new Set(byAdp.slice(0, 30).map((p) => p.id));
+    const mine = [byAdp[4], byAdp[19]];
+    for (const p of mine) drafted.add(p.id);
+    const rosterOf = (pos: Position) => Array.from({ length: 2 }, (_, i) => ({ ...byAdp.filter((p) => p.pos === pos)[i + 30], bye: 5 + i }));
+    const roomA = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, rosterOf("RB")]));
+    const roomB = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, rosterOf("WR")]));
+    const picks = [31, 44, 53, 68, 77, 92, 101, 116, 125, 140, 149, 164, 173];
+    const a = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomA }));
+    const b = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomB }));
+    const rbEdge = (o: EngineOutput) => (o.recommendations.find((r) => r.player.pos === "RB")?.score ?? -1e9) - (o.recommendations.find((r) => r.player.pos === "WR")?.score ?? -1e9);
+    // When the room is about to run on WRs (A), taking my WR now is worth relatively more than in B.
+    expect(rbEdge(a)).toBeLessThan(rbEdge(b));
   });
 });
 ```
@@ -1332,8 +1404,19 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
   });
   const players = available.map(toCp);
   const indexById = new Map(players.map((p, i) => [p.id, i]));
+  // Opponent rosters: real ones when the client/backtest supplies them, else
+  // reconstructed from position counts (no byes → treated as never off).
+  const opponentRosters: Record<number, { pos: Position; bye: number | null }[]> = {};
+  if (state.opponentRosters) {
+    for (const [slot, r] of Object.entries(state.opponentRosters)) opponentRosters[Number(slot)] = r.map((p) => ({ pos: p.pos, bye: p.bye }));
+  } else {
+    for (const [slot, counts] of Object.entries(state.opponentCounts ?? {})) {
+      opponentRosters[Number(slot)] = [];
+      for (const [pos, c] of Object.entries(counts)) for (let i = 0; i < (c ?? 0); i++) opponentRosters[Number(slot)].push({ pos: pos as Position, bye: null });
+    }
+  }
   const shared: CompletionShared = {
-    players, myRoster: state.myRoster.map(toCp), opponentCounts: state.opponentCounts ?? {},
+    players, myRoster: state.myRoster.map(toCp), opponentRosters,
     schedule, teams: config.teams, rounds: config.rounds, config, waiver, params,
   };
   const completions = completeRosters(shared, shortlist.map((c) => indexById.get(c.id)!), UNIFIED_ITERATIONS, seed);
@@ -1369,11 +1452,25 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
 ```
 `pickOwner` is already imported from `../draft/snake`. `INJURY_EXCLUDE`, `vona`, `survivalProb`, `buildReason`, `buildAlternateReason`, `expectedBestAtPick` already exist in the file.
 
-- [ ] **Step 5: tsconfig / JSON import**
+- [ ] **Step 5: Feed real opponent rosters from the live draft and the backtest**
+
+`lib/client/useDraft.ts`: next to the existing `opponentCounts` computation (inside the same `useMemo` that builds `myRoster`/`draftedIds`), build
+```ts
+    const opponentRosters: Record<number, BoardPlayer[]> = {};
+    for (const pick of picks) {
+      const owner = pickOwner(pick.pickNo, teams, tradedPicks);
+      if (owner === mySlot) continue;
+      const pl = boardIndexes.byId.get(pick.playerId) ?? matchByName(pick); // whatever the existing myRoster code uses to resolve a pick to a board player
+      if (pl) (opponentRosters[owner] ??= []).push(pl);
+    }
+```
+and return it alongside `opponentCounts`. In `components/Cockpit.tsx`, add `opponentRosters: draft.opponentRosters` to both `recommend({...})` calls (the live one and `autoComplete`) and to the memo's dependency array. In `lib/engine/replay.ts`, inside the engine branch build `opponentRosters` from `rosters` (all slots except `engineSlot`, keyed 1-indexed) and pass it in the state. `scripts/backtest.ts` (the Sleeper replay) can stay on counts.
+
+- [ ] **Step 6: tsconfig / JSON import**
 
 `app/page.tsx` already imports `config/strategies.json`, so `resolveJsonModule` is on. If `tsc` complains about the relative JSON import from `lib/engine/`, add `"resolveJsonModule": true` under `compilerOptions` in `tsconfig.json`.
 
-- [ ] **Step 6: Perf test**
+- [ ] **Step 7: Perf test**
 
 Append to `tests/perf.test.ts` inside the describe:
 ```ts
@@ -1391,15 +1488,15 @@ Append to `tests/perf.test.ts` inside the describe:
   });
 ```
 
-- [ ] **Step 7: Run tests**
+- [ ] **Step 8: Run tests**
 
 Run: `npx tsc --noEmit && npx vitest run tests/engine.test.ts tests/perf.test.ts`
 Expected: the five unified tests PASS; perf PASS. If perf fails, lower `UNIFIED_ITERATIONS` to 80 and re-run; if still failing, reduce `UNIFIED_SHORTLIST` to 10. Record the final numbers in the commit message.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add lib/types.ts lib/engine/recommend.ts tests/engine.test.ts tests/perf.test.ts tsconfig.json
+git add lib/types.ts lib/engine/recommend.ts lib/client/useDraft.ts components/Cockpit.tsx lib/engine/replay.ts tests/engine.test.ts tests/perf.test.ts tsconfig.json
 git commit -m "Engine: unified value model — candidates scored by risk-adjusted expected points of the completed roster"
 ```
 
@@ -1721,5 +1818,7 @@ git fetch origin && git rebase origin/main && pnpm test && git push origin main
 **Spec coverage.** Objective (T3, T5) ✓ · outcome model calibrated from data (T1, T2) ✓ · opponents + my future picks (T4) ✓ · no static rules, legality only (T5 `legalPool`) ✓ · floors emergent, gated in backtest (T7 gate, T10 test) ✓ · waivers redraft / none best ball (T3 `WaiverLine`, T5) ✓ · stacking via correlation (T2, T3 test) ✓ · risk dial per format (T5 λ, T9) ✓ · market shrinkage (T5 `marketShrunkProjection`) ✓ · status/news → availability (T2 `STATUS_MISS_PROB`; Cockpit already escalates `injury`) ✓ · hold-out (T7) ✓ · objective calibration ρ (T7) ✓ · perf (T5 perf test) ✓ · one model for recap (T8) ✓ · strategies collapse (T9) ✓ · docs (T10) ✓. Out of scope per spec: per-player injury history, human-meta opponent model.
 
 **Placeholders.** None: every step has code or an exact command. T7 step 4's "diagnose before touching constants" names the only tunables.
+
+**Live / league-aware (added after review).** Recompute-per-pick is inherent (`recommend` is pure; Cockpit's memo keys on `draftedIds`). Opponents modeled by need: T4 `opponentChoice` + `CompletionShared.opponentRosters`; T5 wires real rosters from `useDraft` and `replay` ✓; test "re-evaluates the whole board when the room changes" ✓.
 
 **Type consistency.** `WaiverLine` (T3) used by T4/T5 ✓ · `CompletionPlayer.weeklyRate` = rate × avail, produced in T5 via `expectedWeekly` ✓ · `completeRosters` returns `number[][][]` indexed `[ci][it]` and T5 maps indices through `available` (the same array `players` was built from) ✓ · `evaluateCompletions(base, candidates, futurePicks[ci][it], …)` ✓ · `Recommendation.expectedPoints/pointsSd/gainOverNext/byeCoverWeeks` declared in T5 types, consumed in T6 ✓ · `coverageSlotWeeks` widened in T3 before T4 passes `{pos,bye}[]` ✓ · `simulateSeasons` signature keeps `(roster, config, sims, seed)` and adds an optional 5th param; `simulateRoom` unchanged ✓.
