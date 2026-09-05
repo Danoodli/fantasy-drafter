@@ -19,10 +19,12 @@ interface Props {
   onMark: (player: BoardPlayer) => void;
   /** Fires as the query changes so the tier board can live-filter with it. */
   onQueryChange?: (query: string) => void;
+  /** Override the prompt — e.g. while filling in an unknown pick. */
+  placeholder?: string;
 }
 
 const SearchBox = forwardRef<SearchBoxHandle, Props>(function SearchBox(
-  { players, draftedIds, onMark, onQueryChange },
+  { players, draftedIds, onMark, onQueryChange, placeholder },
   ref
 ) {
   const [query, setQueryRaw] = useState("");
@@ -67,7 +69,7 @@ const SearchBox = forwardRef<SearchBoxHandle, Props>(function SearchBox(
             inputRef.current?.blur();
           }
         }}
-        placeholder="Mark a pick — type a name, Enter marks it  ( / )"
+        placeholder={placeholder ?? "Mark a pick — type a name, Enter marks it  ( / )"}
         aria-label="Mark a player drafted"
         className="w-full rounded border border-line bg-panel px-3 py-2.5 text-[15px] placeholder:text-ink-faint"
       />

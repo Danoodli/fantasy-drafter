@@ -23,6 +23,7 @@ import Confetti, { type Burst } from "./Confetti";
 import Recap from "./Recap";
 import PlayerModal from "./PlayerModal";
 import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
+import RecentPicks from "./RecentPicks";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -66,6 +67,9 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const draft = useDraft(board, config);
   const [strategyId, setStrategyId] = useState(config.strategy);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  /** An unknown pick being filled in by name via the search box. */
+  const [fillTarget, setFillTarget] = useState<{ index: number; pickNo: number } | null>(null);
+  const byId = useMemo(() => new Map(board.players.map((p) => [p.id, p])), [board]);
   const [custom, setCustom] = useState<CustomStrategyParams | null>(null);
   const [showDials, setShowDials] = useState(false);
   const [toast, setToast] = useState<{ text: string; undoable: boolean } | null>(null);
@@ -84,7 +88,6 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     if (draft.myRoster.length < 3) return;
     const rosterCount = draft.myRoster.length;
     const t = setTimeout(() => {
-      const byId = new Map(board.players.map((p) => [p.id, p]));
       const rosters: BoardPlayer[][] = Array.from({ length: config.teams }, () => []);
       for (const pick of draft.picks) {
         const pl = byId.get(pick.playerId);
@@ -651,6 +654,36 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
         </section>
       )}
 
+      <RecentPicks
+        picks={draft.picks}
+        currentPick={draft.currentPick}
+        totalPicks={totalPicks}
+        mySlot={config.myDraftSlot ?? 1}
+        byId={byId}
+        manual={config.platform !== "sleeper" || !draft.live}
+        onOpen={setModalPlayer}
+        onRemove={(i) => {
+          draft.removeManualAt(i);
+          showToast("Pick removed.");
+        }}
+        onFillUnknown={(index, pickNo) => {
+          setFillTarget({ index, pickNo });
+          searchRef.current?.focus();
+        }}
+        onUnknown={() => {
+          draft.markUnknown();
+          showToast("Unknown pick added — click it in Recent to fill in the name.", true);
+        }}
+        onSetPick={(n) => {
+          const removed = draft.setCurrentPick(n);
+          showToast(
+            removed > 0
+              ? `Back to pick ${n} — removed ${removed} mark${removed === 1 ? "" : "s"}.`
+              : `Now at pick ${n}.`
+          );
+        }}
+      />
+
       {/* Warnings */}
       {(output?.strategyWarning || draft.syncError || staleSources.length > 0) && (
         <div className="mt-2 space-y-1">
@@ -804,9 +837,24 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
             ref={searchRef}
             players={gradedBoard.players}
             draftedIds={draft.draftedIds}
-            onMark={(p) => mark(p)}
+            onMark={(p) => {
+              if (fillTarget) {
+                draft.fillUnknown(fillTarget.index, p);
+                setFillTarget(null);
+                showToast(`Pick ${fillTarget.pickNo}: ${p.name}.`);
+              } else mark(p);
+            }}
             onQueryChange={setBoardQuery}
+            placeholder={fillTarget ? `Who was pick ${fillTarget.pickNo}? Type a name, Enter fills it in` : undefined}
           />
+          {fillTarget && (
+            <button
+              onClick={() => setFillTarget(null)}
+              className="-mt-1 self-end text-xs text-ink-faint hover:text-ink"
+            >
+              cancel fill-in
+            </button>
+          )}
           </div>
 
           {/* Look-ahead: what's probably still there at my pick after this one */}

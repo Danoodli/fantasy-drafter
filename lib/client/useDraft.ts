@@ -101,12 +101,30 @@ export interface DraftApi {
   markDrafted: (player: BoardPlayer) => void;
   /** Append many manual picks at once, in order (auto-complete). */
   markMany: (players: BoardPlayer[]) => void;
+  /**
+   * Someone drafted a player we can't identify (or we missed a pick): advance
+   * the pick counter with a placeholder so "you're on the clock" stays honest.
+   */
+  markUnknown: (count?: number) => void;
+  /**
+   * Resync to the real draft: forward pads with unknown picks, backward
+   * removes the most recent manual marks. Returns how many marks were removed.
+   */
+  setCurrentPick: (pickNo: number) => number;
+  /** Replace the unknown placeholder at a manual index with the real player. */
+  fillUnknown: (index: number, player: BoardPlayer) => void;
   undo: () => void;
+  /** Undo the last n manual marks at once (batch imports). */
+  undoMany: (n: number) => void;
   canUndo: boolean;
+  /** Number of manual (non-API) picks — the batch-undo horizon. */
+  manualCount: number;
   /** True if this player left the board via a manual mark (so it can be undone). */
   isManuallyMarked: (playerId: string) => boolean;
   /** Put a specific manually-marked player back in the pool. */
   unmark: (playerId: string) => void;
+  /** Remove one manual pick by its index (works for unknown placeholders too). */
+  removeManualAt: (index: number) => void;
   /** Clear every manual pick — restart a manual/test draft. */
   reset: () => void;
   lastPickFlash: number; // bump counter for UI flash on new picks
@@ -127,6 +145,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
    *  without re-subscribing (and restarting the timer) on every pick. */
   const untilMeRef = useRef<number | null>(null);
   const restoredRef = useRef(false);
+  /** Merged pick count as of the last render, for setCurrentPick. */
+  const currentPickRef = useRef(1);
 
   // History-fitted drift prior, if the ETL produced one for THIS league.
   useEffect(() => {
@@ -257,17 +277,20 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       playerId: matchToBoard(p, boardIndexes.byId, boardIndexes.byName),
     }));
     const known = new Set(resolved.map((p) => p.playerId).filter(Boolean));
-    const extras = manualPicks.filter((m) => !known.has(m.playerId));
     const merged = [...resolved];
-    for (const extra of extras) {
+    manualPicks.forEach((m, manualIndex) => {
+      if (m.playerId && known.has(m.playerId)) return; // the API caught up with this mark
       const pickNo = merged.length + 1;
-      const { round } = slotOnClock(pickNo, teams);
-      merged.push({ ...extra, pickNo, round, draftSlot: slotOnClock(pickNo, teams).slot });
-    }
+      const { round, slot } = slotOnClock(pickNo, teams);
+      merged.push({ ...m, pickNo, round, draftSlot: slot, manualIndex });
+    });
     return merged;
   }, [apiPicks, manualPicks, boardIndexes, teams]);
 
   const currentPick = picks.length + 1;
+  useEffect(() => {
+    currentPickRef.current = currentPick;
+  }, [currentPick]);
   const round = slotOnClock(Math.min(currentPick, teams * rounds), teams).round;
   const allMyPicks = useMemo(
     () => picksForSlot(mySlot, teams, rounds, tradedPicks),
@@ -333,6 +356,34 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     []
   );
 
+  const markUnknown = useCallback((count = 1) => {
+    if (count <= 0) return;
+    setManualPicks((prev) => [
+      ...prev,
+      ...Array.from({ length: count }, () => ({
+        playerId: "",
+        playerName: "Unknown pick",
+        pos: null,
+        pickNo: 0,
+        round: 0,
+        draftSlot: 0,
+        isKeeper: false,
+        byMe: false,
+      })),
+    ]);
+  }, []);
+
+  const fillUnknown = useCallback((index: number, player: BoardPlayer) => {
+    setManualPicks((prev) => {
+      const target = prev[index];
+      if (!target || target.playerId !== "") return prev;
+      if (prev.some((p) => p.playerId === player.id)) return prev;
+      const next = [...prev];
+      next[index] = { ...target, playerId: player.id, playerName: player.name, pos: player.pos };
+      return next;
+    });
+  }, []);
+
   const markMany = useCallback((players: BoardPlayer[]) => {
     setManualPicks((prev) => {
       const have = new Set(prev.map((p) => p.playerId));
@@ -356,13 +407,42 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     setManualPicks((prev) => prev.slice(0, -1));
   }, []);
 
+  const undoMany = useCallback((n: number) => {
+    if (n <= 0) return;
+    setManualPicks((prev) => prev.slice(0, Math.max(0, prev.length - n)));
+  }, []);
+
+  // Resync needs the merged pick count, which lives in `picks` above — so
+  // it reads through a ref set on each render.
+  const setCurrentPick = useCallback(
+    (pickNo: number): number => {
+      const delta = pickNo - currentPickRef.current;
+      if (delta > 0) {
+        markUnknown(delta);
+        return 0;
+      }
+      if (delta < 0) {
+        const remove = -delta;
+        setManualPicks((prev) => prev.slice(0, Math.max(0, prev.length - remove)));
+        return remove;
+      }
+      return 0;
+    },
+    [markUnknown]
+  );
+
   const isManuallyMarked = useCallback(
     (playerId: string) => manualPicks.some((p) => p.playerId === playerId),
     [manualPicks]
   );
 
   const unmark = useCallback((playerId: string) => {
+    if (!playerId) return; // unknown placeholders are removed by index
     setManualPicks((prev) => prev.filter((p) => p.playerId !== playerId));
+  }, []);
+
+  const removeManualAt = useCallback((index: number) => {
+    setManualPicks((prev) => (index >= 0 && index < prev.length ? prev.filter((_, i) => i !== index) : prev));
   }, []);
 
   const reset = useCallback(() => {
@@ -386,10 +466,16 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     onClockSlot: pickOwner(Math.min(currentPick, teams * rounds), teams, tradedPicks),
     markDrafted,
     markMany,
+    markUnknown,
+    setCurrentPick,
+    fillUnknown,
     undo,
+    undoMany,
     canUndo: manualPicks.length > 0,
+    manualCount: manualPicks.length,
     isManuallyMarked,
     unmark,
+    removeManualAt,
     reset,
     lastPickFlash,
   };
