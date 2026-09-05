@@ -1297,7 +1297,7 @@ Add imports:
 import outcomeJson from "../../config/outcome-model.json";
 import type { OutcomeParams } from "./outcomeModel";
 import { expectedWeekly, healthyRate, availability } from "./outcome";
-import { evaluateCompletions, marginalGainNow, type WaiverLine } from "./rosterValue";
+import { evaluateCompletions, marginalGainNow, positionGainTable, type WaiverLine } from "./rosterValue";
 import { completeRosters, type CompletionPlayer, type CompletionShared } from "./completion";
 import { coverageSlotWeeks } from "./coverage";
 ```
@@ -1380,15 +1380,19 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
     }
   }
 
-  // Shortlist: best marginal gain now, plus the best at every position so a
-  // cross-position comparison always happens.
+  // Shortlist: two proxies, because each is blind to something. The closed-form
+  // lineup delta sees FLEX upgrades but only BYE cover (in expectation a starter is
+  // never "out"); the insurance-aware gain table sees injury cover but approximates
+  // FLEX. Take the top of both, plus the best at every position so a cross-position
+  // comparison always happens. The completed-roster simulation decides.
+  const table = positionGainTable(state.myRoster, params, config, waiver);
+  const byTable = [...legal].sort((a, b) => table[b.pos](expectedWeekly(b, params, projOf(b))) - table[a.pos](expectedWeekly(a, params, projOf(a))));
   const gains = new Map(legal.map((p) => [p.id, marginalGainNow(p, state.myRoster, params, config, waiver, projOf)]));
-  const ranked = [...legal].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
-  const shortlist = ranked.slice(0, UNIFIED_SHORTLIST);
-  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
-    const best = ranked.find((p) => p.pos === pos);
-    if (best && !shortlist.includes(best)) shortlist.push(best);
-  }
+  const byEv = [...legal].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
+  const shortlist: BoardPlayer[] = [];
+  const add = (p: BoardPlayer | undefined) => { if (p && !shortlist.includes(p)) shortlist.push(p); };
+  for (let i = 0; i < UNIFIED_SHORTLIST / 2; i++) { add(byTable[i]); add(byEv[i]); }
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) add(byTable.find((p) => p.pos === pos));
 
   // Roster completion from the current board.
   const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
