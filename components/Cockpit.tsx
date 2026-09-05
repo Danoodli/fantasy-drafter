@@ -25,6 +25,9 @@ import PlayerModal from "./PlayerModal";
 import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
 import RecentPicks from "./RecentPicks";
 import RoomStrip from "./RoomStrip";
+import PasteImport from "./PasteImport";
+import { parsePastedPicks } from "../lib/draft/pasteImport";
+import type { ImportItem } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -73,7 +76,9 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const byId = useMemo(() => new Map(board.players.map((p) => [p.id, p])), [board]);
   const [custom, setCustom] = useState<CustomStrategyParams | null>(null);
   const [showDials, setShowDials] = useState(false);
-  const [toast, setToast] = useState<{ text: string; undoable: boolean } | null>(null);
+  const [toast, setToast] = useState<{ text: string; undoable: boolean; onUndo?: () => void } | null>(null);
+  /** Paste-import modal: null closed, "" opens with an empty textarea. */
+  const [pasteText, setPasteText] = useState<string | null>(null);
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
   const [endedEarly, setEndedEarly] = useState(false);
   const [boardQuery, setBoardQuery] = useState("");
@@ -322,11 +327,47 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     showToast(mine ? `Drafted ${player.name}.` : `${player.name} is off the board.`, true);
   }
 
-  function showToast(text: string, undoable = false) {
-    setToast({ text, undoable });
+  function showToast(text: string, undoable = false, onUndo?: () => void) {
+    setToast({ text, undoable, onUndo });
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), undoable ? 4500 : 2200);
+    toastTimer.current = setTimeout(() => setToast(null), undoable ? (onUndo ? 8000 : 4500) : 2200);
   }
+
+  /** Commit a batch of picks (paste / screen sync) with one undo for the lot. */
+  function commitImport(items: ImportItem[], source: string) {
+    if (items.length === 0) return;
+    const out = draft.applyImport(items);
+    const parts = [
+      out.added + out.filled > 0 ? `${out.added + out.filled} marked` : null,
+      out.padded > 0 ? `${out.padded} unknown` : null,
+      out.skipped > 0 ? `${out.skipped} already gone` : null,
+    ].filter(Boolean);
+    showToast(`${source}: ${parts.join(" · ") || "nothing new"}.`, out.added + out.filled + out.padded > 0, () =>
+      draft.restoreManual(out.snapshot)
+    );
+  }
+
+  // Paste anywhere: a multi-line clipboard (or several names) opens the import
+  // preview. A single name pasted into the search box stays a normal paste.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (pasteText != null || confirm || modalPlayer) return;
+      const text = e.clipboardData?.getData("text") ?? "";
+      if (!text.trim()) return;
+      const target = e.target as HTMLElement | null;
+      const inField = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+      const multiLine = /\n/.test(text.trim());
+      if (inField && !multiLine) return;
+      if (!multiLine) {
+        const found = parsePastedPicks(text, gradedBoard.players, draft.draftedIds, { teams: config.teams }).matches.filter((m) => m.player).length;
+        if (found < 2) return;
+      }
+      e.preventDefault();
+      setPasteText(text);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }); // cheap, always-fresh closures (same pattern as the keyboard handler)
 
   /** Fill the rest of the draft: engine picks for me, ADP for the room. */
   function autoComplete() {
@@ -878,14 +919,23 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
             onQueryChange={setBoardQuery}
             placeholder={fillTarget ? `Who was pick ${fillTarget.pickNo}? Type a name, Enter fills it in` : undefined}
           />
-          {fillTarget && (
+          <div className="-mt-1 flex items-center justify-between gap-2">
+            {fillTarget ? (
+              <button onClick={() => setFillTarget(null)} className="text-xs text-ink-faint hover:text-ink">
+                cancel fill-in
+              </button>
+            ) : (
+              <span className="text-[11px] text-ink-faint">⌘V anywhere pastes a whole picks list</span>
+            )}
             <button
-              onClick={() => setFillTarget(null)}
-              className="-mt-1 self-end text-xs text-ink-faint hover:text-ink"
+              data-tour="paste"
+              onClick={() => setPasteText("")}
+              title="Paste the drafted-players list from any draft room — every name is matched and marked at once"
+              className="rounded border border-line bg-panel px-2 py-1 text-xs text-ink-dim hover:text-ink"
             >
-              cancel fill-in
+              Paste picks
             </button>
-          )}
+          </div>
           </div>
 
           {/* Look-ahead: what's probably still there at my pick after this one */}
@@ -1050,21 +1100,37 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           className="toast-in fixed bottom-5 left-1/2 flex items-center gap-3 rounded-lg bg-panel-2 px-4 py-2 text-sm shadow-xl"
         >
           {toast.text}
-          {toast.undoable && draft.canUndo && (
+          {toast.undoable && (toast.onUndo || draft.canUndo) && (
             <button
               onClick={() => {
-                draft.undo();
+                if (toast.onUndo) toast.onUndo();
+                else draft.undo();
                 showToast("Undone.");
               }}
               className="font-semibold text-wr hover:underline"
             >
-              Undo
+              {toast.onUndo ? "Undo all" : "Undo"}
             </button>
           )}
         </div>
       )}
 
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
+
+      {pasteText != null && (
+        <PasteImport
+          initialText={pasteText}
+          players={gradedBoard.players}
+          draftedIds={draft.draftedIds}
+          teams={config.teams}
+          currentPick={draft.currentPick}
+          onCommit={(items) => {
+            setPasteText(null);
+            commitImport(items, "Pasted");
+          }}
+          onClose={() => setPasteText(null)}
+        />
+      )}
 
       {/* Player detail */}
       {modalPlayer && (

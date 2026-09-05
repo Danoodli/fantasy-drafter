@@ -82,6 +82,43 @@ function matchToBoard(
   return hit?.id ?? "";
 }
 
+export interface ImportItem {
+  player: BoardPlayer;
+  pickNo: number | null;
+}
+
+export interface ImportOutcome {
+  added: number;
+  filled: number;
+  padded: number;
+  skipped: number;
+  snapshot: DraftPick[];
+}
+
+function manualPickOf(player: BoardPlayer): DraftPick {
+  return {
+    playerId: player.id,
+    playerName: player.name,
+    pos: player.pos,
+    pickNo: 0,
+    round: 0,
+    draftSlot: 0,
+    isKeeper: false,
+    byMe: false,
+  };
+}
+
+const UNKNOWN_PICK: DraftPick = {
+  playerId: "",
+  playerName: "Unknown pick",
+  pos: null,
+  pickNo: 0,
+  round: 0,
+  draftSlot: 0,
+  isKeeper: false,
+  byMe: false,
+};
+
 export interface DraftApi {
   picks: DraftPick[];
   currentPick: number;
@@ -113,6 +150,15 @@ export interface DraftApi {
   setCurrentPick: (pickNo: number) => number;
   /** Replace the unknown placeholder at a manual index with the real player. */
   fillUnknown: (index: number, player: BoardPlayer) => void;
+  /**
+   * Batch import (paste / screen sync). Items with a pick number land at that
+   * pick: gaps are padded with unknowns, an unknown already sitting there is
+   * filled in. Items without one append in order. Returns what happened plus
+   * a snapshot that `restoreManual` can roll back to.
+   */
+  applyImport: (items: ImportItem[]) => ImportOutcome;
+  /** Roll the manual pick list back to a snapshot (undo a whole import). */
+  restoreManual: (snapshot: DraftPick[]) => void;
   undo: () => void;
   /** Undo the last n manual marks at once (batch imports). */
   undoMany: (n: number) => void;
@@ -290,7 +336,9 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const currentPick = picks.length + 1;
   useEffect(() => {
     currentPickRef.current = currentPick;
-  }, [currentPick]);
+    picksRef.current = picks;
+    manualRef.current = manualPicks;
+  }, [currentPick, picks, manualPicks]);
   const round = slotOnClock(Math.min(currentPick, teams * rounds), teams).round;
   const allMyPicks = useMemo(
     () => picksForSlot(mySlot, teams, rounds, tradedPicks),
@@ -358,19 +406,52 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
 
   const markUnknown = useCallback((count = 1) => {
     if (count <= 0) return;
-    setManualPicks((prev) => [
-      ...prev,
-      ...Array.from({ length: count }, () => ({
-        playerId: "",
-        playerName: "Unknown pick",
-        pos: null,
-        pickNo: 0,
-        round: 0,
-        draftSlot: 0,
-        isKeeper: false,
-        byMe: false,
-      })),
-    ]);
+    setManualPicks((prev) => [...prev, ...Array.from({ length: count }, () => ({ ...UNKNOWN_PICK }))]);
+  }, []);
+
+  // The merged list as of the last render, for the import to reason about
+  // pick numbers (API picks occupy the front of it).
+  const picksRef = useRef<DraftPick[]>([]);
+  const manualRef = useRef<DraftPick[]>([]);
+  const applyImport = useCallback((items: ImportItem[]): ImportOutcome => {
+    const snapshot = manualRef.current;
+    const merged = picksRef.current;
+    const apiCount = merged.filter((p) => p.manualIndex == null).length;
+    const next = [...snapshot];
+    const have = new Set<string>();
+    for (const p of merged) if (p.playerId) have.add(p.playerId);
+    let added = 0, filled = 0, padded = 0, skipped = 0;
+    const mergedLength = () => apiCount + next.length;
+    for (const item of items) {
+      if (have.has(item.player.id)) {
+        skipped++;
+        continue;
+      }
+      const n = item.pickNo;
+      if (n != null && n <= mergedLength()) {
+        const manualIdx = n - 1 - apiCount;
+        if (manualIdx >= 0 && next[manualIdx]?.playerId === "") {
+          next[manualIdx] = manualPickOf(item.player);
+          have.add(item.player.id);
+          filled++;
+          continue;
+        }
+        // That pick belongs to someone we already know — append instead of clobbering.
+      } else if (n != null && n > mergedLength() + 1) {
+        const gap = n - mergedLength() - 1;
+        for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
+        padded += gap;
+      }
+      next.push(manualPickOf(item.player));
+      have.add(item.player.id);
+      added++;
+    }
+    setManualPicks(next);
+    return { added, filled, padded, skipped, snapshot };
+  }, []);
+
+  const restoreManual = useCallback((snapshot: DraftPick[]) => {
+    setManualPicks(snapshot);
   }, []);
 
   const fillUnknown = useCallback((index: number, player: BoardPlayer) => {
@@ -469,6 +550,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     markUnknown,
     setCurrentPick,
     fillUnknown,
+    applyImport,
+    restoreManual,
     undo,
     undoMany,
     canUndo: manualPicks.length > 0,

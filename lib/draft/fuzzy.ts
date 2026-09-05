@@ -5,11 +5,6 @@
 import type { BoardPlayer } from "../types";
 import { mergeName } from "../etl/names";
 
-interface Match {
-  player: BoardPlayer;
-  score: number;
-}
-
 /**
  * Score how well query tokens match name tokens, in order. Each query token
  * must match SOME name token at or after the previous match position:
@@ -46,15 +41,23 @@ function tokenScore(queryTokens: string[], nameTokens: string[]): number {
   return score;
 }
 
-export function searchPlayers(
-  query: string,
-  players: BoardPlayer[],
-  limit = 8
-): BoardPlayer[] {
+export interface ScoredPlayer {
+  player: BoardPlayer;
+  score: number;
+  /** The normalized query equals the normalized full name. */
+  exact: boolean;
+}
+
+/**
+ * Every player the query could mean, best first, with the match score —
+ * the paste/OCR importers need the scores to judge confidence; the search
+ * box only needs the order.
+ */
+export function scorePlayers(query: string, players: BoardPlayer[]): ScoredPlayer[] {
   const q = mergeName(query.replace(/\./g, " "));
   if (!q) return [];
   const queryTokens = q.split(" ").filter(Boolean);
-  const matches: Match[] = [];
+  const matches: ScoredPlayer[] = [];
   for (const p of players) {
     const name = mergeName(p.name);
     const nameTokens = name.split(" ");
@@ -64,8 +67,18 @@ export function searchPlayers(
     if (score <= 0) continue;
     // Earlier-ADP players are the likelier intent; small, bounded boost.
     const adpBoost = Math.max(0, 2 - p.adp / 100);
-    matches.push({ player: p, score: score + adpBoost });
+    matches.push({ player: p, score: score + adpBoost, exact: name === q });
   }
   matches.sort((a, b) => b.score - a.score || a.player.adp - b.player.adp);
-  return matches.slice(0, limit).map((m) => m.player);
+  return matches;
+}
+
+export function searchPlayers(
+  query: string,
+  players: BoardPlayer[],
+  limit = 8
+): BoardPlayer[] {
+  return scorePlayers(query, players)
+    .slice(0, limit)
+    .map((m) => m.player);
 }
