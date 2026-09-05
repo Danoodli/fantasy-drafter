@@ -1,16 +1,10 @@
 // The recommendation engine's front door. Pure — zero I/O, deterministic
 // given the seed, so it unit-tests and backtests offline.
 
-import type {
-  BoardPlayer,
-  EngineOutput,
-  EngineState,
-  Position,
-  Recommendation,
-  Strategy,
-} from "../types";
+import type { BoardPlayer, EngineOutput, EngineState, Position, Recommendation, Strategy, LeagueConfig } from "../types";
 import { survivalProb } from "./survival";
 import { vona, expectedBestAtPick } from "./vona";
+import { coverageValue } from "./coverage";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
 import { buildReason, buildAlternateReason } from "./reasons";
 import { slotOnClock, pickOwner } from "../draft/snake";
@@ -75,6 +69,15 @@ export const BESTBALL_POS_VALUE: Record<Position, number> = {
   K: 1,
   DST: 1,
 };
+
+/**
+ * Redraft construction floors: bodies per position needed to cover byes and
+ * one injury, beyond the starting lineup. The coverage math in
+ * ./coverage.ts should make these rarely bind — they are the backstop that
+ * guarantees a roster can field its own lineup in week 6. TE/K/DST are
+ * exempt; a second TE is a luxury the bye math can still argue for on its own.
+ */
+export const REDRAFT_FLOORS: Partial<Record<Position, number>> = { QB: 2, RB: 3, WR: 3 };
 
 export function positionMultiplier(strategy: Strategy, pos: Position, round: number): number {
   for (const [range, mults] of Object.entries(strategy.positionMultipliers)) {
@@ -221,9 +224,10 @@ function applyNeed(value: number, need: number): number {
  *   with his quality against the league's last starter (VOLS). Two players who
  *   would fill the same FLEX slot with the same projection are worth the same,
  *   whatever their positions' replacement levels look like.
- * - A bench player only scores when a starter sits, and then he replaces
- *   replacement level — so his value is VORP, scaled by needWeight's
- *   insurance factor downstream.
+ * - A bench player only scores in weeks a starting slot at his position
+ *   would otherwise be empty — so his value is the expected slot-weeks he
+ *   covers (byes exactly, injuries probabilistically) times his weekly rate.
+ *   See ./coverage.ts. Position-neutral: no replacement baseline involved.
  *
  * The blend model priced Javonte Williams (217 proj) 84 value-points above
  * Keenan Allen (213 proj) for the same FLEX slot, because RB58 projects 80 and
@@ -232,7 +236,9 @@ function applyNeed(value: number, need: number): number {
 function makeLineupValueFn(
   available: BoardPlayer[],
   nextPick: number,
-  drift: Partial<Record<Position, number>>
+  drift: Partial<Record<Position, number>>,
+  roster: BoardPlayer[],
+  config: LeagueConfig
 ): (p: BoardPlayer, need: number) => number {
   const expBest = new Map<Position, number>();
   for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
@@ -244,7 +250,13 @@ function makeLineupValueFn(
       const vonaNow = p.projPoints - (expBest.get(p.pos) ?? 0);
       return LINEUP_VONA_WEIGHT * vonaNow + (1 - LINEUP_VONA_WEIGHT) * p.vols + sosAdjust(p, false);
     }
-    return p.vorp + sosAdjust(p, false);
+    // Bench: the slot-weeks he fills that this roster would leave EMPTY (byes
+    // are certain, injuries probabilistic), times his scoring rate. Already
+    // has diminishing returns built in, so the caller must not also apply the
+    // bench need weight. The first version of this model returned raw VORP
+    // here — the steep RB curve made an 8th RB outbid a 3rd WR and produced
+    // 7-RB / 2-WR rosters with no bye cover at all.
+    return coverageValue(p, roster, config);
   };
 }
 
@@ -285,8 +297,11 @@ function quickScoreAll(
     const mult = positionMultiplier(strategy, p.pos, round);
     const need = needWeight(p.pos, myCounts, state);
     const injuryMult = p.injury ? INJURY_PENALTY[p.injury] ?? 1 : 1;
-    const raw = lineupValue ? lineupValue(p, need) : valueFn(p);
-    let base = applyNeed(raw * mult * injuryMult, need);
+    // Lineup model: starters still take the 0.85/1.0 slot weight; bench value
+    // already encodes diminishing returns (coverage), so it is NOT re-weighted.
+    let base = lineupValue
+      ? lineupValue(p, need) * mult * injuryMult * (need >= STARTER_NEED_MIN ? need : 1)
+      : applyNeed(valueFn(p) * mult * injuryMult, need);
     const urg = urgencyOf(p.pos);
     if (urg > 1) {
       // Multiplicative when the player has value, additive floor so a weak
@@ -340,7 +355,17 @@ export function requiredFloor(
   config: EngineState["config"]
 ): number {
   const starters = config.rosterSlots[pos] ?? 0;
-  if (config.leagueType !== "bestball") return starters;
+  if (config.leagueType !== "bestball") {
+    // Only when every floor fits: a 10-round draft cannot carry 2 QB / 3 RB /
+    // 3 WR plus starters, so it falls back to the lineup itself.
+    const all = ["QB", "RB", "WR", "TE", "K", "DST"] as Position[];
+    const total = all.reduce(
+      (a, q) => a + Math.max(config.rosterSlots[q] ?? 0, REDRAFT_FLOORS[q] ?? 0),
+      0
+    ) + (config.rosterSlots.FLEX ?? 0);
+    if (total > config.rounds) return starters;
+    return Math.max(starters, REDRAFT_FLOORS[pos] ?? 0);
+  }
   if (starters === 0) return 0; // formats without K/DST need none
   const minF = BESTBALL_TARGETS[pos]?.[0] ?? 0;
   return Math.max(starters, Math.round(minF * config.rounds));
@@ -349,12 +374,14 @@ export function requiredFloor(
 /** Per-position shortfall vs the floor, plus total unmet count. */
 function shortfalls(
   state: EngineState,
-  myCounts: Partial<Record<Position, number>>
+  myCounts: Partial<Record<Position, number>>,
+  startersOnly = false
 ): { missing: Partial<Record<Position, number>>; unmet: number } {
   const missing: Partial<Record<Position, number>> = {};
   let unmet = 0;
   for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
-    const m = Math.max(0, requiredFloor(pos, state.config) - (myCounts[pos] ?? 0));
+    const floor = startersOnly ? (state.config.rosterSlots[pos] ?? 0) : requiredFloor(pos, state.config);
+    const m = Math.max(0, floor - (myCounts[pos] ?? 0));
     if (m > 0) missing[pos] = m;
     unmet += m;
   }
@@ -374,11 +401,21 @@ function hardFilter(
   const bestball = config.leagueType === "bestball";
   const lastTwoRounds = round > config.rounds - 2;
 
-  // If my remaining picks are only enough to fill the construction floors,
-  // recommend nothing but the unmet positions.
-  const { missing, unmet } = shortfalls(state, myCounts);
-  const required = Object.keys(missing) as Position[];
-  const mustFill = myPicks.length <= unmet;
+  // Must-fill, in two tiers. An empty STARTING slot always outranks a depth
+  // floor: with two picks left and K + DST unfilled, the answer is K and DST,
+  // not a second QB for bye cover. Only when every starter can still be
+  // filled do the depth floors (2 QB / 3 RB / 3 WR) get to force a pick.
+  const starters = shortfalls(state, myCounts, true);
+  const floors = shortfalls(state, myCounts);
+  let required: Position[] = [];
+  let mustFill = false;
+  if (myPicks.length <= starters.unmet) {
+    required = Object.keys(starters.missing) as Position[];
+    mustFill = true;
+  } else if (myPicks.length <= floors.unmet) {
+    required = Object.keys(floors.missing) as Position[];
+    mustFill = true;
+  }
 
   const qbSlots = config.rosterSlots.QB ?? 0;
   return available.filter((p) => {
@@ -438,7 +475,7 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
   // as an explicit opt-in for comparison.
   const lineupValue =
     !bestball && (strategy.valueModel ?? "lineup") === "lineup"
-      ? makeLineupValueFn(available, nextPick, drift)
+      ? makeLineupValueFn(available, nextPick, drift, state.myRoster, config)
       : undefined;
   const pool = hardFilter(available, state, myCounts, round);
   const scored = quickScoreAll(pool, state, strategy, myCounts, round, valueFn, lineupValue).sort(

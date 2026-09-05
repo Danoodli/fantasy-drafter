@@ -265,6 +265,63 @@ describe("recommendation engine (integration on real board)", () => {
     expect(["K", "DST"]).toContain(out.recommendations[0].player.pos);
   });
 
+  it("uses spare late picks to cover byes, but never at the cost of an empty starting slot", () => {
+    // Redraft floors are 2 QB / 3 RB / 3 WR. Here QB2 is the only floor unmet,
+    // K and DST are the only starters unmet, and there are exactly 3 picks.
+    const roster = [
+      ...board.players.filter((p) => p.pos === "QB").slice(0, 1),
+      ...board.players.filter((p) => p.pos === "RB").slice(0, 4),
+      ...board.players.filter((p) => p.pos === "WR").slice(0, 4),
+      ...board.players.filter((p) => p.pos === "TE").slice(0, 2),
+    ];
+    const drafted = new Set(roster.map((p) => p.id));
+    const mine = [...roster];
+    const taken: string[] = [];
+    for (const pick of [149, 164, 173]) {
+      const out = recommend(
+        makeState({
+          myRoster: mine,
+          draftedIds: drafted,
+          currentPick: pick,
+          myPicks: [149, 164, 173].filter((n) => n >= pick),
+        })
+      );
+      const choice = out.recommendations[0].player;
+      taken.push(choice.pos);
+      mine.push(choice);
+      drafted.add(choice.id);
+    }
+    // All three holes get filled — the QB2 for bye cover AND both starters.
+    expect(taken.sort()).toEqual(["DST", "K", "QB"]);
+  });
+
+  it("never finishes a 15-round redraft with fewer than 3 WR or 3 RB or 2 QB", () => {
+    // The whole point of the coverage math + floors: 7 RB / 2 WR is unreachable.
+    for (const slot of [1, 6, 12]) {
+      const myPicks = picksForSlot(slot, 12, 15);
+      const drafted = new Set<string>();
+      const mine: BoardPlayer[] = [];
+      const pool = [...board.players].sort((a, b) => a.adp - b.adp);
+      let cursor = 0;
+      for (let pick = 1; pick <= 180; pick++) {
+        if (myPicks.includes(pick)) {
+          const out = recommend(makeState({ myRoster: mine, draftedIds: drafted, currentPick: pick, myPicks: myPicks.filter((n) => n >= pick), config: { ...config, myDraftSlot: slot } }));
+          const c = out.recommendations[0].player;
+          mine.push(c);
+          drafted.add(c.id);
+          continue;
+        }
+        while (cursor < pool.length && drafted.has(pool[cursor].id)) cursor++;
+        if (cursor < pool.length) drafted.add(pool[cursor].id);
+      }
+      const n = (pos: string) => mine.filter((p) => p.pos === pos).length;
+      expect(n("WR"), `slot ${slot} WR`).toBeGreaterThanOrEqual(3);
+      expect(n("RB"), `slot ${slot} RB`).toBeGreaterThanOrEqual(3);
+      expect(n("QB"), `slot ${slot} QB`).toBeGreaterThanOrEqual(2);
+      expect(n("K") + n("DST"), `slot ${slot} K+DST`).toBe(2);
+    }
+  });
+
 });
 
 // ---------------------------------------------------------------------------
