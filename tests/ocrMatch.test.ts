@@ -89,6 +89,16 @@ describe("matchOcrLines", () => {
     expect(names(r)).toEqual(["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"]);
   });
 
+  it("attaches a label-only line's pick number to the name line beside it (ESPN below, Sleeper above)", () => {
+    const espn = matchOcrLines(
+      lines("Puka Nacua / LAR WR", "R1, P2 - Team 7", "Ja'Marr Chase / CIN WR", "R1, P3 - Team 10"),
+      players, none, { teams: 12 }
+    );
+    expect(espn.matches.map((m) => [m.player.name, m.pickNo])).toEqual([["Puka Nacua", 2], ["Ja'Marr Chase", 3]]);
+    const sleeper = matchOcrLines(lines("1.02", "Puka Nacua", "1.03", "Ja'Marr Chase"), players, none, { teams: 12 });
+    expect(sleeper.matches.map((m) => [m.player.name, m.pickNo])).toEqual([["Puka Nacua", 2], ["Ja'Marr Chase", 3]]);
+  });
+
   it("reads ESPN-style 'Name / TEAM POS' lines", () => {
     const r = matchOcrLines(lines("Puka Nacua / LAR WR", "Amon-Ra St. Brown / DET WR"), players, none, { teams: 12 });
     expect(names(r)).toEqual(["Puka Nacua", "Amon-Ra St. Brown"]);

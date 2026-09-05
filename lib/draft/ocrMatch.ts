@@ -61,7 +61,15 @@ export function matchOcrLines(
   const best = new Map<string, OcrMatch>();
   let maxPickNo: number | null = null;
 
-  for (const line of lines) {
+  // Pass 1: what each line says — a pick number, players, or a defense.
+  interface Read {
+    raw: string;
+    y: number;
+    pickNo: number | null;
+    players: { player: BoardPlayer; score: number }[];
+  }
+  const reads: Read[] = [];
+  for (const line of [...lines].sort((a, b) => a.y - b.y)) {
     const raw = line.text.trim();
     if (!raw) continue;
     const pickNo = extractPickNo(raw, opts.teams);
@@ -69,21 +77,33 @@ export function matchOcrLines(
     const tokens = normalizeOcr(raw);
     if (tokens.length === 0) continue;
     const hints = lineHints(tokens, raw);
-
     const found = findPlayers(tokens, vocab, counts, { pos: hints.pos, team: hints.team }, { minScore, onTie: "skip" });
-    if (found.length === 0) {
+    const players_: Read["players"] = found.map((f) => ({ player: f.player, score: f.score }));
+    if (players_.length === 0) {
       const dst = findDefense(raw, hints.team, players);
-      if (dst && !draftedIds.has(dst.id)) {
-        const existing = best.get(dst.id);
-        if (!existing || existing.score < 0.9) best.set(dst.id, { player: dst, line: raw, score: 0.9, pickNo, y: line.y });
-      }
-      continue;
+      if (dst) players_.push({ player: dst, score: 0.9 });
     }
-    for (const f of found) {
-      if (draftedIds.has(f.player.id)) continue;
-      const existing = best.get(f.player.id);
-      const m: OcrMatch = { player: f.player, line: raw, score: f.score, pickNo: found.length === 1 ? pickNo : null, y: line.y };
-      if (!existing || existing.score < m.score) best.set(f.player.id, m);
+    reads.push({ raw, y: line.y, pickNo, players: players_ });
+  }
+
+  // Pass 2: a label-only line ("R1, P4 - Team 12", "1.04") numbers the name
+  // line next to it — below the name on ESPN, above it on Sleeper. Prefer the
+  // unnumbered name line just above; else the one just below.
+  for (let i = 0; i < reads.length; i++) {
+    const r = reads[i];
+    if (r.pickNo == null || r.players.length > 0) continue;
+    const above = reads[i - 1];
+    const below = reads[i + 1];
+    if (above && above.players.length === 1 && above.pickNo == null) above.pickNo = r.pickNo;
+    else if (below && below.players.length === 1 && below.pickNo == null) below.pickNo = r.pickNo;
+  }
+
+  for (const r of reads) {
+    for (const { player, score } of r.players) {
+      if (draftedIds.has(player.id)) continue;
+      const existing = best.get(player.id);
+      const m: OcrMatch = { player, line: r.raw, score, pickNo: r.players.length === 1 ? r.pickNo : null, y: r.y };
+      if (!existing || existing.score < m.score) best.set(player.id, m);
     }
   }
 
