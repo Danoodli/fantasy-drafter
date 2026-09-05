@@ -1,9 +1,29 @@
 // Sleeper live-draft client. Read-only, no auth, free for personal use.
-// Polled every 2s on draft night (Sleeper's limit is 1000 calls/min; we use 30).
+//
+// Polled every 1-2s on draft night. Sleeper's limit is ~1000 calls/min and we
+// peak at 60, so the constraint was never rate limiting — it was CACHING. The
+// API sits behind Cloudflare and serves `cache-control: public, s-maxage=...,
+// stale-while-revalidate=...` on these endpoints, so a bare fetch() polled
+// every 2s can return the same stale body for minutes on end. Every request
+// below is cache-busted and sent with `cache: "no-store"`, which is what
+// actually makes the board feel live.
 
 import type { DraftPick, Position, TradedPick } from "../types";
 
 const BASE = "https://api.sleeper.app/v1";
+
+/**
+ * Fetch that defeats both the browser HTTP cache and Sleeper's CDN edge cache.
+ * The `_` cache-buster is what gets past Cloudflare — `no-store` alone only
+ * governs the local cache.
+ */
+async function fetchLive(url: string): Promise<Response> {
+  const sep = url.includes("?") ? "&" : "?";
+  return fetch(`${url}${sep}_=${Date.now()}`, {
+    cache: "no-store",
+    headers: { "cache-control": "no-cache" },
+  });
+}
 
 export interface SleeperDraftInfo {
   draftId: string;
@@ -23,7 +43,7 @@ export interface SleeperDraftInfo {
 }
 
 export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo> {
-  const draftRes = await fetch(`${BASE}/draft/${draftId}`);
+  const draftRes = await fetchLive(`${BASE}/draft/${draftId}`);
   if (!draftRes.ok) throw new Error(`Sleeper draft ${draftId}: HTTP ${draftRes.status}`);
   const draft = await draftRes.json();
   const teams = draft.settings?.teams ?? 12;
@@ -35,7 +55,7 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
   let bestBall = false;
   if (draft.league_id) {
     try {
-      const leagueRes = await fetch(`${BASE}/league/${draft.league_id}`);
+      const leagueRes = await fetchLive(`${BASE}/league/${draft.league_id}`);
       if (leagueRes.ok) {
         const league = await leagueRes.json();
         scoringSettings = league.scoring_settings ?? null;
@@ -55,7 +75,7 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
   }
   let tradedPicks: TradedPick[] = [];
   try {
-    const tpRes = await fetch(`${BASE}/draft/${draftId}/traded_picks`);
+    const tpRes = await fetchLive(`${BASE}/draft/${draftId}/traded_picks`);
     if (tpRes.ok) {
       const raw: { round: number; roster_id: number; owner_id: number }[] = await tpRes.json();
       tradedPicks = raw
@@ -104,7 +124,7 @@ interface SleeperPickRaw {
 }
 
 export async function fetchPicks(draftId: string, mySlot: number | null): Promise<DraftPick[]> {
-  const res = await fetch(`${BASE}/draft/${draftId}/picks`);
+  const res = await fetchLive(`${BASE}/draft/${draftId}/picks`);
   if (!res.ok) throw new Error(`Sleeper picks: HTTP ${res.status}`);
   const raw: SleeperPickRaw[] = await res.json();
   return raw
@@ -131,7 +151,7 @@ export function parseDraftId(input: string): string {
 
 /** Fetch a league's drafts (for using league id instead of draft id, and for backtests). */
 export async function fetchLeagueDrafts(leagueId: string): Promise<{ draft_id: string; status: string; season: string }[]> {
-  const res = await fetch(`${BASE}/league/${leagueId}/drafts`);
+  const res = await fetchLive(`${BASE}/league/${leagueId}/drafts`);
   if (!res.ok) throw new Error(`Sleeper league drafts: HTTP ${res.status}`);
   return res.json();
 }

@@ -21,7 +21,18 @@ import { computeDrift, type DriftPrior } from "../engine/drift";
 import { mergeName } from "../etl/names";
 
 const STORAGE_KEY = "draft-cockpit-picks-v1";
-const POLL_MS = 2000;
+/**
+ * Live-draft poll cadence. Sleeper allows ~1000 calls/min; one call per tick
+ * means 30/min at rest and 60/min when our pick is close — 16x under the limit
+ * even at peak, so there is no rate-limit exposure at either rate.
+ *
+ * The cache-busting in lib/draft/sleeper.ts is what actually removes the lag;
+ * this just tightens the window when it matters most.
+ */
+const POLL_IDLE_MS = 2000;
+const POLL_HOT_MS = 1000;
+/** Within this many picks of our turn, poll at the faster rate. */
+const HOT_WINDOW_PICKS = 3;
 
 interface PersistedPicks {
   draftKey: string; // config fingerprint so stale state isn't restored into a different draft
@@ -81,6 +92,11 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const [lastPickFlash, setLastPickFlash] = useState(0);
   const [driftPrior, setDriftPrior] = useState<DriftPrior | undefined>(undefined);
   const lastCountRef = useRef(0);
+  /** Signature of the last applied pick list, so a *corrected* pick still lands. */
+  const lastSigRef = useRef("");
+  /** Picks until our turn, mirrored into a ref so the poll loop can read it
+   *  without re-subscribing (and restarting the timer) on every pick. */
+  const untilMeRef = useRef<number | null>(null);
   const restoredRef = useRef(false);
 
   // History-fitted drift prior, if the ETL produced one for THIS league.
@@ -159,17 +175,25 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
         if (cancelled) return;
         setLive(true);
         setSyncError(null);
-        if (picks.length !== lastCountRef.current) {
+        // Compare a signature, not just the count: Sleeper rooms do get picks
+        // edited or reassigned, and a same-length change was silently dropped.
+        const last = picks[picks.length - 1];
+        const sig = `${picks.length}:${last?.pickNo ?? 0}:${last?.playerId ?? ""}`;
+        if (sig !== lastSigRef.current) {
+          lastSigRef.current = sig;
+          const grew = picks.length !== lastCountRef.current;
           lastCountRef.current = picks.length;
           setApiPicks(picks);
-          setLastPickFlash((n) => n + 1);
+          if (grew) setLastPickFlash((n) => n + 1);
         }
       } catch (err) {
         if (cancelled) return;
         setLive(false);
         setSyncError(`Sync lost (${(err as Error).message}). Retrying — manual entry still works.`);
       }
-      timer = setTimeout(poll, POLL_MS);
+      const until = untilMeRef.current;
+      const hot = until != null && until <= HOT_WINDOW_PICKS;
+      timer = setTimeout(poll, hot ? POLL_HOT_MS : POLL_IDLE_MS);
     };
     poll();
     return () => {
@@ -224,6 +248,13 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     () => allMyPicks.filter((n) => n >= currentPick),
     [allMyPicks, currentPick]
   );
+  // Mirror distance-to-our-pick so the poll loop can pick its cadence without
+  // taking `currentPick` as a dependency (which would restart the timer on
+  // every single pick in the room).
+  const untilMe = myPicks.length > 0 ? myPicks[0] - currentPick : null;
+  useEffect(() => {
+    untilMeRef.current = untilMe;
+  }, [untilMe]);
 
   const { myRoster, draftedIds, opponentCounts } = useMemo(() => {
     const roster: BoardPlayer[] = [];
