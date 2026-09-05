@@ -5,7 +5,6 @@
     "blurb": "Best overall roster. Values starters by what they add to your lineup versus waiting, bench by insurance \u2014 adapts to the board as it empties. The control.",
     "lambda": 0.5,
     "baselineBlend": 0.5,
-    "valueModel": "lineup",
     "adpDiscipline": 0.5,
     "positionMultipliers": {},
     "positionCaps": {

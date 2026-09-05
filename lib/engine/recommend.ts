@@ -433,9 +433,11 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
   const bestball = config.leagueType === "bestball";
   const valueFn = makeValueFn(board, strategy, bestball);
   const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
-  // Best ball keeps its market-curve model; "lineup" is a redraft concept.
+  // Best ball keeps its market-curve model; "lineup" is a redraft concept and
+  // the default there. "blend" is the legacy league-wide-scarcity model, kept
+  // as an explicit opt-in for comparison.
   const lineupValue =
-    !bestball && strategy.valueModel === "lineup"
+    !bestball && (strategy.valueModel ?? "lineup") === "lineup"
       ? makeLineupValueFn(available, nextPick, drift)
       : undefined;
   const pool = hardFilter(available, state, myCounts, round);
