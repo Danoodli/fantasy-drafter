@@ -13,7 +13,7 @@
 
 import type { LeagueConfig, Position } from "../types";
 import { makeRng } from "./montecarlo";
-import { gaussian } from "./outcome";
+import { sampleAdpNoise } from "./survival";
 import { positionGainTable, type WaiverLine } from "./rosterValue";
 import { coverageSlotWeeks } from "./coverage";
 import { FLEX_SHARE } from "./baselines";
@@ -226,7 +226,7 @@ export function completeRosters(
   const myCounts = new Int8Array(6);
 
   for (let it = 0; it < iterations; it++) {
-    for (let i = 0; i < n; i++) x[i] = adp[i] + stdev[i] * gaussian(rng);
+    for (let i = 0; i < n; i++) x[i] = adp[i] + sampleAdpNoise(rng, stdev[i]);
     for (let i = 0; i < n; i++) order[i] = i;
     order.sort((a, b) => x[a] - x[b]);
 
