@@ -85,7 +85,9 @@ Join a free Sleeper mock draft and run the app against it — that's the integra
 
 Read the error bars as clustered by room, and treat one season as one sample: the engine drafts the same core in every room, so a season's result is a bet on a handful of players. Run every snapshotted season (`--strategy=all` compares all strategies) before drawing conclusions.
 
-This harness is what caught the RB tilt. Under the old blend model every strategy lost to a plain ADP bot in 2024 (−42 to −127 realized lineup points per seat) and beat it in 2025 (+125 to +278) — the same bet on RB depth paying off or not. Under the lineup model every strategy is positive in both years (2024: +59 to +118; 2025: +156 to +270), and balanced, upside and safe-floor tie at the top of the two-year average.
+This harness is what caught the RB tilt. Under the old blend model every strategy lost to a plain ADP bot in 2024 (−42 to −127 realized lineup points per seat) and beat it in 2025 (+125 to +278) — the same bet on RB depth paying off or not. Under the lineup model every strategy is positive in both years (2024: +59 to +118; 2025: +156 to +270 — no-waiver scoring), and balanced, upside and safe-floor tie at the top of the two-year average.
+
+Redraft scoring now includes a waiver wire (one streamable body per position per week, taken from that room's actual undrafted players), because empty slots get streamed in real life, not zeroed. That is the honest yardstick and it shrinks the edge: **balanced is +48 ± 18 in 2024 and +140 ± 18 in 2025** over a same-seat ADP drafter who also streams, with 0 of 288 rosters below a construction floor versus 24–27% for the ADP bot.
 
 **Data (free):** ESPN's historical `kona_player_info` payload carries both the preseason projection and the realized weekly actuals for a season; FFC serves that year's final pre-season ADP via `?year=`. The first run for a season writes `data/raw/seasons/<year>.json` (~1 MB). **Commit it** — ESPN purges old projections (2023 retains 22 of 264), so every season not snapshotted is lost for good. Currently snapshotted: 2024, 2025.
 
