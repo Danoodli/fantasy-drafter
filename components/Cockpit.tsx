@@ -26,6 +26,7 @@ import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
 import RecentPicks from "./RecentPicks";
 import RoomStrip from "./RoomStrip";
 import PasteImport from "./PasteImport";
+import Shortlist from "./Shortlist";
 import { parsePastedPicks } from "../lib/draft/pasteImport";
 import type { ImportItem } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
@@ -285,6 +286,57 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     return out;
   }, [config.teams, config.rounds, draft.tradedPicks, draft.currentPick]);
 
+  // The seat on the clock, modeled with the engine from ITS roster and ITS
+  // remaining picks (default strategy for the format — opponents don't share
+  // my dials). Only when it isn't my turn and the room isn't syncing itself.
+  const shortlistNeeded = !myTurn && !draftOver && !(config.platform === "sleeper" && draft.live);
+  const shortlist = useMemo(() => {
+    if (!shortlistNeeded) return null;
+    const slot = draft.onClockSlot;
+    const theirs = rostersBySlot[slot] ?? [];
+    const theirPicks = picksForSlot(slot, config.teams, config.rounds, draft.tradedPicks).filter((n) => n >= draft.currentPick);
+    if (theirPicks.length === 0) return null;
+    const others: Record<number, BoardPlayer[]> = {};
+    const counts: Record<number, Partial<Record<Position, number>>> = {};
+    for (const [s, roster] of Object.entries(rostersBySlot)) {
+      if (Number(s) === slot) continue;
+      others[Number(s)] = roster;
+      const c: Partial<Record<Position, number>> = {};
+      for (const p of roster) c[p.pos] = (c[p.pos] ?? 0) + 1;
+      counts[Number(s)] = c;
+    }
+    const base = strategies.find((s) => s.id === recommendedId) ?? strategies[0];
+    const out = recommend({
+      board: gradedBoard.players,
+      draftedIds: draft.draftedIds,
+      myRoster: theirs,
+      currentPick: draft.currentPick,
+      myPicks: theirPicks,
+      config: { ...config, myDraftSlot: slot },
+      strategy: base,
+      drift: draft.drift,
+      opponentCounts: counts,
+      opponentRosters: others,
+    });
+    const ranked = (out.scored ?? out.recommendations).map((r) => r.player).slice(0, 10);
+    const has: Partial<Record<Position, number>> = {};
+    for (const p of theirs) has[p.pos] = (has[p.pos] ?? 0) + 1;
+    return { slot, pickNo: draft.currentPick, players: ranked, counts: has, ids: new Set(ranked.map((p) => p.id)) };
+  }, [shortlistNeeded, draft.onClockSlot, rostersBySlot, config, draft.tradedPicks, draft.currentPick, strategies, recommendedId, gradedBoard, draft.draftedIds, draft.drift]);
+
+  // Shortlist hit rate: every pick marked from elsewhere (search, paste, board,
+  // screen sync) is scored against the list that was showing at the time.
+  const [shortlistHits, setShortlistHits] = useState({ hits: 0, misses: 0 });
+  const shortlistIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    shortlistIdsRef.current = shortlist?.ids ?? null;
+  }, [shortlist]);
+  function scoreAgainstShortlist(player: BoardPlayer) {
+    const ids = shortlistIdsRef.current;
+    if (!ids) return;
+    setShortlistHits((s) => (ids.has(player.id) ? { ...s, hits: s.hits + 1 } : { ...s, misses: s.misses + 1 }));
+  }
+
   const top = output?.recommendations[0];
   const alternates = output?.recommendations.slice(1) ?? [];
   const picksUntilMe = draft.myPicks.length > 0 ? draft.myPicks[0] - draft.currentPick : null;
@@ -318,7 +370,8 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
 
   const [burst, setBurst] = useState<Burst | null>(null);
 
-  function mark(player: BoardPlayer, mine = false) {
+  function mark(player: BoardPlayer, mine = false, fromShortlist = false) {
+    if (!mine && !fromShortlist) scoreAgainstShortlist(player);
     draft.markDrafted(player);
     if (mine) {
       setSnipe(null);
@@ -901,6 +954,19 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
                 </li>
               ))}
             </ol>
+          )}
+
+          {shortlist && (
+            <Shortlist
+              slot={shortlist.slot}
+              pickNo={shortlist.pickNo}
+              players={shortlist.players}
+              counts={shortlist.counts}
+              hits={shortlistHits.hits}
+              misses={shortlistHits.misses}
+              onMark={(p) => mark(p, false, true)}
+              onOpen={setModalPlayer}
+            />
           )}
 
           {/* Manual entry — always available, even in Sleeper mode */}
