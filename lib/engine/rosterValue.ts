@@ -38,6 +38,69 @@ export interface RosterSample {
   samples: Float64Array;
 }
 
+const POS_INDEX: Record<Position, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
+
+/**
+ * Allocation-free optimal lineup for one week. Same answer as
+ * `lineupPointsWeek`, built for the tens of thousands of calls the completed-
+ * roster evaluation makes: fixed position buckets, insertion sort on ≤ ~10
+ * entries, then FLEX from the best leftovers. The wire body per position is
+ * appended when the slot exists and the wire pays.
+ */
+class FastLineup {
+  private readonly slots = new Int8Array(6);
+  private readonly flexEligible = new Uint8Array(6);
+  private readonly wire = new Float64Array(6);
+  private readonly flexSlots: number;
+  private readonly buckets: number[][] = [[], [], [], [], [], []];
+  constructor(config: LeagueConfig, waiver: WaiverLine) {
+    for (const pos of POSITIONS) {
+      const pi = POS_INDEX[pos];
+      this.slots[pi] = config.rosterSlots[pos] ?? 0;
+      this.flexEligible[pi] = config.flexEligible.includes(pos) ? 1 : 0;
+      this.wire[pi] = this.slots[pi] > 0 ? waiver[pos] ?? 0 : 0;
+    }
+    this.flexSlots = config.rosterSlots.FLEX ?? 0;
+  }
+  /** posIdx[i], pts[i] for i < n. */
+  total(posIdx: Int8Array, pts: Float64Array, n: number): number {
+    const b = this.buckets;
+    for (let pi = 0; pi < 6; pi++) {
+      b[pi].length = 0;
+      if (this.wire[pi] > 0) b[pi].push(this.wire[pi]);
+    }
+    for (let i = 0; i < n; i++) {
+      const arr = b[posIdx[i]];
+      const v = pts[i];
+      // insertion into a descending array
+      let k = arr.length;
+      arr.push(v);
+      while (k > 0 && arr[k - 1] < v) { arr[k] = arr[k - 1]; k--; }
+      arr[k] = v;
+    }
+    let total = 0;
+    for (let pi = 0; pi < 6; pi++) {
+      const arr = b[pi];
+      const take = Math.min(this.slots[pi], arr.length);
+      for (let k = 0; k < take; k++) total += arr[k];
+    }
+    // FLEX: best leftovers across eligible positions.
+    for (let f = 0; f < this.flexSlots; f++) {
+      let bestPi = -1, bestV = -Infinity;
+      for (let pi = 0; pi < 6; pi++) {
+        if (!this.flexEligible[pi]) continue;
+        const arr = b[pi];
+        const k = this.slots[pi];
+        if (k < arr.length && arr[k] > bestV) { bestV = arr[k]; bestPi = pi; }
+      }
+      if (bestPi < 0) break;
+      total += bestV;
+      b[bestPi].splice(this.slots[bestPi], 1);
+    }
+    return total;
+  }
+}
+
 /**
  * Score every candidate's completed rosters with common random numbers: in
  * iteration `it`, each distinct player is sampled once and shared by every
@@ -56,6 +119,7 @@ export function evaluateCompletions(
 ): RosterSample[] {
   const iterations = futurePicks[0]?.length ?? 0;
   const out = candidates.map(() => new Float64Array(iterations));
+  const fast = new FastLineup(config, waiver);
   for (let it = 0; it < iterations; it++) {
     const rng = makeRng((seed * 7919 + it * 104729) >>> 0);
     const shocks = makeTeamShocks(rng, params.weeks);
@@ -72,12 +136,15 @@ export function evaluateCompletions(
     for (let ci = 0; ci < candidates.length; ci++) {
       const roster = [candidates[ci], ...futurePicks[ci][it]];
       const draws = [...baseDraws, ...roster.map(draw)];
-      const poss = [...base, ...roster].map((p) => p.pos);
+      const n = draws.length;
+      const posIdx = new Int8Array(n);
+      for (let i = 0; i < base.length; i++) posIdx[i] = POS_INDEX[base[i].pos];
+      for (let i = 0; i < roster.length; i++) posIdx[base.length + i] = POS_INDEX[roster[i].pos];
+      const pts = new Float64Array(n);
       let total = 0;
       for (let w = 0; w < params.weeks; w++) {
-        const entries: { pos: Position; pts: number }[] = [];
-        for (let i = 0; i < draws.length; i++) entries.push({ pos: poss[i], pts: draws[i].weekly[w] });
-        total += lineupPointsWeek(entries, config, waiver);
+        for (let i = 0; i < n; i++) pts[i] = draws[i].weekly[w];
+        total += fast.total(posIdx, pts, n);
       }
       out[ci][it] = total;
     }

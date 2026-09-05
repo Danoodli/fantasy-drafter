@@ -20,6 +20,8 @@ export interface ReplayOptions {
   /** 1-indexed slot the engine drafts from; null = every seat is a bot. */
   engineSlot: number | null;
   seed: number;
+  /** Outcome-model override (hold-out calibration in the backtest). */
+  outcome?: import("./outcomeModel").OutcomeParams;
 }
 
 export interface ReplayPick {
@@ -115,8 +117,12 @@ export function replayRoom(opts: ReplayOptions): ReplayResult {
 
     if (engineSlot && slot === engineSlot) {
       const opponentCounts: Record<number, Partial<Record<Position, number>>> = {};
+      const opponentRosters: Record<number, BoardPlayer[]> = {};
       counts.forEach((c, i) => {
-        if (i + 1 !== engineSlot) opponentCounts[i + 1] = c;
+        if (i + 1 !== engineSlot) {
+          opponentCounts[i + 1] = c;
+          opponentRosters[i + 1] = rosters[i];
+        }
       });
       const out = recommend(
         {
@@ -129,6 +135,8 @@ export function replayRoom(opts: ReplayOptions): ReplayResult {
           strategy,
           drift: {},
           opponentCounts,
+          opponentRosters,
+          outcome: opts.outcome,
         },
         seed + pickNo
       );

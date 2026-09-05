@@ -11,7 +11,7 @@ import { searchPlayers } from "../lib/draft/fuzzy";
 import { recommend } from "../lib/engine/recommend";
 import { scoreStatLine, SCORING_PRESETS } from "../lib/scoring";
 import { mergeName } from "../lib/etl/names";
-import type { Board, BoardPlayer, EngineState, LeagueConfig, Strategy } from "../lib/types";
+import type { Board, BoardPlayer, EngineState, LeagueConfig, Strategy, Position } from "../lib/types";
 
 const board: Board = JSON.parse(
   readFileSync(join(process.cwd(), "public", "data", "board-ppr.json"), "utf8")
@@ -832,5 +832,102 @@ describe("portfolio exposure", () => {
     expect(pf.players[0].pct).toBe(1);
     expect(pf.stacks[0].count).toBe(2); // QB + same-team WR both drafts
     expect(pf.teams[0].count).toBe(2); // 2+ players same team, both drafts
+  });
+});
+
+describe("unified model (fluid, no static rules)", () => {
+  const unified = { ...byId("balanced"), valueModel: "unified" as const, lambda: 0.25, lambdaBestBall: -0.3 };
+  const st = (over: Partial<EngineState> = {}) => makeState({ strategy: unified, ...over });
+
+  it("recommends a player at pick 5 and reports expected points", () => {
+    const out = recommend(st());
+    expect(out.recommendations.length).toBeGreaterThan(0);
+    expect(out.recommendations[0].expectedPoints).toBeGreaterThan(1000);
+    expect(out.recommendations[0].pointsSd).toBeGreaterThan(0);
+  });
+
+  it("QB timing is fluid: when the room still needs QBs, mine gets more urgent", () => {
+    // Identical board, identical drafted set, identical candidates. Room A: every
+    // opponent already has a QB, so QBs survive to my next pick. Room B: no
+    // opponent has one, so they will take QBs before I pick again.
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const nonQb = byAdp.filter((p) => p.pos !== "QB");
+    const drafted = new Set(nonQb.slice(0, 30).map((p) => p.id));
+    const mine = [nonQb[4], nonQb[19]];
+    for (const p of mine) drafted.add(p.id);
+    const hold = (poss: Position[]) => poss.map((pos, i) => ({ ...byAdp.filter((p) => p.pos === pos)[i + 40], bye: 5 + i }));
+    const roomA = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, hold(["QB", "RB", "RB", "WR", "WR"])]));
+    const roomB = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, hold(["TE", "RB", "RB", "WR", "WR"])]));
+    const picks = [31, 44, 53, 68, 77, 92, 101, 116, 125, 140, 149, 164, 173];
+    const outA = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomA }));
+    const outB = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomB }));
+    const qbEdge = (o: EngineOutput) => o.scored!.find((r) => r.player.pos === "QB")!.score - o.scored!.find((r) => r.player.pos !== "QB")!.score;
+    expect(qbEdge(outB)).toBeGreaterThan(qbEdge(outA));
+  });
+
+  it("K/DST fall to the last picks without a rule, and a bench emerges at QB/RB/WR", () => {
+    const myPicks = picksForSlot(5, 12, 15);
+    const drafted = new Set<string>();
+    const mine: BoardPlayer[] = [];
+    const pool = [...board.players].sort((a, b) => a.adp - b.adp);
+    let cursor = 0;
+    const roundOf: Record<string, number[]> = { K: [], DST: [] };
+    for (let pick = 1; pick <= 180; pick++) {
+      if (myPicks.includes(pick)) {
+        const out = recommend(st({ myRoster: mine, draftedIds: drafted, currentPick: pick, myPicks: myPicks.filter((n) => n >= pick), config: { ...config, myDraftSlot: 5 } }));
+        const c = out.recommendations[0].player;
+        if (c.pos === "K" || c.pos === "DST") roundOf[c.pos].push(Math.ceil(pick / 12));
+        mine.push(c); drafted.add(c.id); continue;
+      }
+      while (cursor < pool.length && drafted.has(pool[cursor].id)) cursor++;
+      if (cursor < pool.length) drafted.add(pool[cursor].id);
+    }
+    expect(roundOf.K.length + roundOf.DST.length).toBe(2);
+    expect(Math.min(...roundOf.K, ...roundOf.DST)).toBeGreaterThanOrEqual(12);
+    const n = (pos: string) => mine.filter((p) => p.pos === pos).length;
+    // Emergent depth: a bench at every position that matters. No floor enforces this.
+    expect(n("WR")).toBeGreaterThanOrEqual(3);
+    expect(n("RB")).toBeGreaterThanOrEqual(3);
+    expect(n("QB")).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not hoard: with the five best RBs already rostered, a 6th RB never tops the board", () => {
+    // Every available RB is far below my RB5, so a 6th adds nothing — while my two
+    // WRs have no cover. No cap or floor enforces this; the completed-roster
+    // objective simply finds no lineup points in another RB.
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const take = (pos: Position, k: number) => byAdp.filter((p) => p.pos === pos)[k];
+    const mine = [take("QB", 3), take("RB", 0), take("RB", 1), take("RB", 2), take("RB", 3), take("RB", 4), take("WR", 4), take("WR", 12), take("TE", 2)];
+    const drafted = new Set(byAdp.slice(0, 100).map((p) => p.id));
+    for (const p of mine) drafted.add(p.id);
+    const out = recommend(st({ myRoster: mine, draftedIds: drafted, currentPick: 101, myPicks: [101, 116, 125, 140, 149, 164, 173] }));
+    expect(out.recommendations[0].player.pos).not.toBe("RB");
+    const rb = out.scored!.find((r) => r.player.pos === "RB")!;
+    const wr = out.scored!.find((r) => r.player.pos === "WR")!;
+    expect(wr.score).toBeGreaterThan(rb.score);
+  });
+
+  it("is deterministic", () => {
+    const a = recommend(st()), b = recommend(st());
+    expect(a.recommendations.map((r) => r.player.id)).toEqual(b.recommendations.map((r) => r.player.id));
+  });
+
+  it("re-evaluates the whole board when the room changes — opponents' rosters move my pick", () => {
+    // Same board, same my-roster, pick 31. Room A: every opponent holds 2 RB / 0 WR.
+    // Room B: every opponent holds 0 RB / 2 WR. Need-aware opponents will take WRs in A
+    // and RBs in B before my next pick, so what I should take now differs.
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const drafted = new Set(byAdp.slice(0, 30).map((p) => p.id));
+    const mine = [byAdp[4], byAdp[19]];
+    for (const p of mine) drafted.add(p.id);
+    const rosterOf = (pos: Position) => Array.from({ length: 2 }, (_, i) => ({ ...byAdp.filter((p) => p.pos === pos)[i + 30], bye: 5 + i }));
+    const roomA = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, rosterOf("RB")]));
+    const roomB = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, rosterOf("WR")]));
+    const picks = [31, 44, 53, 68, 77, 92, 101, 116, 125, 140, 149, 164, 173];
+    const a = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomA }));
+    const b = recommend(st({ draftedIds: drafted, myRoster: mine, currentPick: 31, myPicks: picks, opponentRosters: roomB }));
+    const rbEdge = (o: EngineOutput) => o.scored!.find((r) => r.player.pos === "RB")!.score - o.scored!.find((r) => r.player.pos === "WR")!.score;
+    // When the room is about to run on WRs (A), taking my WR now is worth relatively more than in B.
+    expect(rbEdge(a)).toBeLessThan(rbEdge(b));
   });
 });

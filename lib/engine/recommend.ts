@@ -4,7 +4,12 @@
 import type { BoardPlayer, EngineOutput, EngineState, Position, Recommendation, Strategy, LeagueConfig } from "../types";
 import { survivalProb } from "./survival";
 import { vona, expectedBestAtPick } from "./vona";
-import { coverageValue, REG_SEASON_WEEKS } from "./coverage";
+import { coverageValue, REG_SEASON_WEEKS, coverageSlotWeeks } from "./coverage";
+import outcomeJson from "../../config/outcome-model.json";
+import type { OutcomeParams } from "./outcomeModel";
+import { expectedWeekly, availability } from "./outcome";
+import { evaluateCompletions, marginalGainNow, positionGainTable, type WaiverLine } from "./rosterValue";
+import { completeRosters, type CompletionPlayer, type CompletionShared } from "./completion";
 import { FLEX_SHARE } from "./baselines";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
 import { buildReason, buildAlternateReason } from "./reasons";
@@ -12,6 +17,12 @@ import { slotOnClock, pickOwner } from "../draft/snake";
 
 const MC_ITERATIONS = 400;
 const MC_CANDIDATES = 12;
+/** Unified model: candidates scored by full roster completion. */
+const UNIFIED_SHORTLIST = 10;
+const UNIFIED_ITERATIONS = 80;
+/** The closed-form EV proxy is computed for this many table-ranked players only. */
+const UNIFIED_EV_SCAN = 40;
+const DEFAULT_OUTCOME = outcomeJson as OutcomeParams;
 /** Value-points penalty per pick of reach past ADP, at adpDiscipline = 1. */
 const REACH_PENALTY_PER_PICK = 1.0;
 /** Soft penalty when a candidate shares a bye with a same-position starter. */
@@ -477,7 +488,167 @@ function hardFilter(
   });
 }
 
+/**
+ * Shrink each projection toward the market's implied value at its ADP (the
+ * projection curve smoothed over ±7 ADP neighbors within the position). Weight
+ * comes from the calibration — 0 today: projections beat the crowd at
+ * RB/WR/TE and adding market rank did not improve ordering accuracy.
+ */
+export function marketShrunkProjection(board: BoardPlayer[], weight: number): (p: BoardPlayer) => number {
+  if (weight <= 0) return (p) => p.projPoints;
+  const byPos = new Map<Position, BoardPlayer[]>();
+  for (const p of board) {
+    const list = byPos.get(p.pos) ?? [];
+    list.push(p);
+    byPos.set(p.pos, list);
+  }
+  const market = new Map<string, number>();
+  const W = 7;
+  for (const list of byPos.values()) {
+    const sorted = [...list].sort((a, b) => a.adp - b.adp);
+    for (let i = 0; i < sorted.length; i++) {
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - W); j <= Math.min(sorted.length - 1, i + W); j++) { sum += sorted[j].projPoints; n++; }
+      market.set(sorted[i].id, sum / n);
+    }
+  }
+  return (p) => (1 - weight) * p.projPoints + weight * (market.get(p.id) ?? p.projPoints);
+}
+
+/**
+ * Format legality is the only hard constraint in the unified model: no pacing
+ * rules, no caps, no floors. A player on a season-long list is not draftable,
+ * a position the league does not roster is not draftable, and when the picks
+ * I have left equal the STARTING slots I have not filled, I fill them.
+ */
+function legalPool(available: BoardPlayer[], state: EngineState): BoardPlayer[] {
+  const { config, myPicks } = state;
+  const counts: Partial<Record<Position, number>> = {};
+  for (const p of state.myRoster) counts[p.pos] = (counts[p.pos] ?? 0) + 1;
+  let unmetStarters = 0;
+  const required: Position[] = [];
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
+    const short = Math.max(0, (config.rosterSlots[pos] ?? 0) - (counts[pos] ?? 0));
+    if (short > 0) { unmetStarters += short; required.push(pos); }
+  }
+  const mustFill = myPicks.length <= unmetStarters;
+  return available.filter((p) => {
+    if (p.injury && INJURY_EXCLUDE.has(p.injury)) return false;
+    if ((config.rosterSlots[p.pos] ?? 0) === 0 && (p.pos === "K" || p.pos === "DST")) return false;
+    if (mustFill && !required.includes(p.pos)) return false;
+    return true;
+  });
+}
+
+/**
+ * The unified decision model. Score(c) = U(LineupPoints(FinalRoster(c))):
+ * complete my roster from the live board (need-aware opponents, greedy me),
+ * sample each completed roster's season from the calibrated outcome model,
+ * and rank by mean − λ·sd. See docs/superpowers/specs/2026-09-04-unified-decision-model.md.
+ */
+export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
+  const t0 = typeof performance !== "undefined" ? performance.now() : 0;
+  const { board, draftedIds, config, strategy, currentPick, myPicks, drift } = state;
+  const params = state.outcome ?? DEFAULT_OUTCOME;
+  const bestball = config.leagueType === "bestball";
+  const lambda = bestball ? strategy.lambdaBestBall ?? -0.3 : strategy.lambda;
+  const projOf = marketShrunkProjection(board, params.marketWeight);
+  const POSITIONS: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
+
+  const available = board.filter((p) => !draftedIds.has(p.id));
+  const legal = legalPool(available, state);
+  if (legal.length === 0) return { recommendations: [], strategyWarning: null, computeMs: 0 };
+
+  // Waiver wire (redraft only): expected weekly points of the best player
+  // likely to go undrafted at each position.
+  const lastPick = config.teams * config.rounds;
+  const waiver: WaiverLine = {};
+  if (!bestball) {
+    for (const pos of POSITIONS) {
+      const atPos = available.filter((p) => p.pos === pos);
+      if (!atPos.length || (config.rosterSlots[pos] ?? 0) === 0) continue;
+      const season = expectedBestAtPick(atPos, lastPick + 1, drift);
+      const best = atPos.reduce((a, b) => (a.projPoints > b.projPoints ? a : b));
+      waiver[pos] = (season / params.gamesPerSeason) * params.byPos[pos].projMedianRatio * availability(best, params);
+    }
+  }
+
+  // Shortlist: two proxies, because each is blind to something. The closed-form
+  // lineup delta sees FLEX upgrades but only BYE cover (in expectation a starter
+  // is never "out"); the insurance-aware gain table sees injury cover but
+  // approximates FLEX. Take the top of both, plus the best at every position so
+  // a cross-position comparison always happens. The completed-roster simulation decides.
+  const table = positionGainTable(state.myRoster, params, config, waiver);
+  const rateOf = new Map(legal.map((p) => [p.id, expectedWeekly(p, params, projOf(p))]));
+  const byTable = [...legal].sort((a, b) => table[b.pos](rateOf.get(b.id)!) - table[a.pos](rateOf.get(a.id)!));
+  const evPool = byTable.slice(0, UNIFIED_EV_SCAN);
+  const gains = new Map(evPool.map((p) => [p.id, marginalGainNow(p, state.myRoster, params, config, waiver, projOf)]));
+  const byEv = [...evPool].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
+  const shortlist: BoardPlayer[] = [];
+  const add = (p: BoardPlayer | undefined) => { if (p && !shortlist.includes(p)) shortlist.push(p); };
+  for (let i = 0; i < UNIFIED_SHORTLIST / 2; i++) { add(byTable[i]); add(byEv[i]); }
+  for (const pos of POSITIONS) add(byTable.find((p) => p.pos === pos));
+
+  // Roster completion from the live board: every remaining pick of the draft.
+  const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
+  const future = myPicks.filter((n) => n > currentPick);
+  const simEnd = future.length ? future[future.length - 1] : currentPick;
+  const schedule: CompletionShared["schedule"] = [];
+  for (let n = currentPick + 1; n <= simEnd; n++) {
+    schedule.push({ pickNo: n, slot: pickOwner(n, config.teams, []), mine: future.includes(n) });
+  }
+  const toCp = (p: BoardPlayer): CompletionPlayer => ({
+    id: p.id, pos: p.pos, adp: p.adp + (drift[p.pos] ?? 0), stdev: p.adpStdev, bye: p.bye,
+    weeklyRate: expectedWeekly(p, params, projOf(p)),
+  });
+  const players = available.map(toCp);
+  const indexById = new Map(players.map((p, i) => [p.id, i]));
+  // Opponent rosters: real ones when the client/backtest supplies them, else
+  // reconstructed from position counts (no byes → treated as never off).
+  const opponentRosters: Record<number, { pos: Position; bye: number | null }[]> = {};
+  if (state.opponentRosters) {
+    for (const [slot, r] of Object.entries(state.opponentRosters)) opponentRosters[Number(slot)] = r.map((p) => ({ pos: p.pos, bye: p.bye }));
+  } else {
+    for (const [slot, counts] of Object.entries(state.opponentCounts ?? {})) {
+      const r: { pos: Position; bye: number | null }[] = [];
+      for (const [pos, c] of Object.entries(counts)) for (let i = 0; i < (c ?? 0); i++) r.push({ pos: pos as Position, bye: null });
+      opponentRosters[Number(slot)] = r;
+    }
+  }
+  const shared: CompletionShared = {
+    players, myRoster: state.myRoster.map(toCp), opponentRosters,
+    schedule, teams: config.teams, rounds: config.rounds, config, waiver, params,
+  };
+  const completions = completeRosters(shared, shortlist.map((c) => indexById.get(c.id)!), UNIFIED_ITERATIONS, seed);
+  const futurePicks = completions.map((perIt) => perIt.map((idxs) => idxs.map((i) => available[i])));
+  const samples = evaluateCompletions(state.myRoster, shortlist, futurePicks, params, config, waiver, seed, projOf);
+
+  const recs: Recommendation[] = shortlist.map((p, i) => ({
+    player: p,
+    reason: "",
+    score: samples[i].mean - lambda * samples[i].sd,
+    vona: vona(p, available, nextPick, drift),
+    survivalToNextPick: survivalProb(p, nextPick, drift),
+    simMean: samples[i].mean,
+    simStdev: samples[i].sd,
+    expectedPoints: samples[i].mean,
+    pointsSd: samples[i].sd,
+    byeCoverWeeks: coverageSlotWeeks(p.pos, p.bye, state.myRoster, config),
+  }));
+  recs.sort((a, b) => b.score - a.score);
+  for (let i = 0; i < recs.length; i++) {
+    const other = recs[i === 0 ? 1 : 0];
+    recs[i].gainOverNext = recs[i].expectedPoints! - (other?.expectedPoints ?? recs[i].expectedPoints!);
+  }
+  const top = recs.slice(0, 3);
+  if (top[0]) top[0].reason = buildReason(top[0], available, nextPick);
+  for (const rec of top.slice(1)) rec.reason = buildAlternateReason(rec, top[0], nextPick);
+  const t1 = typeof performance !== "undefined" ? performance.now() : 0;
+  return { recommendations: top, scored: recs, strategyWarning: null, computeMs: t1 - t0 };
+}
+
 export function recommend(state: EngineState, seed = 42): EngineOutput {
+  if ((state.strategy.valueModel ?? "lineup") === "unified") return unifiedRecommend(state, seed);
   const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { board, draftedIds, config, strategy, currentPick, myPicks, drift } = state;
 

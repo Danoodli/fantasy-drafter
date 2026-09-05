@@ -37,4 +37,18 @@ describe("latency budget", () => {
     }
     expect(best).toBeLessThan(50);
   });
+
+  it("unified model full recompute is under 50ms (best of 5)", () => {
+    const unified = { ...strategies[0], valueModel: "unified" as const };
+    const state: EngineState = {
+      board: board.players, draftedIds: new Set(), myRoster: [], currentPick: 5,
+      myPicks: [5, 20, 29, 44, 53, 68, 77, 92, 101, 116, 125, 140, 149, 164, 173],
+      config, strategy: unified, drift: {},
+    };
+    for (let i = 0; i < 3; i++) recommend(state);
+    let best = Infinity;
+    for (let i = 0; i < 5; i++) { const t0 = performance.now(); recommend(state); best = Math.min(best, performance.now() - t0); }
+    console.log(`unified recompute best-of-5: ${best.toFixed(1)}ms`);
+    expect(best).toBeLessThan(50);
+  });
 });
