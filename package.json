@@ -10,6 +10,7 @@
     "build:board": "tsx scripts/build-board.ts",
     "test": "vitest run",
     "backtest": "tsx scripts/backtest.ts",
+    "backtest:season": "tsx scripts/backtest-season.ts",
     "simulate": "tsx scripts/simulate-season.ts"
   },
   "dependencies": {

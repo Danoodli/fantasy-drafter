@@ -29,6 +29,7 @@ import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
 import { updateAdpTrends } from "../lib/etl/adpTrend";
+import { ESPN_POS, ESPN_TEAM, type EspnPlayerEntry } from "../lib/etl/espn";
 import {
   fetchFantasyProsData,
   fetchFantasyProsNews,
@@ -50,13 +51,6 @@ const SEASON = 2026;
 const FORMATS: ScoringFormat[] = ["standard", "half-ppr", "ppr", "2qb"];
 const OUT_DIR = join(process.cwd(), "public", "data");
 
-const ESPN_POS: Record<number, Position> = { 1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DST" };
-const ESPN_TEAM: Record<number, string> = {
-  1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN", 8: "DET",
-  9: "GB", 10: "TEN", 11: "IND", 12: "KC", 13: "LV", 14: "LAR", 15: "MIA", 16: "MIN",
-  17: "NE", 18: "NO", 19: "NYG", 20: "NYJ", 21: "PHI", 22: "ARI", 23: "PIT", 24: "LAC",
-  25: "SF", 26: "SEA", 27: "TB", 28: "WAS", 29: "CAR", 30: "JAX", 33: "BAL", 34: "HOU",
-};
 
 interface CrossRow {
   sleeper_id: string;
@@ -100,24 +94,6 @@ function defaultConfigFor(format: ScoringFormat): LeagueConfig {
 }
 
 // ---------------------------------------------------------------------------
-
-interface EspnStatEntry {
-  statSourceId: number;
-  statSplitTypeId: number;
-  seasonId: number;
-  stats: Record<string, number>;
-  appliedTotal?: number;
-}
-interface EspnPlayerEntry {
-  player?: {
-    id: number;
-    fullName: string;
-    defaultPositionId: number;
-    proTeamId: number;
-    stats?: EspnStatEntry[];
-    ownership?: { averageDraftPosition?: number };
-  };
-}
 
 function parseEspn(raw: { players: unknown[] }): EspnProj[] {
   const out: EspnProj[] = [];

@@ -56,6 +56,7 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 | `pnpm test` | engine math test suite (vitest) |
 | `pnpm backtest <draft_id> <slot> [strategy] [scoring]` | replay a real Sleeper draft with the engine in your slot; compare rosters |
 | `pnpm simulate <draft_id> [slot] [scoring] [--sims=500] [--bestball]` | run every roster in a drafted room through hundreds of simulated seasons; report win rates and ceiling percentiles |
+| `pnpm backtest:season <year> [--format=ppr] [--strategy=balanced\|all] [--rooms=12] [--bestball]` | draft a **past** season with that year's draft-day ADP + projections, then score every roster with what really happened — see [Season backtest](#season-backtest) |
 
 ## Player cards and draft controls
 
@@ -68,6 +69,20 @@ When the draft ends (or any time via the **Recap** header button), the recap scr
 ## Validating and tuning
 
 Join a free Sleeper mock draft and run the app against it — that's the integration test. Then `pnpm backtest <that draft id> <your slot> zero-rb` to see what a different strategy would have produced from the same room.
+
+`pnpm backtest` grades both rosters with the *current* board's projections — useful for comparing strategies against the same room, but circular as a measure of quality (it asks the engine whether it likes its own picks). For the real answer, use the season backtest below.
+
+## Season backtest
+
+`pnpm backtest:season 2025` rebuilds the board as it looked on draft day of a completed season and scores every roster with realized points. It answers two separate questions:
+
+- **A. Projection quality** — rank correlation, pairwise ordering accuracy (when we said A over B, how often were we right?), MAE, and signed bias per position and per draft range. Bias is the tunable: a position that comes in −30 points every year is a projection problem, not bad luck.
+- **B. Decision quality** — the engine drafts from every seat of N simulated rooms against ADP-following bots, and its roster's realized points are compared with the bot that would have sat in the *same seat of the same room* (paired by seed, so the room is identical until the engine deviates). Rosters are scored as the sum of each week's optimal lineup — exactly how best ball scores, and the standard "perfect manager" yardstick for redraft. The roster-shape table usually explains the result: it shows how many players the engine took at each position versus the bot, and where the points came from.
+- **C.** — the players the engine kept drafting, with their projected vs realized position rank.
+
+Read the error bars as clustered by room, and treat one season as one sample: the engine drafts the same core in every room, so a season's result is a bet on a handful of players. Run every snapshotted season (`--strategy=all` compares all strategies) before drawing conclusions.
+
+**Data (free):** ESPN's historical `kona_player_info` payload carries both the preseason projection and the realized weekly actuals for a season; FFC serves that year's final pre-season ADP via `?year=`. The first run for a season writes `data/raw/seasons/<year>.json` (~1 MB). **Commit it** — ESPN purges old projections (2023 retains 22 of 264), so every season not snapshotted is lost for good. Currently snapshotted: 2024, 2025.
 
 ## Data sources (all free, all switchable)
 
