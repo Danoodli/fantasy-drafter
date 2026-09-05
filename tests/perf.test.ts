@@ -51,4 +51,21 @@ describe("latency budget", () => {
     console.log(`unified recompute best-of-5: ${best.toFixed(1)}ms`);
     expect(best).toBeLessThan(50);
   });
+
+  it("unified model stays under 50ms in round 12 too (best of 5)", () => {
+    const unified = { ...strategies[0], valueModel: "unified" as const };
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const mine = byAdp.filter((p) => ["RB", "WR", "QB", "TE"].includes(p.pos)).filter((_, i) => i % 11 === 0).slice(0, 11);
+    const drafted = new Set(byAdp.slice(0, 135).map((p) => p.id));
+    for (const p of mine) drafted.add(p.id);
+    const state: EngineState = {
+      board: board.players, draftedIds: drafted, myRoster: mine, currentPick: 140,
+      myPicks: [140, 149, 164, 173], config, strategy: unified, drift: {},
+    };
+    for (let i = 0; i < 3; i++) recommend(state);
+    let best = Infinity;
+    for (let i = 0; i < 5; i++) { const t0 = performance.now(); recommend(state); best = Math.min(best, performance.now() - t0); }
+    console.log(`unified round-12 recompute best-of-5: ${best.toFixed(1)}ms`);
+    expect(best).toBeLessThan(50);
+  });
 });

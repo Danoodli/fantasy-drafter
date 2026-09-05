@@ -14,7 +14,7 @@
 //   hold-out: fit on one season, test on the other, within 1σ of fit-on-both
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const rooms = process.argv.find((a) => a.startsWith("--rooms="))?.split("=")[1] ?? "12";
 interface Row {
@@ -22,7 +22,13 @@ interface Row {
   violations?: number; fragility?: number; botFragility?: number; objectiveRho?: number;
 }
 const run = (args: string, out: string): { decisions: Row[] } => {
-  execSync(`npx tsx scripts/backtest-season.ts ${args} --rooms=${rooms} --json=${out}`, { stdio: ["ignore", "ignore", "inherit"] });
+  try {
+    execSync(`npx tsx scripts/backtest-season.ts ${args} --rooms=${rooms} --json=${out}`, { stdio: ["ignore", "ignore", "inherit"] });
+  } catch (err) {
+    // backtest-season exits non-zero when it sees an illegal roster; that is a
+    // gate result, not a crash. The JSON is still written — read it.
+    if (!existsSync(out)) throw err;
+  }
   return JSON.parse(readFileSync(out, "utf8"));
 };
 const pick = (j: { decisions: Row[] }, id: string): Row => {

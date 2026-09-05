@@ -19,16 +19,23 @@ const MC_ITERATIONS = 400;
 const MC_CANDIDATES = 12;
 /** Unified model: candidates scored by full roster completion. */
 const UNIFIED_SHORTLIST = 10;
-/** Iterations at the start of a draft; late picks are cheap to complete, so the budget grows as picks run out. */
+/** Once this few picks remain, candidates sit within a few points of each other; a smaller shortlist keeps latency flat. */
+const UNIFIED_SHORTLIST_LATE = 6;
+const LATE_PICKS = 6;
+/**
+ * Iterations at the start of a draft. The budget grows as picks run out, but
+ * evaluation cost per iteration is roughly constant (sampling + 17 lineups per
+ * candidate), so the growth is capped at 2× to hold the 50 ms budget at every pick.
+ */
 const UNIFIED_ITERATIONS = 80;
-const UNIFIED_ITERATIONS_MAX = 400;
+const UNIFIED_ITERATIONS_MAX = 120;
 /**
  * When the top two scores sit inside this many standard errors of their paired
  * difference, re-run the top few with more iterations — only once the draft is
  * past halfway, where completions are cheap and margins are small.
  */
 const REFINE_SE = 1.0;
-const REFINE_TOP = 3;
+const REFINE_TOP = 2;
 const REFINE_MULT = 2;
 const REFINE_MAX_FUTURE = 8;
 /** The closed-form EV proxy is computed for this many table-ranked players only. */
@@ -542,6 +549,7 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
   const POSITIONS: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
 
   const available = board.filter((p) => !draftedIds.has(p.id));
+  const future = myPicks.filter((n) => n > currentPick);
   const legal = legalPool(available, state);
   if (legal.length === 0) return { recommendations: [], strategyWarning: null, computeMs: 0 };
 
@@ -582,12 +590,18 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
   const byEv = [...evPool].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
   const shortlist: BoardPlayer[] = [];
   const add = (p: BoardPlayer | undefined) => { if (p && !shortlist.includes(p)) shortlist.push(p); };
-  for (let i = 0; i < UNIFIED_SHORTLIST / 2; i++) { add(byTable[i]); add(byEv[i]); }
-  for (const pos of POSITIONS) add(byTable.find((p) => p.pos === pos));
+  const shortlistSize = future.length <= LATE_PICKS ? UNIFIED_SHORTLIST_LATE : UNIFIED_SHORTLIST;
+  for (let i = 0; i < shortlistSize / 2; i++) { add(byTable[i]); add(byEv[i]); }
+  // The best at every position, so a cross-position comparison always happens —
+  // unless the position cannot add lineup points at all (its best available is
+  // worth nothing over the wire on this roster), in which case it cannot win.
+  for (const pos of POSITIONS) {
+    const best = byTable.find((p) => p.pos === pos);
+    if (best && table[pos](rateOf.get(best.id)!) > 0) add(best);
+  }
 
   // Roster completion from the live board: every remaining pick of the draft.
   const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
-  const future = myPicks.filter((n) => n > currentPick);
   const simEnd = future.length ? future[future.length - 1] : currentPick;
   const schedule: CompletionShared["schedule"] = [];
   for (let n = currentPick + 1; n <= simEnd; n++) {
