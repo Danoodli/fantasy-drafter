@@ -43,6 +43,33 @@ function draftKeyOf(config: LeagueConfig): string {
   return `${config.platform}:${config.draftId || "manual"}:${config.teams}x${config.rounds}`;
 }
 
+/**
+ * How many manual picks are saved for THIS config — what the setup screen's
+ * resume card shows. Null when nothing is saved for it (or storage is
+ * unavailable). Sleeper drafts also mirror from the API, so this undercounts
+ * them; the card says "live" for those instead.
+ */
+export function persistedPickCount(config: LeagueConfig): number | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved: PersistedPicks = JSON.parse(raw);
+    return saved.draftKey === draftKeyOf(config) ? saved.manualPicks.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget the saved draft entirely — "start a new draft" from the setup screen. */
+export function clearPersistedPicks(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem("draft-cockpit-session-v1");
+  } catch {
+    // nothing to clear
+  }
+}
+
 /** Match a Sleeper pick to a board player: by sleeper id, then by name+pos. */
 function matchToBoard(
   pick: DraftPick,

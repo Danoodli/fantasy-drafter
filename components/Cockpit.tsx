@@ -22,6 +22,7 @@ import InjuryBadge from "./InjuryBadge";
 import Confetti, { type Burst } from "./Confetti";
 import Recap from "./Recap";
 import PlayerModal from "./PlayerModal";
+import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -38,7 +39,8 @@ interface Props {
   board: Board;
   config: LeagueConfig;
   strategies: Strategy[];
-  onReconfigure: () => void;
+  /** Back to the setup screen. The draft stays saved and resumable. */
+  onHome: () => void;
 }
 
 function customStrategy(p: CustomStrategyParams, bestball: boolean): Strategy {
@@ -60,9 +62,10 @@ function customStrategy(p: CustomStrategyParams, bestball: boolean): Strategy {
 const SLOT_ORDER: (keyof LeagueConfig["rosterSlots"])[] = ["QB", "RB", "WR", "TE", "FLEX", "K", "DST"];
 
 
-export default function Cockpit({ board, config, strategies, onReconfigure }: Props) {
+export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const draft = useDraft(board, config);
   const [strategyId, setStrategyId] = useState(config.strategy);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [custom, setCustom] = useState<CustomStrategyParams | null>(null);
   const [showDials, setShowDials] = useState(false);
   const [toast, setToast] = useState<{ text: string; undoable: boolean } | null>(null);
@@ -361,6 +364,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   // Keyboard: / focuses search, Enter drafts the pick, ⌘Z undoes.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (confirm) return; // a question is on screen — no drafting, no undo
       const inField =
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLSelectElement ||
@@ -436,6 +440,23 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     <main data-tour-screen="cockpit" className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-4 pb-4 pt-3 lg:h-dvh">
       {/* Status bar */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2">
+        <button
+          onClick={() =>
+            setConfirm({
+              title: "Back to setup?",
+              body:
+                draft.picks.length > 0 && !draftOver
+                  ? `${draft.picks.length} picks are on the board. The draft stays saved — resume it from the setup screen any time.`
+                  : "The draft stays saved — you can come straight back to it.",
+              confirmLabel: "Go to setup",
+              onConfirm: onHome,
+            })
+          }
+          title="Back to the setup screen (the draft is saved)"
+          className="rounded border border-line bg-panel px-2.5 py-1.5 text-sm font-semibold text-ink-dim hover:text-ink"
+        >
+          ← Home
+        </button>
         <div className="font-mono text-sm text-ink" key={draft.currentPick}>
           <span className={draft.lastPickFlash ? "pick-flash rounded px-1" : "px-1"}>
             {draftOver ? "DRAFT OVER" : `PICK ${draft.currentPick} · RND ${draft.round}`}
@@ -510,8 +531,12 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               <button
                 onClick={(e) => {
                   (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
-                  if (window.confirm("Auto-complete the rest of the draft? (Reset clears it if you change your mind.)"))
-                    autoComplete();
+                  setConfirm({
+                    title: "Auto-complete the draft?",
+                    body: "The engine drafts your remaining picks and ADP drafts the room. Reset clears it if you change your mind.",
+                    confirmLabel: "Auto-complete",
+                    onConfirm: autoComplete,
+                  });
                 }}
                 data-tour="auto-complete"
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
@@ -543,12 +568,18 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
               <button
                 onClick={(e) => {
                   (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
-                  if (window.confirm("Clear every manually marked pick and restart?")) {
-                    draft.reset();
-                    setEndedEarly(false);
-                    renewSession(); // the next draft gets its own history entry
-                    showToast("Draft reset.");
-                  }
+                  setConfirm({
+                    title: "Reset the draft?",
+                    body: "Every manually marked pick is cleared and the board starts over.",
+                    confirmLabel: "Reset",
+                    danger: true,
+                    onConfirm: () => {
+                      draft.reset();
+                      setEndedEarly(false);
+                      renewSession(); // the next draft gets its own history entry
+                      showToast("Draft reset.");
+                    },
+                  });
                 }}
                 className="block w-full px-3 py-2 text-left text-sm text-warn hover:bg-panel"
               >
@@ -565,24 +596,12 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           >
             Undo
           </button>
-          <button
-            onClick={() => {
-              // Leaving setup mid-draft orphans the marked picks — make sure.
-              if (
-                draft.picks.length > 0 &&
-                !draftOver &&
-                !window.confirm(
-                  `Leave this draft? ${draft.picks.length} picks are on the board — a new league setup starts fresh.`
-                )
-              )
-                return;
-              onReconfigure();
-            }}
-            title="Change league or tournament format"
-            className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
+          <span
+            className="hidden rounded bg-panel px-2 py-1.5 font-mono text-xs text-ink-faint sm:inline"
+            title="This draft's format — change it from the setup screen"
           >
-            {config.teams}tm · {config.scoring} · {bestball ? "best ball" : "redraft"} ⚙
-          </button>
+            {config.teams}tm · {config.scoring} · {bestball ? "best ball" : "redraft"}
+          </span>
           {config.platform === "sleeper" && (
             <span
               className="flex items-center gap-1.5 font-mono text-xs uppercase"
@@ -965,6 +984,8 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           )}
         </div>
       )}
+
+      <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
 
       {/* Player detail */}
       {modalPlayer && (

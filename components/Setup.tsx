@@ -11,6 +11,16 @@ import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } fro
 import { loadHistory, deleteDraft, type SavedDraft } from "../lib/client/history";
 import { loadSources, saveSources, DEFAULT_SOURCES, type SourcePrefs } from "../lib/client/sources";
 import { DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
+import { persistedPickCount } from "../lib/client/useDraft";
+import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
+
+/** The draft the cockpit was just showing — offered back as one click. */
+export interface ResumeInfo {
+  config: LeagueConfig;
+  onResume: () => void;
+  /** Forget the saved draft and its config; setup starts from defaults. */
+  onDiscard: () => void;
+}
 
 const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
   { value: "ppr", label: "PPR" },
@@ -22,15 +32,24 @@ const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
 export default function Setup({
   onDone,
   initialConfig,
+  resume,
   onViewDraft,
   onViewPortfolio,
 }: {
   onDone: (config: LeagueConfig) => void;
   /** A config decoded from a shared link — prefills everything. */
   initialConfig?: LeagueConfig | null;
+  /** Set when the user came here from the cockpit via Home. */
+  resume?: ResumeInfo | null;
   onViewDraft: (draft: SavedDraft) => void;
   onViewPortfolio: () => void;
 }) {
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [resumePicks, setResumePicks] = useState<number | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage read
+    setResumePicks(resume ? persistedPickCount(resume.config) : null);
+  }, [resume]);
   const [mode, setMode] = useState<"sleeper" | "manual">(initialConfig?.platform ?? "sleeper");
   const [draftInput, setDraftInput] = useState("");
   const [config, setConfig] = useState<LeagueConfig>(initialConfig ?? DEFAULT_CONFIG);
@@ -153,7 +172,55 @@ export default function Setup({
         <p className="mt-1 text-ink-dim">Who to take, right now. Set up once, then draft.</p>
       </header>
 
-      {initialConfig && (
+      {resume && (
+        <section
+          data-tour="resume"
+          className="rounded-lg border-l-4 border-rb bg-panel p-4"
+          aria-label="Draft in progress"
+        >
+          <p className="font-mono text-xs uppercase tracking-widest text-ink-dim">Draft in progress</p>
+          <p className="mt-1 text-sm">
+            {resume.config.teams}tm · {resume.config.scoring} ·{" "}
+            {resume.config.leagueType === "bestball" ? "best ball" : "redraft"} · slot{" "}
+            {resume.config.myDraftSlot ?? "?"}
+            {resume.config.platform === "sleeper" ? (
+              <span className="text-ink-dim"> · live Sleeper sync</span>
+            ) : resumePicks != null ? (
+              <span className="text-ink-dim">
+                {" "}
+                · {resumePicks} of {resume.config.teams * resume.config.rounds} picks marked
+              </span>
+            ) : null}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={resume.onResume}
+              className="btn-shimmer rounded-lg bg-rb px-4 py-2 font-display text-lg font-bold uppercase tracking-wide text-field"
+            >
+              Resume draft
+            </button>
+            <button
+              onClick={() =>
+                setConfirm({
+                  title: "Start a new draft?",
+                  body: "The saved picks for the current draft are cleared. Its recap stays in your history.",
+                  confirmLabel: "Start new",
+                  danger: true,
+                  onConfirm: resume.onDiscard,
+                })
+              }
+              className="rounded-lg border border-line bg-panel-2 px-4 py-2 text-sm font-semibold text-ink-dim hover:text-ink"
+            >
+              Start a new draft
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-ink-faint">
+            Or change anything below and open the cockpit — same league settings resume the same draft.
+          </p>
+        </section>
+      )}
+
+      {initialConfig && !resume && (
         <p className="rounded-lg bg-panel px-3 py-2 text-sm text-live">
           Shared setup loaded — everything below is prefilled. Check your draft slot and go.
         </p>
@@ -583,6 +650,7 @@ export default function Setup({
           </ul>
         </section>
       )}
+      <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </main>
   );
 }
