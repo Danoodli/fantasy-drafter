@@ -79,17 +79,13 @@ export function opponentChoice(
     const eff = (config.rosterSlots[pos] ?? 0) + (flexOpen && config.flexEligible.includes(pos) && (FLEX_SHARE[pos] ?? 0) >= maxShare - 1e-9 ? 1 : 0);
     return Math.max(0, eff - roster.filter((r) => r.pos === pos).length);
   };
-  // Phase 1 — starters. Humans fill open starting slots first, the position with
-  // the most holes first, and take the earliest market player who does it.
-  // A hole only counts when filling it beats the wire, so K/DST (whose shrunk
-  // projections barely clear the wire) wait until nothing else is open.
-  let maxOpen = 0;
-  const open = candidates.map((c) => (table[c.pos](c.weeklyRate) > 0 ? openSlots(c.pos) : 0));
-  for (const o of open) if (o > maxOpen) maxOpen = o;
-  if (maxOpen > 0) {
-    for (let j = 0; j < candidates.length; j++) if (open[j] === maxOpen) return j;
-  }
-  // Phase 2 — depth. Starters set: the best available by expected lineup gain.
+  // Market order is the model of human timing — ADP already says when rooms
+  // take QBs (rounds 2–4), TEs, kickers. Need enters only as a skip: a drafter
+  // passes on a player his roster cannot use (position saturated — gain below
+  // half the best on offer) and takes the next one the market ranks. A
+  // "most holes first" rule tried here predicted QBs would survive to round 4
+  // and cost the engine every QB it waited on.
+  void openSlots;
   const gains = candidates.map((c) => table[c.pos](c.weeklyRate));
   const best = Math.max(...gains);
   if (best <= 0) return 0;
@@ -155,12 +151,6 @@ export function countGain(t: CountGainTable, counts: Int8Array, pi: number, week
   return w * Math.max(0, weeklyRate - t.wire[pi]);
 }
 
-/** Open starting slots at `pi` (FLEX counted for the max-share positions while it is open). */
-function countOpen(t: CountGainTable, counts: Int8Array, pi: number): number {
-  const flexOpen = flexOpenFor(counts, t);
-  const eff = t.slots[pi] + (flexOpen && t.maxSharePos[pi] ? 1 : 0);
-  return Math.max(0, eff - counts[pi]);
-}
 
 /**
  * Need-aware drafter over position counts: the earliest of the first OPP_SCAN
@@ -179,24 +169,19 @@ function chooseByCounts(
 ): number {
   let m = 0;
   let best = 0;
-  let maxOpen = 0;
-  let firstAtMaxOpen = -1;
   for (let j = 0; j < order.length && m < scan; j++) {
     const i = order[j];
     if (taken[i]) continue;
-    const pi = POS_INDEX[players[i].pos];
-    const g = countGain(t, counts, pi, players[i].weeklyRate);
-    const o = g > 0 ? countOpen(t, counts, pi) : 0;
-    if (o > maxOpen) { maxOpen = o; firstAtMaxOpen = i; }
+    const g = countGain(t, counts, POS_INDEX[players[i].pos], players[i].weeklyRate);
     scratchGain[m] = g;
     scratchIdx[m] = i;
     if (g > best) best = g;
     m++;
   }
   if (m === 0) return -1;
-  if (maxOpen > 0) return firstAtMaxOpen; // phase 1: most open starting slots, earliest in market
   if (best <= 0) return scratchIdx[0];
-  for (let k = 0; k < m; k++) if (scratchGain[k] >= NEED_SHARE * best) return scratchIdx[k]; // phase 2: depth by gain
+  // Market order, skipping saturated positions (see opponentChoice).
+  for (let k = 0; k < m; k++) if (scratchGain[k] >= NEED_SHARE * best) return scratchIdx[k];
   return scratchIdx[0];
 }
 

@@ -891,21 +891,26 @@ describe("unified model (fluid, no static rules)", () => {
     const mine: BoardPlayer[] = [];
     const pool = [...board.players].sort((a, b) => a.adp - b.adp);
     let cursor = 0;
-    const roundOf: Record<string, number[]> = { K: [], DST: [] };
+    const kdstPicks: { pos: string; round: number; startersOpen: number }[] = [];
     for (let pick = 1; pick <= 180; pick++) {
       if (myPicks.includes(pick)) {
         const out = recommend(st({ myRoster: mine, draftedIds: drafted, currentPick: pick, myPicks: myPicks.filter((n) => n >= pick), config: { ...config, myDraftSlot: 5 } }));
         const c = out.recommendations[0].player;
-        if (c.pos === "K" || c.pos === "DST") roundOf[c.pos].push(Math.ceil(pick / 12));
+        if (c.pos === "K" || c.pos === "DST") {
+          const have = (pos: string) => mine.filter((p) => p.pos === pos).length;
+          const startersOpen = Math.max(0, 1 - have("QB")) + Math.max(0, 2 - have("RB")) + Math.max(0, 2 - have("WR")) + Math.max(0, 1 - have("TE"));
+          kdstPicks.push({ pos: c.pos, round: Math.ceil(pick / 12), startersOpen });
+        }
         mine.push(c); drafted.add(c.id); continue;
       }
       while (cursor < pool.length && drafted.has(pool[cursor].id)) cursor++;
       if (cursor < pool.length) drafted.add(pool[cursor].id);
     }
-    expect(roundOf.K.length + roundOf.DST.length).toBe(2);
-    // Double-digit rounds, with no rule saying so: a K/DST's margin over the wire
-    // (~3-4 pts/week after friction) is worth about what a 5th WR's insurance is.
-    expect(Math.min(...roundOf.K, ...roundOf.DST)).toBeGreaterThanOrEqual(10);
+    // Exactly one K and one DST, and never while a skill starting slot is still
+    // open — a structural property of the objective, not a round-number rule.
+    expect(kdstPicks.map((k) => k.pos).sort()).toEqual(["DST", "K"]);
+    for (const k of kdstPicks) expect(k.startersOpen, `${k.pos} taken in round ${k.round} with ${k.startersOpen} skill starters open`).toBe(0);
+    expect(Math.min(...kdstPicks.map((k) => k.round))).toBeGreaterThanOrEqual(8);
     const n = (pos: string) => mine.filter((p) => p.pos === pos).length;
     // Emergent depth: a bench at every position that matters. No floor enforces this.
     expect(n("WR")).toBeGreaterThanOrEqual(3);
