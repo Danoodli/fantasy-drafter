@@ -18,6 +18,12 @@ Score(c) = U( LineupPoints( FinalRoster(c) ) )
 - **LineupPoints(R)** = the season total of each week's optimal starting lineup for roster R under the league's slots, with the week's realized points drawn from a calibrated **outcome model** (below). Redraft: any starting slot the roster cannot fill in a week is filled from the waiver wire at that position's expected streamable rate. Best ball: no waivers, no lineup management — exactly how best ball scores.
 - **U** = utility over the distribution of LineupPoints across simulations: `mean − λ·sd`. Redraft λ is a small risk aversion; large-field best-ball tournaments use negative λ (ceiling-seeking), because the payout is for finishing 1st, not for the mean.
 
+Three refinements came out of building it, each forced by a measured failure (see the plan's review log):
+
+- **Redraft lineups are set before kickoff.** Starters are chosen by expected weekly rate among players known to be active that week; realized points then accrue. Best ball keeps the realized-optimal lineup (the platform picks it). Without this, any two interchangeable high-variance players — a second DST — looked valuable purely through hindsight, in both the engine and the backtest.
+- **The waiver wire is contested and costs something.** It is the 3rd-best undrafted player *by projection* at the position (a pickup is made on projections, not hindsight), it always exists (deepest-ADP fallback), and every streamed slot-week is charged `WAIVER_FRICTION` = 2.5 points — a roster move, waiver priority, a pickup a little worse than his projection. That single term is why a rostered QB2 for the bye beats a plan to stream one. Engine and harness apply it identically.
+- **Projections are shrunk toward their ADP-neighborhood mean by (1 − reliability)**, with reliability fitted per position as Spearman(projection, per-game actual): QB .38, RB .69, WR .61, TE .52, K .07, DST .29. That is the regression to the mean the data demands — and it is what makes kickers and defenses last picks with no rule.
+
 One unit (expected points my completed roster scores this season), one uncertainty model, one place where opponents live. Everything the old stack hard-coded becomes emergent:
 
 | old heuristic | how the objective produces it |
@@ -38,7 +44,7 @@ One unit (expected points my completed roster scores this season), one uncertain
 
 The recommendation is recomputed from scratch on every board change — there is no ranked queue that "falls to #3" when #1 and #2 go. Each recompute rebuilds the completion model from the live room: every opponent's actual roster (from the draft feed), the live ADP drift, and the remaining pool.
 
-Opponents are modeled **with the same objective I use for myself**. An opponent's next pick is the earliest player in market (effective-ADP) order whose expected lineup gain *for that opponent's roster* is meaningful — i.e., the best available player they actually need. A team holding 5 RB and 0 WR is predicted to take a WR; a team with every starter filled is predicted to take the best player left. This replaces the fixed position caps, so "what will be left at my next pick" reflects how the league is panning out, pick by pick.
+Opponents are modeled **with the same objective I use for myself**. An opponent fills open starting slots first — the position with the most holes first, the earliest player in market (effective-ADP) order who fills it — and once the starters are set drafts depth by expected lineup gain *for that opponent's roster*. A team holding 2 RB and 0 WR is predicted to take a WR; an empty roster wants RB/WR (three holes each, with FLEX) before a QB (one), which is why QBs go later than RB/WR in rounds 1–2 without any rule; a team with every starter filled takes the best player left. This replaces the fixed position caps, so "what will be left at my next pick" reflects how the league is panning out, pick by pick.
 
 ## The outcome model (calibrated, not guessed)
 
