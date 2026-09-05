@@ -44,6 +44,8 @@
 
 ## Tasks and commit boundaries
 
+All nine tasks landed on `cockpit-ux-and-ingestion` on 2026-09-05 (commits 83c5cad … edd63d9 plus docs). Deviations from the plan: the survival tail is a normal/wide mixture (`tailScale`, `wideShare`, `wideFactor`) instead of a Student-t — closed form with the existing CDF and trivially the same sampler in the sim; it ships OFF because FFC's own extremes are consistent with a normal and no real-draft ids were available in the repo to fit against. `pnpm calibrate:survival` is the fitting tool.
+
 1. **Navigation + confirm dialog + resume.** ConfirmDialog; Home button; page keeps config on Home; Setup resume card; three native confirms replaced. Commit: `UI: Home button, custom confirm dialog, resume an in-progress draft from setup`.
 2. **Manual-mode sync tools.** `markUnknown`, `setCurrentPick`, RecentPicks strip. Commit: `UI: recent picks feed, unknown-pick placeholder, set-current-pick resync`.
 3. **Room strip.** Commit: `UI: room strip — every slot's build, on-clock slot highlighted`.
