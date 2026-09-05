@@ -24,6 +24,7 @@ import Recap from "./Recap";
 import PlayerModal from "./PlayerModal";
 import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
 import RecentPicks from "./RecentPicks";
+import RoomStrip from "./RoomStrip";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -32,7 +33,7 @@ import { fetchBoardNews, type PlayerNews } from "../lib/client/espnNews";
 import { fetchWireNews, mergeNews, DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
 import { connectWireStream } from "../lib/client/wireStream";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
-import { pickOwner } from "../lib/draft/snake";
+import { pickOwner, picksForSlot } from "../lib/draft/snake";
 import { startWalkthrough } from "./Walkthrough";
 import { simulateRoom } from "../lib/engine/season";
 
@@ -264,6 +265,20 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
       opponentRosters: draft.opponentRosters,
     });
   }, [gradedBoard, draft.draftedIds, draft.myRoster, planningPick, draft.myPicks, config, strategy, draftOver, draft.drift, draft.opponentCounts, draft.opponentRosters]);
+
+  // Every seat's build, mine included — the room strip and the shortlist read this.
+  const mySlot = config.myDraftSlot ?? 1;
+  const rostersBySlot = useMemo<Record<number, BoardPlayer[]>>(
+    () => ({ ...draft.opponentRosters, [mySlot]: draft.myRoster }),
+    [draft.opponentRosters, draft.myRoster, mySlot]
+  );
+  const nextPickBySlot = useMemo(() => {
+    const out: Record<number, number | undefined> = {};
+    for (let s = 1; s <= config.teams; s++) {
+      out[s] = picksForSlot(s, config.teams, config.rounds, draft.tradedPicks).find((n) => n >= draft.currentPick);
+    }
+    return out;
+  }, [config.teams, config.rounds, draft.tradedPicks, draft.currentPick]);
 
   const top = output?.recommendations[0];
   const alternates = output?.recommendations.slice(1) ?? [];
@@ -653,6 +668,16 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           ))}
         </section>
       )}
+
+      <RoomStrip
+        teams={config.teams}
+        mySlot={mySlot}
+        onClockSlot={draft.onClockSlot}
+        draftOver={draftOver}
+        rosters={rostersBySlot}
+        nextPickBySlot={nextPickBySlot}
+        onOpen={setModalPlayer}
+      />
 
       <RecentPicks
         picks={draft.picks}
