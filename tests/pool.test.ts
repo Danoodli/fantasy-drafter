@@ -62,6 +62,18 @@ describe("pool depth", () => {
     expect(myRoster.length).toBe(config.rounds);
   });
 
+  it.each(FORMATS)("%s has no unrostered players and every player has a bye", (fmt) => {
+    // The deep pool once admitted 153 free agents (crosswalk team "FA") with
+    // no bye week; the insurance math then treated them as never off.
+    const players = load(fmt).players;
+    const bad = players.filter((p) => !p.team || p.team === "FA" || p.team.length !== p.team.trim().length);
+    expect(bad.map((p) => `${p.name} (${p.team})`)).toEqual([]);
+    const noBye = players.filter((p) => p.bye == null);
+    expect(noBye.map((p) => `${p.name} (${p.team})`)).toEqual([]);
+    const teams = new Set(players.map((p) => p.team));
+    expect(teams.size).toBe(32);
+  });
+
   it("leaves the FFC-sourced top of the board untouched", () => {
     for (const fmt of FORMATS) {
       const players = load(fmt).players;

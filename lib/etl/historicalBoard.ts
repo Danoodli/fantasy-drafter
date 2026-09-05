@@ -197,6 +197,8 @@ export function buildHistoricalBoard(
   const ffcTail = Math.max(0, ...players.filter((p) => SKILL.includes(p.pos)).map((p) => p.adp));
   let budget = DEEP_POOL_TARGET_SKILL - players.filter((p) => SKILL.includes(p.pos)).length;
   let deepPool = 0;
+  const teamBye = new Map<string, number>();
+  for (const p of players) if (p.bye != null && !teamBye.has(p.team)) teamBye.set(p.team, p.bye);
   const tail = snapshot.espn
     .filter((e) => SKILL.includes(e.pos) && !espnMatched.has(e.espnId) && e.team)
     .sort((a, b) => (a.adpEspn ?? 9999) - (b.adpEspn ?? 9999) || b.projApplied - a.projApplied);
@@ -207,7 +209,7 @@ export function buildHistoricalBoard(
       name: e.name,
       pos: e.pos,
       team: e.team,
-      bye: null,
+      bye: teamBye.get(e.team) ?? null,
       adp: Math.round(adp * 10) / 10,
       adpStdev: 24,
       adpHigh: Math.max(1, Math.round(adp - 36)),

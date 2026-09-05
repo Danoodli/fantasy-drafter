@@ -222,17 +222,28 @@ function appendDeepPool(
     if (!SKILL.includes(pos)) continue;
     const adp = adpFor(proj, pos);
     if (adp == null || adp <= ffcTail) continue;
-    const team = playerInfo[id]?.team ?? (row.team && row.team !== "NA" ? row.team : null);
-    if (!team) continue; // unrostered free agents are not draftable
+    // Sleeper's team is the roster authority. The crosswalk fallback returned
+    // the literal string "FA" for free agents (and stale abbreviations like
+    // NOS/JAC/LVR), which passed a truthiness check and put 153 unrostered
+    // players on the live board with no bye week.
+    const team = playerInfo[id]?.team;
+    if (!team) continue; // not on an NFL roster per Sleeper: not draftable
     candidates.push({ id, row, adp, proj });
   }
   candidates.sort((a, b) => a.adp - b.adp);
+
+  // Bye week by team, from the FFC-sourced players already on the board. A
+  // null bye makes the insurance math treat a player as never off — a deep
+  // flier would look like perfect bye cover, and a rostered one would hide
+  // the hole he leaves.
+  const teamBye = new Map<string, number>();
+  for (const p of players) if (p.bye != null && !teamBye.has(p.team)) teamBye.set(p.team, p.bye);
 
   let added = 0;
   for (const c of candidates) {
     if (budget <= 0) break;
     const pos = c.row.position as Position;
-    const team = playerInfo[c.id]?.team ?? c.row.team;
+    const team = playerInfo[c.id]!.team!; // guaranteed by the candidate filter
     const stats = c.proj.stats && Object.keys(c.proj.stats).length ? c.proj.stats : undefined;
     const info = playerInfo[c.id];
     players.push({
@@ -240,7 +251,7 @@ function appendDeepPool(
       name: c.row.name,
       pos,
       team,
-      bye: null,
+      bye: teamBye.get(team) ?? null,
       projPoints: stats ? Math.round(scoreStatLine(stats, scoring, pos === "TE") * 10) / 10 : 0,
       projImputed: false,
       stats: undefined,
@@ -340,6 +351,12 @@ function buildBoard(
   for (const f of ffc.data.players) {
     const pos = (f.position === "PK" ? "K" : f.position === "DEF" ? "DST" : f.position) as Position;
     if (!["QB", "RB", "WR", "TE", "K", "DST"].includes(pos)) continue;
+    // FFC keeps drafting a player for a while after he is cut. An unrostered
+    // player cannot score and has no bye, so he must never be recommendable.
+    if (!f.team || f.team === "FA") {
+      warnings.push(`skipped free agent: ${f.name} (${pos}, ADP ${f.adp})`);
+      continue;
+    }
 
     let id = "";
     let ids: BoardPlayer["ids"] = { ffc: String(f.player_id) };
