@@ -135,7 +135,7 @@ export function needWeight(
  * "balanced" drafting 6.8 RBs and 2.2 WRs into a 2-RB/2-WR/FLEX lineup, and
  * losing to a plain ADP bot in 2024. First bench spot ~25%, then halving.
  */
-export const BENCH_INSURANCE = { skill: 0.25, other: 0.12, decay: 0.5 };
+export const BENCH_INSURANCE = { skill: 0.25, other: 0.12, decay: 0.4 };
 
 function blendedValue(p: BoardPlayer, strategy: Strategy): number {
   return strategy.baselineBlend * p.vorp + (1 - strategy.baselineBlend) * p.vols;
