@@ -12,6 +12,7 @@
     "backtest": "tsx scripts/backtest.ts",
     "backtest:season": "tsx scripts/backtest-season.ts",
     "calibrate": "tsx scripts/calibrate-outcomes.ts",
+    "calibrate:survival": "tsx scripts/calibrate-survival.ts",
     "backtest:gate": "tsx scripts/backtest-gate.ts",
     "simulate": "tsx scripts/simulate-season.ts"
   },

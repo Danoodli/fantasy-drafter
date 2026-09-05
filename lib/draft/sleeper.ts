@@ -40,6 +40,8 @@ export interface SleeperDraftInfo {
   scoringType: string | null;
   tradedPicks: TradedPick[];
   status: string;
+  /** NFL season the draft belongs to ("2025"), when Sleeper reports it. */
+  season: string | null;
 }
 
 export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo> {
@@ -102,6 +104,7 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
     scoringType: draft.metadata?.scoring_type ?? null,
     tradedPicks,
     status: draft.status ?? "unknown",
+    season: draft.season != null ? String(draft.season) : null,
   };
 }
 
