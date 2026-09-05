@@ -661,6 +661,25 @@ describe("construction floors (the zero-TE bug)", () => {
   });
 });
 
+describe("recap simulator uses the outcome model", () => {
+  it("a roster with no bench has a fatter left tail: depth raises the floor more than the median", async () => {
+    const { simulateSeasons } = await import("../lib/engine/season");
+    const byAdp = [...board.players].sort((a, b) => a.adp - b.adp);
+    const take = (pos: Position, k: number) => byAdp.filter((p) => p.pos === pos)[k];
+    // Nine starters (FLEX included) and nothing else — every added body below is pure bench.
+    const thin = [take("QB", 2), take("RB", 2), take("RB", 8), take("WR", 4), take("WR", 12), take("WR", 18), take("TE", 2), take("K", 1), take("DST", 1)];
+    const deep = [...thin, take("RB", 20), take("WR", 24), take("QB", 12), take("TE", 10)];
+    const a = simulateSeasons(thin, config, 600, 3), b = simulateSeasons(deep, config, 600, 3);
+    // Season-ending events (~18% of skill players) give a bench-less roster a heavy
+    // left tail — something the old weekly-noise simulator could never produce.
+    expect((a.mean - a.p10) / a.mean).toBeGreaterThan(0.1);
+    // Depth pays: with players missing ~4 of 16 games, bench bodies start routinely,
+    // so depth lifts the mean AND cushions the tail.
+    expect(b.mean).toBeGreaterThan(a.mean);
+    expect((b.mean - b.p10) / b.mean).toBeLessThan((a.mean - a.p10) / a.mean);
+  });
+});
+
 describe("post-draft recap", () => {
   it("ranks rosters, grades them, and finds steals and reaches", async () => {
     const { buildRecap, gradeFor, superlatives } = await import("../lib/engine/recap");
