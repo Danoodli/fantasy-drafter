@@ -1,6 +1,33 @@
 # Projections vs. reality — 2024 and 2025
 
-What this document is: the draft-day projections and ADP the engine would have drafted from in 2024 and 2025, compared against what those players actually scored. Every number comes from `pnpm backtest:season <year>` on the committed snapshots in `data/raw/seasons/`, scored PPR, 12-team. Regenerate any table with that command; the report at the bottom explains how to read it.
+## The short version
+
+We took the exact projections and ADP the engine would have had on draft day in 2024 and 2025, let it draft against a room of bots that simply follow ADP, and then scored every roster with what those players *actually* did that season.
+
+**Do we beat the crowd?** Yes, in both years — after fixing a bug this test exposed. Against a drafter who just takes the next player by ADP, the engine's roster finished about **4th of 12 on average in 2024 and 2nd of 12 in 2025**, and out-scored the ADP drafter sitting in the same seat about 70% of the time in 2024 and 90% in 2025. Before the fix, it *lost* to the ADP drafter in 2024 (finished ~9th of 12), because it was drafting 7 running backs and 2 wide receivers — which you saw yourself in your Sleeper mock. That was a math artifact, not a football opinion, and it's gone.
+
+**How good are the projections themselves?** When they say player A will outscore player B, they're right **about 80% of the time**. That number was identical in both years and is basically the noise floor of the sport — one time in five, the "worse" player scores more, and no engine changes that. Where they're weakest is exactly where it hurts most: **among the first seven rounds, telling the elite players apart is barely better than a coin flip (~60%).** Everyone up there is projected to score a lot; the differences between them are smaller than the randomness. The projections earn their 80% deeper in the draft, where a WR20 vs. a WR60 is a real, predictable gap.
+
+**Are they biased toward a position?** A little, and in a defensible direction. Running backs were the most *reliable* position both years — a projected top-24 RB finished top-24 about 70–80% of the time, versus ~55% for wide receivers. Tight ends are the most accurately projected position overall. **Quarterbacks are the blind spot: neither the projections nor the crowd could predict which top QBs would finish where** (Jayden Daniels was the consensus QB1 in 2025 and finished nowhere; Lamar Jackson went in round 4 in 2024 and finished QB1). That's a strong argument for never paying up for a QB in a 1-QB league. The old engine's RB obsession was *not* the projections' fault — it liked RBs for a broken reason and to an extreme; the fixed engine still leans RB-ish, which the reliability numbers support.
+
+**How do outliers factor in?** They dominate, and they're lopsided. **Busts are two to three times bigger than booms.** The worst miss each year was a star who lost his whole season (McCaffrey −288 in 2024, Nabers −244 in 2025); the best boom each year was about +120. A projection assumes 17 healthy games — it has a hard ceiling and a floor of zero — so the downside of any premium pick is always much bigger than its upside. This is also why projections run "hot" on average: they don't price in the games players will miss. That tax was small in 2024 (players scored ~4 points below projection on average) and brutal in 2025 (~10 points overall, and 55–60 points per player in rounds 1–7, when Nabers, Daniels, Burrow, Conner, Hill and Kamara all went down). Nobody drafting off projections *or* ADP could have dodged 2025. The lesson isn't to predict injuries — nobody can — it's that a deep, balanced roster survives them and a top-heavy one doesn't, which is what the engine now builds.
+
+**Why it works**
+- Projections genuinely beat the ADP crowd at RB, WR and TE in both years — a small but consistent edge, which is the whole reason to draft off projections rather than follow the room.
+- The engine now values a player by what he adds to *your* lineup versus what you could get at his position later, so it adapts to runs and tier cliffs instead of stacking one position.
+- Late-round projections are the most accurate and slightly conservative, so the engine's deep-pool picks are drawn from the most trustworthy part of the data.
+
+**Where it falls short**
+- It can't see injuries, and injuries are the biggest source of misses. Treat every projection as an "if healthy" number.
+- It can't reliably separate the top ~80 players from each other. Don't reach several picks early for a specific elite name — the certainty isn't there.
+- Quarterbacks are unpredictable for everyone. Kickers and defenses are pure noise.
+- Two seasons of evidence. 2025's big win was partly luck — an RB-leaning engine in the one year the top of the WR and QB board collapsed. 2024's modest win is the more honest expectation.
+
+---
+
+## The detail
+
+Everything below is the evidence behind the summary. What this document is: the draft-day projections and ADP the engine would have drafted from in 2024 and 2025, compared against what those players actually scored. Every number comes from `pnpm backtest:season <year>` on the committed snapshots in `data/raw/seasons/`, scored PPR, 12-team. Regenerate any table with that command; the report at the bottom explains how to read it.
 
 Two seasons is two samples. Treat anything that shows up in **both** years as a property of projections; treat anything that shows up in one as that year's story.
 
