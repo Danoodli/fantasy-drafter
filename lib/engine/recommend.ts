@@ -5,6 +5,7 @@ import type { BoardPlayer, EngineOutput, EngineState, Position, Recommendation, 
 import { survivalProb } from "./survival";
 import { vona, expectedBestAtPick } from "./vona";
 import { coverageValue, REG_SEASON_WEEKS } from "./coverage";
+import { FLEX_SHARE } from "./baselines";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
 import { buildReason, buildAlternateReason } from "./reasons";
 import { slotOnClock, pickOwner } from "../draft/snake";
@@ -120,7 +121,16 @@ export function needWeight(
     (a, fp) => a + Math.max(0, (counts[fp] ?? 0) - (rosterSlots[fp] ?? 0)),
     0
   );
-  if (flexEligible.includes(pos) && surplus < flexSlots) return STARTER_NEED_MIN;
+  // A surplus body only claims the FLEX as often as his position realistically
+  // does (FLEX_SHARE: RB/WR 0.45, TE 0.10). Treating every flex-eligible 2nd
+  // TE as a 0.85 starter made the engine draft exactly 2 TE in 288 of 288
+  // backtest seats — the TE cap, not a choice. Below the starter threshold
+  // the player is valued as bench insurance instead.
+  if (flexEligible.includes(pos) && surplus < flexSlots) {
+    const share = FLEX_SHARE[pos] ?? 0;
+    const maxShare = Math.max(...flexEligible.map((fp) => FLEX_SHARE[fp] ?? 0), 1e-9);
+    return STARTER_NEED_MIN * (share / maxShare);
+  }
   // Bench depth
   const depth = have - starters - (flexEligible.includes(pos) ? 1 : 0);
   const benchBase = pos === "RB" || pos === "WR" ? BENCH_INSURANCE.skill : BENCH_INSURANCE.other;
