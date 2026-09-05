@@ -73,7 +73,13 @@ export interface BoardPlayer {
   /** ADP movement vs ~3 days ago, in picks. POSITIVE = rising (drafted earlier). */
   adpTrend?: number | null;
   /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */
-  adpSources?: { ffc: number; espn: number | null; sleeper: number | null };
+  adpSources?: { ffc: number | null; espn: number | null; sleeper: number | null };
+  /**
+   * True for players appended from the Sleeper ADP tail rather than FFC.
+   * FFC only aggregates 12-team/15-round mocks (180 picks), so without these
+   * the board runs dry around round 19 of a 20-round best ball draft.
+   */
+  deepPool?: boolean;
   adp: number;
   adpStdev: number;
   adpHigh: number;

@@ -168,7 +168,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           )}
           {p.adpSources && (
             <span className="ml-auto font-mono text-[10px] text-ink-faint">
-              ADP — FFC {p.adpSources.ffc.toFixed(0)}
+              ADP — {p.adpSources.ffc != null ? `FFC ${p.adpSources.ffc.toFixed(0)}` : "no FFC data"}
               {p.adpSources.sleeper != null && ` · SLP ${p.adpSources.sleeper.toFixed(0)}`}
               {p.adpSources.espn != null && ` · ESPN ${p.adpSources.espn.toFixed(0)}`}
             </span>

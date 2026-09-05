@@ -60,6 +60,7 @@ const ESPN_TEAM: Record<number, string> = {
 
 interface CrossRow {
   sleeper_id: string;
+  name: string;
   espn_id: string;
   fantasypros_id: string;
   yahoo_id: string;
@@ -157,9 +158,154 @@ function imputeProjections(players: BoardPlayer[], warnings: string[]) {
       else if (prev) p.projPoints = prev.projPoints * 0.95;
       else if (next) p.projPoints = next.projPoints * 1.05;
       p.projImputed = true;
-      if (p.adp <= 250) warnings.push(`imputed projection for ${p.name} (${pos}, ADP ${p.adp})`);
+      // Deep-pool players are expected to lack projections — warning on each
+      // of the ~700 of them would bury the warnings that actually matter.
+      if (p.adp <= 250 && !p.deepPool)
+        warnings.push(`imputed projection for ${p.name} (${pos}, ADP ${p.adp})`);
     }
   }
+}
+
+/**
+ * Target size for the skill-position pool (QB/RB/WR/TE).
+ *
+ * A DraftKings-style best ball is 12 teams x 20 rounds = 240 picks with no
+ * K/DST, so an FFC-only board (213 draftable skill players) runs dry in round
+ * 19. 480 gives 2x coverage of the deepest realistic draft while keeping the
+ * board JSON and the <50ms recompute budget in hand.
+ */
+const DEEP_POOL_TARGET_SKILL = 480;
+
+/** Positions a best-ball roster actually uses, so we only pad where it matters. */
+const SKILL: Position[] = ["QB", "RB", "WR", "TE"];
+
+/**
+ * Append players that Sleeper has an ADP for but FFC does not.
+ *
+ * FFC is still the spine and still owns every ADP it publishes — this only
+ * extends past FFC's tail (deepest skill ADP ~186), so grades at the top of
+ * the board are byte-identical to before. Runs BEFORE imputeProjections so
+ * the tail flows through the existing imputation, VORP, and tier passes.
+ */
+function appendDeepPool(
+  players: BoardPlayer[],
+  format: ScoringFormat,
+  scoring: ScoringSettings,
+  cross: CrossRow[],
+  playerInfo: Record<string, SlimPlayerInfo>,
+  sleeperProj: Record<string, SleeperProjection>,
+  sos: SosTable,
+  warnings: string[]
+) {
+  const have = new Set(players.map((p) => p.id));
+  const skillCount = players.filter((p) => SKILL.includes(p.pos)).length;
+  let budget = DEEP_POOL_TARGET_SKILL - skillCount;
+  if (budget <= 0) return;
+
+  const bySleeper = new Map<string, CrossRow>();
+  for (const r of cross) {
+    if (r.sleeper_id && r.sleeper_id !== "NA" && !bySleeper.has(r.sleeper_id))
+      bySleeper.set(r.sleeper_id, r);
+  }
+
+  // FFC's deepest skill ADP is the boundary: below it FFC is authoritative,
+  // past it Sleeper is the only source we have.
+  const ffcTail = Math.max(
+    ...players.filter((p) => SKILL.includes(p.pos)).map((p) => p.adp),
+    0
+  );
+
+  /**
+   * Sleeper's ADP coverage is wildly uneven by format (2002 for ppr, 244 for
+   * standard), so the requested format alone leaves standard boards 250 players
+   * short. Past FFC's tail these are all sub-200 fliers whose ADP barely moves
+   * between PPR variants, and their stdev is 24 — so borrowing a sibling
+   * format's ADP is far better than dropping the player entirely.
+   *
+   * 2QB is kept out of the cross-format pool for QBs, where it shifts ADP by
+   * hundreds of picks, but is fine for everyone else.
+   */
+  const siblings: ScoringFormat[] = ["ppr", "half-ppr", "standard"];
+  const adpFor = (proj: SleeperProjection, pos: Position): number | null => {
+    const direct = proj.adp[format];
+    if (direct != null) return direct;
+    const order = format === "2qb" && pos === "QB" ? [] : siblings.filter((f) => f !== format);
+    for (const f of order) {
+      const v = proj.adp[f];
+      if (v != null) return v;
+    }
+    return null;
+  };
+
+  const candidates: { id: string; row: CrossRow; adp: number; proj: SleeperProjection }[] = [];
+  for (const [id, proj] of Object.entries(sleeperProj)) {
+    if (have.has(id)) continue;
+    const row = bySleeper.get(id);
+    if (!row?.name) continue;
+    const pos = row.position as Position;
+    if (!SKILL.includes(pos)) continue;
+    const adp = adpFor(proj, pos);
+    if (adp == null || adp <= ffcTail) continue;
+    const team = playerInfo[id]?.team ?? (row.team && row.team !== "NA" ? row.team : null);
+    if (!team) continue; // unrostered free agents are not draftable
+    candidates.push({ id, row, adp, proj });
+  }
+  candidates.sort((a, b) => a.adp - b.adp);
+
+  let added = 0;
+  for (const c of candidates) {
+    if (budget <= 0) break;
+    const pos = c.row.position as Position;
+    const team = playerInfo[c.id]?.team ?? c.row.team;
+    const stats = c.proj.stats && Object.keys(c.proj.stats).length ? c.proj.stats : undefined;
+    const info = playerInfo[c.id];
+    players.push({
+      id: c.id,
+      name: c.row.name,
+      pos,
+      team,
+      bye: null,
+      projPoints: stats ? Math.round(scoreStatLine(stats, scoring, pos === "TE") * 10) / 10 : 0,
+      projImputed: false,
+      stats: undefined,
+      adp: c.adp,
+      // Sleeper publishes no ADP dispersion. These players go undrafted in most
+      // rooms, so treat their landing spot as genuinely wide rather than fake-precise.
+      adpStdev: 24,
+      adpHigh: Math.max(1, Math.round(c.adp - 36)),
+      adpLow: Math.round(c.adp + 36),
+      ecr: null,
+      ecrStdev: null,
+      vorp: 0,
+      vols: 0,
+      tier: 0,
+      injury: info?.injury ?? null,
+      depthOrder: info?.depthOrder ?? null,
+      sosSeason: sos[team]?.[pos]?.season ?? null,
+      sosPlayoff: sos[team]?.[pos]?.playoff ?? null,
+      statsSleeper: c.proj.stats,
+      news: null,
+      deepPool: true,
+      adpSources: { ffc: null, espn: null, sleeper: c.proj.adp[format] ?? c.adp },
+      ids: {
+        espn: c.row.espn_id !== "NA" ? c.row.espn_id : undefined,
+        fantasypros: c.row.fantasypros_id !== "NA" ? c.row.fantasypros_id : undefined,
+        yahoo: c.row.yahoo_id !== "NA" ? c.row.yahoo_id : undefined,
+      },
+    });
+    budget--;
+    added++;
+  }
+
+  const withProj = players.filter((p) => p.deepPool && p.projPoints > 0).length;
+  console.log(
+    `  deep pool: +${added} players past FFC ADP ${ffcTail.toFixed(1)} (${withProj} with Sleeper projections)`
+  );
+  if (added === 0)
+    warnings.push("deep pool added 0 players — Sleeper ADP or the ID crosswalk may have changed shape");
+  const finalSkill = players.filter((p) => SKILL.includes(p.pos)).length;
+  if (finalSkill < DEEP_POOL_TARGET_SKILL)
+    warnings.push(`skill pool is ${finalSkill}, short of the ${DEEP_POOL_TARGET_SKILL} target`);
 }
 
 function buildBoard(
@@ -307,6 +453,8 @@ function buildBoard(
       ids,
     });
   }
+
+  appendDeepPool(players, format, scoring, cross, playerInfo, sleeperProj, sos, warnings);
 
   imputeProjections(players, warnings);
 

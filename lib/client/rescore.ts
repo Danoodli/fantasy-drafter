@@ -43,13 +43,14 @@ function adpFor(p: BoardPlayer, prefs?: SourcePrefs): number {
   const src = p.adpSources;
   if (!src) return p.adp;
   const want = prefs?.adp ?? "ffc";
-  if (want === "espn") return src.espn ?? src.ffc;
-  if (want === "sleeper") return src.sleeper ?? src.ffc;
+  // Deep-pool players have no FFC opinion, so every branch falls back to p.adp.
+  if (want === "espn") return src.espn ?? src.ffc ?? p.adp;
+  if (want === "sleeper") return src.sleeper ?? src.ffc ?? p.adp;
   if (want === "blend") {
     const vals = [src.ffc, src.espn, src.sleeper].filter((v): v is number => v != null);
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : p.adp;
   }
-  return src.ffc;
+  return src.ffc ?? p.adp;
 }
 
 export function rescoreBoard(
