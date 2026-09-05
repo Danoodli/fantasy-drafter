@@ -25,6 +25,8 @@ import { loadSeasonSnapshot } from "../lib/etl/seasonSnapshot";
 import { buildHistoricalBoard, type CrossRow } from "../lib/etl/historicalBoard";
 import { biggestMisses, projectionReport, realizedValue, type ProjRow } from "../lib/engine/evaluate";
 import { replayRoom } from "../lib/engine/replay";
+import { rosterFragility } from "../lib/engine/coverage";
+import { requiredFloor, BESTBALL_TARGETS } from "../lib/engine/recommend";
 import type { BoardPlayer, LeagueConfig, Position, ScoringFormat, Strategy } from "../lib/types";
 
 // ---- args -----------------------------------------------------------------
@@ -168,6 +170,26 @@ async function main() {
     Object.fromEntries(POSITIONS.map((p) => [p, { n: 0, pts: 0 }])) as PosAgg;
   const shape = new Map<string, { engine: PosAgg; bot: PosAgg; seats: number }>();
   const seasonPts = (id: string) => realized.get(id)?.season ?? 0;
+
+  // Roster legality. Expected points cannot see a roster that can't field
+  // its own lineup in week 6 — a 7-RB / 2-WR redraft roster scored fine in
+  // the mean and was unplayable. Count floor violations and expected empty
+  // starting slot-weeks per seat, engine vs bot.
+  const floorFor = (pos: Position) =>
+    config.leagueType === "bestball"
+      ? Math.max(config.rosterSlots[pos] ?? 0, Math.round((BESTBALL_TARGETS[pos]?.[0] ?? 0) * config.rounds))
+      : requiredFloor(pos, config);
+  const violations = (roster: BoardPlayer[]): string[] => {
+    const out: string[] = [];
+    for (const pos of POSITIONS) {
+      const n = roster.filter((p) => p.pos === pos).length;
+      const floor = floorFor(pos);
+      if (n < floor) out.push(`${pos} ${n}<${floor}`);
+    }
+    return out;
+  };
+  interface Legality { engineViol: number; botViol: number; engineFrag: number; botFrag: number; worst: string; worstN: number; seats: number }
+  const legality = new Map<string, Legality>();
   const engineTaken = new Map<string, Map<string, { n: number; pickSum: number }>>(); // strategy → playerId → stats
 
   for (let r = 0; r < rooms; r++) {
@@ -196,6 +218,18 @@ async function main() {
         sh.seats++;
         for (const p of room.rosters[slot - 1]) { sh.engine[p.pos].n++; sh.engine[p.pos].pts += seasonPts(p.id); }
         for (const p of baseline.rosters[slot - 1]) { sh.bot[p.pos].n++; sh.bot[p.pos].pts += seasonPts(p.id); }
+        const lg = legality.get(strategy.id) ?? { engineViol: 0, botViol: 0, engineFrag: 0, botFrag: 0, worst: "", worstN: 0, seats: 0 };
+        legality.set(strategy.id, lg);
+        lg.seats++;
+        const ev = violations(room.rosters[slot - 1]);
+        if (ev.length) {
+          lg.engineViol++;
+          const desc = POSITIONS.map((q) => `${q}${room.rosters[slot - 1].filter((p) => p.pos === q).length}`).join(" ");
+          if (ev.length > lg.worstN) { lg.worstN = ev.length; lg.worst = `${desc} (${ev.join(", ")})`; }
+        }
+        if (violations(baseline.rosters[slot - 1]).length) lg.botViol++;
+        lg.engineFrag += rosterFragility(room.rosters[slot - 1], config);
+        lg.botFrag += rosterFragility(baseline.rosters[slot - 1], config);
         for (const p of room.picks.filter((p) => p.byEngine)) {
           const t = taken.get(p.playerId) ?? { n: 0, pickSum: 0 };
           t.n++;
@@ -276,6 +310,26 @@ async function main() {
           `${pad((e.pts / sh.seats).toFixed(0), 12)}${pad((b.pts / sh.seats).toFixed(0), 9)}${pad(signed((e.pts - b.pts) / sh.seats, 0), 8)}`
       );
     }
+  }
+
+  // Roster legality: the check that would have caught 7 RB / 2 WR.
+  let illegal = false;
+  console.log(`\nroster legality — floor violations and expected EMPTY starting slot-weeks per season:`);
+  console.log(`${padR("strategy", 20)}${pad("engine viol", 12)}${pad("bot viol", 10)}${pad("engine empty", 13)}${pad("bot empty", 11)}  worst engine roster`);
+  for (const strategy of chosen) {
+    const lg = legality.get(strategy.id)!;
+    if (lg.engineViol > 0) illegal = true;
+    console.log(
+      `${padR(strategy.id, 20)}${pad(pct(lg.engineViol / lg.seats), 12)}${pad(pct(lg.botViol / lg.seats), 10)}` +
+        `${pad((lg.engineFrag / lg.seats).toFixed(2), 13)}${pad((lg.botFrag / lg.seats).toFixed(2), 11)}  ${lg.worst || "—"}`
+    );
+  }
+  console.log(
+    "'empty' = expected weeks x slots where the roster starts nobody (byes exact, injuries by position rate). Lower is better; the bot is the yardstick."
+  );
+  if (illegal) {
+    console.log("\n⚠️  ILLEGAL ROSTERS: the engine finished at least one seat below a construction floor. This is a bug in the value model, not a strategy choice.");
+    process.exitCode = 1;
   }
 
   // ---- C. what the engine kept drafting --------------------------------
