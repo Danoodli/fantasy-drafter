@@ -27,6 +27,7 @@ import RecentPicks from "./RecentPicks";
 import RoomStrip from "./RoomStrip";
 import PasteImport from "./PasteImport";
 import Shortlist from "./Shortlist";
+import ScreenSync from "./ScreenSync";
 import { parsePastedPicks } from "../lib/draft/pasteImport";
 import type { ImportItem } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
@@ -80,6 +81,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const [toast, setToast] = useState<{ text: string; undoable: boolean; onUndo?: () => void } | null>(null);
   /** Paste-import modal: null closed, "" opens with an empty textarea. */
   const [pasteText, setPasteText] = useState<string | null>(null);
+  const [screenSync, setScreenSync] = useState(false);
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
   const [endedEarly, setEndedEarly] = useState(false);
   const [boardQuery, setBoardQuery] = useState("");
@@ -993,14 +995,26 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
             ) : (
               <span className="text-[11px] text-ink-faint">⌘V anywhere pastes a whole picks list</span>
             )}
-            <button
-              data-tour="paste"
-              onClick={() => setPasteText("")}
-              title="Paste the drafted-players list from any draft room — every name is matched and marked at once"
-              className="rounded border border-line bg-panel px-2 py-1 text-xs text-ink-dim hover:text-ink"
-            >
-              Paste picks
-            </button>
+            <span className="flex gap-1.5">
+              <button
+                data-tour="paste"
+                onClick={() => setPasteText("")}
+                title="Paste the drafted-players list from any draft room — every name is matched and marked at once"
+                className="rounded border border-line bg-panel px-2 py-1 text-xs text-ink-dim hover:text-ink"
+              >
+                Paste picks
+              </button>
+              {!(config.platform === "sleeper" && draft.live) && (
+                <button
+                  data-tour="screen-sync-open"
+                  onClick={() => setScreenSync(true)}
+                  title="Share your draft-room tab; the cockpit reads new picks off the screen automatically"
+                  className={`rounded border px-2 py-1 text-xs ${screenSync ? "border-live text-live" : "border-line bg-panel text-ink-dim hover:text-ink"}`}
+                >
+                  Screen sync
+                </button>
+              )}
+            </span>
           </div>
           </div>
 
@@ -1183,6 +1197,19 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
 
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
 
+      {screenSync && (
+        <ScreenSync
+          players={gradedBoard.players}
+          draftedIds={draft.draftedIds}
+          teams={config.teams}
+          onImport={(items, source) => {
+            for (const it of items) scoreAgainstShortlist(it.player);
+            commitImport(items, source);
+          }}
+          onClose={() => setScreenSync(false)}
+        />
+      )}
+
       {pasteText != null && (
         <PasteImport
           initialText={pasteText}
@@ -1192,6 +1219,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           currentPick={draft.currentPick}
           onCommit={(items) => {
             setPasteText(null);
+            for (const it of items) scoreAgainstShortlist(it.player);
             commitImport(items, "Pasted");
           }}
           onClose={() => setPasteText(null)}

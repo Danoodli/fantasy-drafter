@@ -175,6 +175,27 @@ function cleanLine(text: string): Cleaned {
   return { nameText, pos, team };
 }
 
+/**
+ * A pick number carried by a line, if any: "1.05" (needs teams), "Round 1
+ * Pick 5", "#17", "17." — shared with the OCR matcher.
+ */
+export function extractPickNo(text: string, teams: number): number | null {
+  const rp = roundPick(text, Math.max(2, teams));
+  if (rp) return rp.pickNo;
+  const ln = leadingNumber(text);
+  return ln ? ln.n : null;
+}
+
+/** The team defense a line names, by nickname / city / code — shared with the OCR matcher. */
+export function findDefense(text: string, team: string | null, players: BoardPlayer[]): BoardPlayer | null {
+  const lower = text.toLowerCase();
+  const mentionsDefense = /\b(d\/st|dst|def|defense|defence)\b/.test(lower);
+  const nick = Object.entries(DST_NAMES).find(([n]) => new RegExp(`(^|\\s)${n}(\\s|$)`).test(lower))?.[1] ?? null;
+  const code = nick ?? (mentionsDefense ? team : null);
+  if (!code) return null;
+  return players.find((p) => p.pos === "DST" && p.team === code) ?? null;
+}
+
 function dstFor(nameText: string, team: string | null, players: BoardPlayer[]): BoardPlayer | null {
   const lower = nameText.toLowerCase();
   let code = team;
