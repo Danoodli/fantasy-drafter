@@ -81,6 +81,25 @@ describe("matchOcrLines", () => {
     expect(names(r)).toEqual(["Puka Nacua", "Ja'Marr Chase"]);
   });
 
+  it("ignores unnumbered reads when the panel numbers its picks (the available list leaking into the box)", () => {
+    const r = matchOcrLines(
+      lines("1.01 Ja'Marr Chase WR CIN", "1.02 Bijan Robinson RB ATL", "1.03 Jahmyr Gibbs RB DET", "Puka Nacua", "CeeDee Lamb"),
+      players, none, { teams: 12 }
+    );
+    expect(names(r)).toEqual(["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"]);
+  });
+
+  it("reads ESPN-style 'Name / TEAM POS' lines", () => {
+    const r = matchOcrLines(lines("Puka Nacua / LAR WR", "Amon-Ra St. Brown / DET WR"), players, none, { teams: 12 });
+    expect(names(r)).toEqual(["Puka Nacua", "Amon-Ra St. Brown"]);
+  });
+
+  it("a drafted player's line does not re-read as his surname-mate", () => {
+    const bijan = players.find((p) => p.name === "Bijan Robinson")!;
+    const r = matchOcrLines(lines("Bijan Robinson / ATL RB", "R1, P4 - Team 12"), players, new Set([bijan.id]), { teams: 12 });
+    expect(r.matches.length).toBe(0);
+  });
+
   it("does not match a lone common surname", () => {
     const r = matchOcrLines(lines("Smith", "Williams"), players, none, { teams: 12 });
     expect(r.matches.length).toBe(0);
