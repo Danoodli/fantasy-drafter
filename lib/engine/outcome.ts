@@ -58,6 +58,50 @@ export function expectedWeekly(p: BoardPlayer, params: OutcomeParams, projOverri
   return healthyRate(p, params, projOverride) * availability(p, params);
 }
 
+/** Smoothing half-window (players on either side in ADP order, same position). */
+export const LOCAL_MEAN_WINDOW = 7;
+
+/**
+ * A player's prior: the mean projection of his ADP neighbors at his position.
+ * The market's order tells you roughly what a player is; his own projection is
+ * a noisy refinement of that. Shrinking toward a position-wide mean instead
+ * would pull a barely-rostered QB projected for 97 points up to 210.
+ */
+export function localMeanProjection(players: BoardPlayer[], window = LOCAL_MEAN_WINDOW): Map<string, number> {
+  const byPos = new Map<Position, BoardPlayer[]>();
+  for (const p of players) {
+    const list = byPos.get(p.pos) ?? [];
+    list.push(p);
+    byPos.set(p.pos, list);
+  }
+  const mu = new Map<string, number>();
+  for (const list of byPos.values()) {
+    const sorted = [...list].sort((a, b) => a.adp - b.adp);
+    for (let i = 0; i < sorted.length; i++) {
+      let s = 0, n = 0;
+      for (let j = Math.max(0, i - window); j <= Math.min(sorted.length - 1, i + window); j++) { s += sorted[j].projPoints; n++; }
+      mu.set(sorted[i].id, s / n);
+    }
+  }
+  return mu;
+}
+
+/**
+ * Regression to the mean: a projection is shrunk toward its ADP-neighborhood
+ * mean by (1 − reliability). Where projections carry no ordering skill (DST,
+ * nearly K) every player collapses to his neighborhood; where they are strong
+ * most of the spread survives. Same transform the calibration fitted its ratios on.
+ */
+export function reliabilityShrunkProjection(board: BoardPlayer[], params: OutcomeParams): (p: BoardPlayer) => number {
+  const mu = localMeanProjection(board);
+  return (p) => {
+    const m = mu.get(p.id);
+    if (m == null) return p.projPoints;
+    const r = params.byPos[p.pos].projReliability;
+    return m + r * (p.projPoints - m);
+  };
+}
+
 export interface SeasonDraw {
   /** index 0 = week 1 */
   weekly: Float64Array;

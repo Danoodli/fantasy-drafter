@@ -14,6 +14,13 @@ export interface PosOutcome {
   projMedianRatio: number;
   /** lognormal sigma of a player's weekly points around his rate. */
   weeklyLogSigma: number;
+  /**
+   * How much of the projected spread within the position is signal:
+   * Spearman(projection, per-game actual). Projections are shrunk toward the
+   * position mean by (1 − reliability) before use — the regression-to-the-mean
+   * that turns "projected K1" into "roughly a kicker".
+   */
+  projReliability: number;
 }
 
 export interface OutcomeParams {
@@ -37,6 +44,7 @@ export const DEFAULT_KDST: PosOutcome = {
   projLogSigma: 0.25,
   projMedianRatio: 1,
   weeklyLogSigma: 0.5,
+  projReliability: 0.2,
 };
 
 /** Positions the model actually plays weekly points for. */

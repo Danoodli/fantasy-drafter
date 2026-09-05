@@ -7,8 +7,8 @@ import { vona, expectedBestAtPick } from "./vona";
 import { coverageValue, REG_SEASON_WEEKS, coverageSlotWeeks } from "./coverage";
 import outcomeJson from "../../config/outcome-model.json";
 import type { OutcomeParams } from "./outcomeModel";
-import { expectedWeekly, availability } from "./outcome";
-import { evaluateCompletions, marginalGainNow, positionGainTable, type WaiverLine } from "./rosterValue";
+import { expectedWeekly, reliabilityShrunkProjection } from "./outcome";
+import { evaluateCompletions, marginalGainNow, positionGainTable, WAIVER_FRICTION, type WaiverLine } from "./rosterValue";
 import { completeRosters, type CompletionPlayer, type CompletionShared } from "./completion";
 import { FLEX_SHARE } from "./baselines";
 import { simulateAll, type SimShared, type SimCandidate, type SimPlayer } from "./montecarlo";
@@ -19,7 +19,18 @@ const MC_ITERATIONS = 400;
 const MC_CANDIDATES = 12;
 /** Unified model: candidates scored by full roster completion. */
 const UNIFIED_SHORTLIST = 10;
+/** Iterations at the start of a draft; late picks are cheap to complete, so the budget grows as picks run out. */
 const UNIFIED_ITERATIONS = 80;
+const UNIFIED_ITERATIONS_MAX = 400;
+/**
+ * When the top two scores sit inside this many standard errors of their paired
+ * difference, re-run the top few with more iterations — only once the draft is
+ * past halfway, where completions are cheap and margins are small.
+ */
+const REFINE_SE = 1.0;
+const REFINE_TOP = 3;
+const REFINE_MULT = 2;
+const REFINE_MAX_FUTURE = 8;
 /** The closed-form EV proxy is computed for this many table-ranked players only. */
 const UNIFIED_EV_SCAN = 40;
 const DEFAULT_OUTCOME = outcomeJson as OutcomeParams;
@@ -489,33 +500,6 @@ function hardFilter(
 }
 
 /**
- * Shrink each projection toward the market's implied value at its ADP (the
- * projection curve smoothed over ±7 ADP neighbors within the position). Weight
- * comes from the calibration — 0 today: projections beat the crowd at
- * RB/WR/TE and adding market rank did not improve ordering accuracy.
- */
-export function marketShrunkProjection(board: BoardPlayer[], weight: number): (p: BoardPlayer) => number {
-  if (weight <= 0) return (p) => p.projPoints;
-  const byPos = new Map<Position, BoardPlayer[]>();
-  for (const p of board) {
-    const list = byPos.get(p.pos) ?? [];
-    list.push(p);
-    byPos.set(p.pos, list);
-  }
-  const market = new Map<string, number>();
-  const W = 7;
-  for (const list of byPos.values()) {
-    const sorted = [...list].sort((a, b) => a.adp - b.adp);
-    for (let i = 0; i < sorted.length; i++) {
-      let sum = 0, n = 0;
-      for (let j = Math.max(0, i - W); j <= Math.min(sorted.length - 1, i + W); j++) { sum += sorted[j].projPoints; n++; }
-      market.set(sorted[i].id, sum / n);
-    }
-  }
-  return (p) => (1 - weight) * p.projPoints + weight * (market.get(p.id) ?? p.projPoints);
-}
-
-/**
  * Format legality is the only hard constraint in the unified model: no pacing
  * rules, no caps, no floors. A player on a season-long list is not draftable,
  * a position the league does not roster is not draftable, and when the picks
@@ -552,24 +536,36 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
   const params = state.outcome ?? DEFAULT_OUTCOME;
   const bestball = config.leagueType === "bestball";
   const lambda = bestball ? strategy.lambdaBestBall ?? -0.3 : strategy.lambda;
-  const projOf = marketShrunkProjection(board, params.marketWeight);
+  // Regression to the mean by calibrated reliability (see outcome.ts). Market
+  // shrinkage measured no benefit (w = 0) and is not applied.
+  const projOf = reliabilityShrunkProjection(board, params);
   const POSITIONS: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
 
   const available = board.filter((p) => !draftedIds.has(p.id));
   const legal = legalPool(available, state);
   if (legal.length === 0) return { recommendations: [], strategyWarning: null, computeMs: 0 };
 
-  // Waiver wire (redraft only): expected weekly points of the best player
-  // likely to go undrafted at each position.
+  // Waiver wire (redraft only). A pickup is made on projections, not hindsight,
+  // and the wire is contested by eleven other teams: model it as the 3rd-best
+  // player BY PROJECTION likely to go undrafted at each position — the same
+  // definition the season backtest scores with. Expected weekly points.
   const lastPick = config.teams * config.rounds;
   const waiver: WaiverLine = {};
   if (!bestball) {
     for (const pos of POSITIONS) {
+      if ((config.rosterSlots[pos] ?? 0) === 0) continue;
       const atPos = available.filter((p) => p.pos === pos);
-      if (!atPos.length || (config.rosterSlots[pos] ?? 0) === 0) continue;
-      const season = expectedBestAtPick(atPos, lastPick + 1, drift);
-      const best = atPos.reduce((a, b) => (a.projPoints > b.projPoints ? a : b));
-      waiver[pos] = (season / params.gamesPerSeason) * params.byPos[pos].projMedianRatio * availability(best, params);
+      let pool = atPos.filter((p) => survivalProb(p, lastPick + 1, drift) > 0.5);
+      // The wire always has someone. When the board runs out before the draft
+      // does (FFC lists ~23 kickers for 12 teams), the deepest-ADP players are
+      // the ones most likely to be left.
+      if (pool.length < 3) {
+        const deepest = [...atPos].sort((a, b) => b.adp - a.adp);
+        for (const p of deepest) { if (pool.length >= 3) break; if (!pool.includes(p)) pool.push(p); }
+      }
+      pool = pool.sort((a, b) => projOf(b) - projOf(a));
+      const pick = pool[Math.min(2, pool.length - 1)];
+      if (pick) waiver[pos] = Math.max(0, expectedWeekly(pick, params, projOf(pick)) - WAIVER_FRICTION);
     }
   }
 
@@ -619,9 +615,49 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
     players, myRoster: state.myRoster.map(toCp), opponentRosters,
     schedule, teams: config.teams, rounds: config.rounds, config, waiver, params,
   };
-  const completions = completeRosters(shared, shortlist.map((c) => indexById.get(c.id)!), UNIFIED_ITERATIONS, seed);
-  const futurePicks = completions.map((perIt) => perIt.map((idxs) => idxs.map((i) => available[i])));
-  const samples = evaluateCompletions(state.myRoster, shortlist, futurePicks, params, config, waiver, seed, projOf);
+  // Late picks are cheap to complete and their margins are small, so spend
+  // more iterations on them: budget ∝ 1 / remaining picks, capped.
+  const iterations = Math.min(
+    UNIFIED_ITERATIONS_MAX,
+    Math.max(UNIFIED_ITERATIONS, Math.round((UNIFIED_ITERATIONS * 14) / Math.max(1, future.length)))
+  );
+  const evaluate = (cands: BoardPlayer[], iters: number, seedOffset: number) => {
+    const completions = completeRosters(shared, cands.map((c) => indexById.get(c.id)!), iters, seed + seedOffset);
+    const fp = completions.map((perIt) => perIt.map((idxs) => idxs.map((i) => available[i])));
+    return evaluateCompletions(state.myRoster, cands, fp, params, config, waiver, seed + seedOffset, projOf);
+  };
+  let samples = evaluate(shortlist, iterations, 0);
+  const scoreOf = (i: number) => samples[i].mean - lambda * samples[i].sd;
+
+  // Refine close calls: if the two leaders are within noise of each other,
+  // re-simulate the top few with several times the iterations and merge.
+  const ranked = shortlist.map((_, i) => i).sort((a, b) => scoreOf(b) - scoreOf(a));
+  if (ranked.length >= 2) {
+    const a = samples[ranked[0]].samples, b = samples[ranked[1]].samples;
+    let m = 0;
+    for (let k = 0; k < a.length; k++) m += a[k] - b[k];
+    m /= a.length;
+    let v = 0;
+    for (let k = 0; k < a.length; k++) v += (a[k] - b[k] - m) ** 2;
+    const seDiff = Math.sqrt(v / Math.max(1, a.length - 1) / a.length);
+    if (future.length <= REFINE_MAX_FUTURE && Math.abs(scoreOf(ranked[0]) - scoreOf(ranked[1])) < REFINE_SE * seDiff) {
+      const topIdx = ranked.slice(0, REFINE_TOP);
+      const more = evaluate(topIdx.map((i) => shortlist[i]), iterations * REFINE_MULT, 7919);
+      samples = samples.map((s0, i) => {
+        const j = topIdx.indexOf(i);
+        if (j < 0) return s0;
+        const merged = new Float64Array(s0.samples.length + more[j].samples.length);
+        merged.set(s0.samples, 0);
+        merged.set(more[j].samples, s0.samples.length);
+        let sum = 0;
+        for (const x of merged) sum += x;
+        const mean = sum / merged.length;
+        let vv = 0;
+        for (const x of merged) vv += (x - mean) ** 2;
+        return { mean, sd: Math.sqrt(vv / (merged.length - 1)), samples: merged };
+      });
+    }
+  }
 
   const recs: Recommendation[] = shortlist.map((p, i) => ({
     player: p,

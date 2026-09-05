@@ -14,10 +14,12 @@ const waiver = { QB: 12, RB: 6, WR: 7, TE: 5, K: 7, DST: 6 };
 // A synthetic pool: 30 of each skill position with ADP spread 1..120, K/DST late.
 function pool(): CompletionPlayer[] {
   const out: CompletionPlayer[] = [];
-  let adp = 1;
-  const rates: Record<Position, number> = { QB: 20, RB: 14, WR: 13, TE: 9, K: 8, DST: 7 };
+  const rates: Record<Position, number> = { QB: 18, RB: 14, WR: 13, TE: 9, K: 8, DST: 7 };
+  // Market shape like a real board: RB/WR carry the top of the ADP order, QBs and TEs start later.
+  const startAdp: Record<Position, number> = { RB: 1, WR: 2, QB: 20, TE: 30, K: 150, DST: 160 };
+  const step: Record<Position, number> = { RB: 2, WR: 2, QB: 5, TE: 5, K: 1, DST: 1 };
   for (let i = 0; i < 30; i++) for (const pos of ["RB", "WR", "QB", "TE"] as Position[]) {
-    out.push({ id: `${pos}${i}`, pos, adp: adp++, stdev: 6, bye: 4 + (i % 10), weeklyRate: rates[pos] * (1 - i / 40) });
+    out.push({ id: `${pos}${i}`, pos, adp: startAdp[pos] + i * step[pos], stdev: 6, bye: 4 + (i % 10), weeklyRate: rates[pos] * (1 - i / 40) });
   }
   for (let i = 0; i < 12; i++) out.push({ id: `K${i}`, pos: "K", adp: 150 + i, stdev: 8, bye: 5 + (i % 9), weeklyRate: 8 - i * 0.2 });
   for (let i = 0; i < 12; i++) out.push({ id: `DST${i}`, pos: "DST", adp: 160 + i, stdev: 8, bye: 5 + (i % 9), weeklyRate: 7 - i * 0.2 });

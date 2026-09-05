@@ -115,6 +115,39 @@ export interface RealizedPlayer {
   pos: Position;
   /** Realized points by week (index 0 = week 1); null when the player did not play. */
   weekly: (number | null)[];
+  /**
+   * Expected weekly points used to CHOOSE the lineup ex ante (redraft managers
+   * set lineups before kickoff). Omit for realized-optimal lineups (best ball).
+   */
+  expected?: number;
+}
+
+/** Optimal lineup chosen by `key`, summing `pts` of the chosen — same shape as season.optimalLineupTotal. */
+function lineupByKey(entries: { pos: Position; key: number; pts: number }[], config: LeagueConfig): number {
+  const byPos = new Map<Position, { key: number; pts: number }[]>();
+  for (const e of entries) {
+    const list = byPos.get(e.pos) ?? [];
+    list.push(e);
+    byPos.set(e.pos, list);
+  }
+  for (const list of byPos.values()) list.sort((a, b) => b.key - a.key);
+  let total = 0;
+  const used = new Map<Position, number>();
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
+    const n = config.rosterSlots[pos] ?? 0;
+    const list = byPos.get(pos) ?? [];
+    for (let i = 0; i < n && i < list.length; i++) total += list[i].pts;
+    used.set(pos, Math.min(n, list.length));
+  }
+  const flexSlots = config.rosterSlots.FLEX ?? 0;
+  const leftovers: { key: number; pts: number }[] = [];
+  for (const pos of config.flexEligible) {
+    const list = byPos.get(pos) ?? [];
+    for (let i = used.get(pos) ?? 0; i < list.length; i++) leftovers.push(list[i]);
+  }
+  leftovers.sort((a, b) => b.key - a.key);
+  for (let i = 0; i < flexSlots && i < leftovers.length; i++) total += leftovers[i].pts;
+  return total;
 }
 
 export interface RealizedValue {
@@ -131,12 +164,25 @@ export interface RealizedValue {
 /** Score a finished roster against what really happened. */
 export function realizedValue(roster: RealizedPlayer[], config: LeagueConfig): RealizedValue {
   const weeks = roster.reduce((m, p) => Math.max(m, p.weekly.length), 0);
+  // Redraft: lineups are chosen on expectation among players known to be
+  // active that week; best ball: the platform starts the realized best.
+  const exAnte = config.leagueType !== "bestball";
   let weeklyLineup = 0;
   for (let w = 0; w < weeks; w++) {
-    weeklyLineup += optimalLineupTotal(
-      roster.map((p) => ({ pos: p.pos, score: p.weekly[w] ?? 0 })),
-      config
-    );
+    if (exAnte) {
+      weeklyLineup += lineupByKey(
+        roster.map((p) => {
+          const pts = p.weekly[w] ?? 0;
+          return { pos: p.pos, pts, key: pts > 0 ? p.expected ?? pts : 0 };
+        }),
+        config
+      );
+    } else {
+      weeklyLineup += optimalLineupTotal(
+        roster.map((p) => ({ pos: p.pos, score: p.weekly[w] ?? 0 })),
+        config
+      );
+    }
   }
   const seasonTotal = roster.reduce(
     (s, p) => s + p.weekly.reduce<number>((a, v) => a + (v ?? 0), 0),

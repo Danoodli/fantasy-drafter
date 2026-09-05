@@ -79,10 +79,21 @@ export function opponentChoice(
     const eff = (config.rosterSlots[pos] ?? 0) + (flexOpen && config.flexEligible.includes(pos) && (FLEX_SHARE[pos] ?? 0) >= maxShare - 1e-9 ? 1 : 0);
     return Math.max(0, eff - roster.filter((r) => r.pos === pos).length);
   };
-  const needs = candidates.map((c) => table[c.pos](c.weeklyRate) * Math.max(1, openSlots(c.pos)));
-  const best = Math.max(...needs);
+  // Phase 1 — starters. Humans fill open starting slots first, the position with
+  // the most holes first, and take the earliest market player who does it.
+  // A hole only counts when filling it beats the wire, so K/DST (whose shrunk
+  // projections barely clear the wire) wait until nothing else is open.
+  let maxOpen = 0;
+  const open = candidates.map((c) => (table[c.pos](c.weeklyRate) > 0 ? openSlots(c.pos) : 0));
+  for (const o of open) if (o > maxOpen) maxOpen = o;
+  if (maxOpen > 0) {
+    for (let j = 0; j < candidates.length; j++) if (open[j] === maxOpen) return j;
+  }
+  // Phase 2 — depth. Starters set: the best available by expected lineup gain.
+  const gains = candidates.map((c) => table[c.pos](c.weeklyRate));
+  const best = Math.max(...gains);
   if (best <= 0) return 0;
-  for (let j = 0; j < candidates.length; j++) if (needs[j] >= NEED_SHARE * best) return j;
+  for (let j = 0; j < candidates.length; j++) if (gains[j] >= NEED_SHARE * best) return j;
   return 0;
 }
 
@@ -144,12 +155,11 @@ export function countGain(t: CountGainTable, counts: Int8Array, pi: number, week
   return w * Math.max(0, weeklyRate - t.wire[pi]);
 }
 
-/** Opponent urgency: gain × open starting slots at the position (see opponentChoice). */
-function countNeed(t: CountGainTable, counts: Int8Array, pi: number, weeklyRate: number): number {
+/** Open starting slots at `pi` (FLEX counted for the max-share positions while it is open). */
+function countOpen(t: CountGainTable, counts: Int8Array, pi: number): number {
   const flexOpen = flexOpenFor(counts, t);
   const eff = t.slots[pi] + (flexOpen && t.maxSharePos[pi] ? 1 : 0);
-  const open = Math.max(0, eff - counts[pi]);
-  return countGain(t, counts, pi, weeklyRate) * Math.max(1, open);
+  return Math.max(0, eff - counts[pi]);
 }
 
 /**
@@ -169,18 +179,24 @@ function chooseByCounts(
 ): number {
   let m = 0;
   let best = 0;
+  let maxOpen = 0;
+  let firstAtMaxOpen = -1;
   for (let j = 0; j < order.length && m < scan; j++) {
     const i = order[j];
     if (taken[i]) continue;
-    const g = countNeed(t, counts, POS_INDEX[players[i].pos], players[i].weeklyRate);
+    const pi = POS_INDEX[players[i].pos];
+    const g = countGain(t, counts, pi, players[i].weeklyRate);
+    const o = g > 0 ? countOpen(t, counts, pi) : 0;
+    if (o > maxOpen) { maxOpen = o; firstAtMaxOpen = i; }
     scratchGain[m] = g;
     scratchIdx[m] = i;
     if (g > best) best = g;
     m++;
   }
   if (m === 0) return -1;
+  if (maxOpen > 0) return firstAtMaxOpen; // phase 1: most open starting slots, earliest in market
   if (best <= 0) return scratchIdx[0];
-  for (let k = 0; k < m; k++) if (scratchGain[k] >= NEED_SHARE * best) return scratchIdx[k];
+  for (let k = 0; k < m; k++) if (scratchGain[k] >= NEED_SHARE * best) return scratchIdx[k]; // phase 2: depth by gain
   return scratchIdx[0];
 }
 

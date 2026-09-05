@@ -26,7 +26,7 @@ import { buildHistoricalBoard, type CrossRow } from "../lib/etl/historicalBoard"
 import { biggestMisses, projectionReport, realizedValue, type ProjRow } from "../lib/engine/evaluate";
 import { replayRoom } from "../lib/engine/replay";
 import { rosterFragility } from "../lib/engine/coverage";
-import { evaluateCompletions } from "../lib/engine/rosterValue";
+import { evaluateCompletions, WAIVER_FRICTION } from "../lib/engine/rosterValue";
 import { spearman } from "../lib/engine/evaluate";
 import outcomeJson from "../config/outcome-model.json";
 import type { OutcomeParams } from "../lib/engine/outcomeModel";
@@ -179,29 +179,36 @@ async function main() {
 
   // Waiver wire. Redraft managers stream: an empty slot in week 6 is filled
   // from free agency, not left at zero. Without this the harness overvalues
-  // rostered depth and would grade "stream your TE2" as a loss. Model: one
-  // waiver-level body per position per week — the realized points of the
-  // 3rd-best undrafted player at that position that week (what a typical
-  // pickup actually returns, not the best one in hindsight). Best ball has
-  // no waivers, so it gets none.
-  const WAIVER_RANK = 3;
-  const waiverLine = (drafted: Set<string>): Record<Position, (number | null)[]> => {
-    const out = {} as Record<Position, (number | null)[]>;
+  // rostered depth and would grade "stream your TE2" as a loss. But a pickup
+  // is made on PROJECTIONS, not hindsight: the streamable pool is the three
+  // best undrafted players by preseason projection, and the wire pays the best
+  // of those three each week (a manager can choose among a few known names by
+  // matchup). Same definition the engine prices. Best ball has no waivers.
+  // Redraft: the manager streams the HIGHEST-PROJECTED of the three who is
+  // active that week (a choice made on expectation, not hindsight).
+  const WAIVER_POOL = 3;
+  const waiverLine = (drafted: Set<string>): Record<Position, { weekly: (number | null)[]; expected: number }> => {
+    const out = {} as Record<Position, { weekly: (number | null)[]; expected: number }>;
     for (const pos of POSITIONS) {
-      const pool = board.filter((p) => p.pos === pos && !drafted.has(p.id));
-      const weeks = Array.from({ length: 18 }, (_, w) => {
-        const pts = pool.map((p) => realized.get(p.id)?.weekly[w] ?? 0).sort((a, b) => b - a);
-        return pts[WAIVER_RANK - 1] ?? 0;
+      const pool = board
+        .filter((p) => p.pos === pos && !drafted.has(p.id))
+        .sort((a, b) => b.projPoints - a.projPoints)
+        .slice(0, WAIVER_POOL);
+      // Streaming costs a roster move and a worse-than-projected pickup: the same
+      // friction the engine charges (lib/engine/rosterValue.ts).
+      const weekly = Array.from({ length: 18 }, (_, w) => {
+        const active = pool.find((p) => (realized.get(p.id)?.weekly[w] ?? 0) > 0);
+        return active ? Math.max(0, realized.get(active.id)!.weekly[w]! - WAIVER_FRICTION) : 0;
       });
-      out[pos] = weeks;
+      out[pos] = { weekly, expected: pool.length ? Math.max(0, pool[0].projPoints / 16 - WAIVER_FRICTION) : 0 };
     }
     return out;
   };
   const value = (roster: BoardPlayer[], drafted: Set<string>) => {
-    const players = roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [] }));
+    const players = roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [], expected: p.projPoints / 16 }));
     if (withWaivers) {
       const line = waiverLine(drafted);
-      for (const pos of POSITIONS) if ((config.rosterSlots[pos] ?? 0) > 0) players.push({ pos, weekly: line[pos] });
+      for (const pos of POSITIONS) if ((config.rosterSlots[pos] ?? 0) > 0) players.push({ pos, weekly: line[pos].weekly, expected: line[pos].expected });
     }
     return realizedValue(players, config).weeklyLineup;
   };
@@ -282,10 +289,12 @@ async function main() {
         if (violations(baseline.rosters[slot - 1]).length) lg.botViol++;
         lg.engineFrag += rosterFragility(room.rosters[slot - 1], config);
         lg.botFrag += rosterFragility(baseline.rosters[slot - 1], config);
+        // Pool the engine's roster with the bot's in the same seat: rosters that
+        // differ systematically are what a calibration test needs.
         const cal = calib.get(strategy.id) ?? { expected: [], realized: [] };
         calib.set(strategy.id, cal);
-        cal.expected.push(modelExpected(room.rosters[slot - 1]));
-        cal.realized.push(engine);
+        cal.expected.push(modelExpected(room.rosters[slot - 1]), modelExpected(baseline.rosters[slot - 1]));
+        cal.realized.push(engine, botValues[slot - 1]);
         for (const p of room.picks.filter((p) => p.byEngine)) {
           const t = taken.get(p.playerId) ?? { n: 0, pickSum: 0 };
           t.n++;
