@@ -157,9 +157,15 @@ async function main() {
 
   // ---- B. decision quality -------------------------------------------
   const strategies: Strategy[] = JSON.parse(readFileSync(join(process.cwd(), "config", "strategies.json"), "utf8"));
-  const chosen = (strategyArg === "all" ? strategies : strategies.filter((s) => s.id === strategyArg)).map((s) =>
-    modelOverride ? { ...s, valueModel: modelOverride } : s
-  );
+  const lambdaOverride = flags.has("lambda") ? Number(flags.get("lambda")) : undefined;
+  const lambdaBbOverride = flags.has("lambdaBestBall") ? Number(flags.get("lambdaBestBall")) : undefined;
+  const chosen = (strategyArg === "all" ? strategies : strategies.filter((s) => s.id === strategyArg)).map((s) => ({
+    ...s,
+    ...(modelOverride ? { valueModel: modelOverride } : {}),
+    ...(lambdaOverride != null ? { lambda: lambdaOverride } : {}),
+    ...(lambdaBbOverride != null ? { lambdaBestBall: lambdaBbOverride } : {}),
+  }));
+  if (lambdaOverride != null || lambdaBbOverride != null) console.log(`risk override: lambda=${lambdaOverride ?? "-"} lambdaBestBall=${lambdaBbOverride ?? "-"}`);
   if (modelOverride) console.log(`value model forced to "${modelOverride}" for every strategy`);
   if (calibPath) console.log(`outcome model: ${calibPath} (fitted on ${paramsForCalib.fittedOn.join(", ")})`);
   if (chosen.length === 0) {
