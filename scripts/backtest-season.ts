@@ -103,6 +103,7 @@ async function main() {
 
   const cross = parseCsv(readFileSync(join(process.cwd(), "data", "raw", "db_playerids.csv"), "utf8")) as unknown as CrossRow[];
   const config = configFor();
+  const withWaivers = config.leagueType !== "bestball"; // best ball has no waiver wire
   const { board, realized, projRows, join: j } = buildHistoricalBoard(snapshot, cross, format, config);
 
   console.log(
@@ -156,10 +157,40 @@ async function main() {
     `B. Decision quality — engine vs ADP bot in the same seat, ${rooms} rooms × ${teams} seats, ` +
       `${rounds} rounds ${config.leagueType} (realized ${year} points)`
   );
-  console.log("Scoring = sum over weeks of the optimal lineup (how best ball scores; the 'perfect manager' yardstick for redraft).\n");
+  console.log(
+    withWaivers
+      ? "Scoring = sum over weeks of the optimal lineup, with one waiver-level body per position available each week (3rd-best undrafted player's actual points) — empty slots get streamed, not zeroed.\n"
+      : "Scoring = sum over weeks of the optimal lineup (how best ball scores). No waivers in best ball.\n"
+  );
 
-  const value = (roster: BoardPlayer[]) =>
-    realizedValue(roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [] })), config).weeklyLineup;
+  // Waiver wire. Redraft managers stream: an empty slot in week 6 is filled
+  // from free agency, not left at zero. Without this the harness overvalues
+  // rostered depth and would grade "stream your TE2" as a loss. Model: one
+  // waiver-level body per position per week — the realized points of the
+  // 3rd-best undrafted player at that position that week (what a typical
+  // pickup actually returns, not the best one in hindsight). Best ball has
+  // no waivers, so it gets none.
+  const WAIVER_RANK = 3;
+  const waiverLine = (drafted: Set<string>): Record<Position, (number | null)[]> => {
+    const out = {} as Record<Position, (number | null)[]>;
+    for (const pos of POSITIONS) {
+      const pool = board.filter((p) => p.pos === pos && !drafted.has(p.id));
+      const weeks = Array.from({ length: 18 }, (_, w) => {
+        const pts = pool.map((p) => realized.get(p.id)?.weekly[w] ?? 0).sort((a, b) => b - a);
+        return pts[WAIVER_RANK - 1] ?? 0;
+      });
+      out[pos] = weeks;
+    }
+    return out;
+  };
+  const value = (roster: BoardPlayer[], drafted: Set<string>) => {
+    const players = roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [] }));
+    if (withWaivers) {
+      const line = waiverLine(drafted);
+      for (const pos of POSITIONS) if ((config.rosterSlots[pos] ?? 0) > 0) players.push({ pos, weekly: line[pos] });
+    }
+    return realizedValue(players, config).weeklyLineup;
+  };
 
   interface SeatResult { strategy: string; room: number; slot: number; engine: number; bot: number; rank: number; roomMean: number }
   const seats: SeatResult[] = [];
@@ -195,13 +226,15 @@ async function main() {
   for (let r = 0; r < rooms; r++) {
     const roomSeed = seed * 1000 + r;
     const baseline = replayRoom({ board, config, strategy: chosen[0], engineSlot: null, seed: roomSeed });
-    const botValues = baseline.rosters.map(value);
+    const baseDrafted = new Set(baseline.picks.map((p) => p.playerId));
+    const botValues = baseline.rosters.map((r) => value(r, baseDrafted));
     for (const strategy of chosen) {
       const taken = engineTaken.get(strategy.id) ?? new Map();
       engineTaken.set(strategy.id, taken);
       for (let slot = 1; slot <= teams; slot++) {
         const room = replayRoom({ board, config, strategy, engineSlot: slot, seed: roomSeed });
-        const values = room.rosters.map(value);
+        const roomDrafted = new Set(room.picks.map((p) => p.playerId));
+        const values = room.rosters.map((r) => value(r, roomDrafted));
         const engine = values[slot - 1];
         const rank = 1 + values.filter((v) => v > engine).length;
         seats.push({
