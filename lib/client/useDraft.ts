@@ -87,12 +87,28 @@ export interface ImportItem {
   pickNo: number | null;
 }
 
+export interface HeldItem {
+  item: ImportItem;
+  /** "mine": it would land on my own pick. "afterMine": the room can't pass my pick until I make it. */
+  reason: "mine" | "afterMine";
+}
+
 export interface ImportOutcome {
   added: number;
   filled: number;
   padded: number;
   skipped: number;
+  /** Items not applied because of `holdMine` (screen sync leaves my picks to me). */
+  held: HeldItem[];
   snapshot: DraftPick[];
+}
+
+export interface ImportOptions {
+  /**
+   * Never fill my own pick and never advance the room past it: anything that
+   * would is returned in `held` for the user to draft (or ignore) themselves.
+   */
+  holdMine?: boolean;
 }
 
 function manualPickOf(player: BoardPlayer): DraftPick {
@@ -156,7 +172,7 @@ export interface DraftApi {
    * filled in. Items without one append in order. Returns what happened plus
    * a snapshot that `restoreManual` can roll back to.
    */
-  applyImport: (items: ImportItem[]) => ImportOutcome;
+  applyImport: (items: ImportItem[], opts?: ImportOptions) => ImportOutcome;
   /** Roll the manual pick list back to a snapshot (undo a whole import). */
   restoreManual: (snapshot: DraftPick[]) => void;
   undo: () => void;
@@ -338,7 +354,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     currentPickRef.current = currentPick;
     picksRef.current = picks;
     manualRef.current = manualPicks;
-  }, [currentPick, picks, manualPicks]);
+    roomRef.current = { teams, rounds, mySlot, tradedPicks };
+  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks]);
   const round = slotOnClock(Math.min(currentPick, teams * rounds), teams).round;
   const allMyPicks = useMemo(
     () => picksForSlot(mySlot, teams, rounds, tradedPicks),
@@ -413,15 +430,27 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   // pick numbers (API picks occupy the front of it).
   const picksRef = useRef<DraftPick[]>([]);
   const manualRef = useRef<DraftPick[]>([]);
-  const applyImport = useCallback((items: ImportItem[]): ImportOutcome => {
+  /** Room geometry for the import's pick-ownership math. */
+  const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[] });
+  const applyImport = useCallback((items: ImportItem[], opts: ImportOptions = {}): ImportOutcome => {
     const snapshot = manualRef.current;
     const merged = picksRef.current;
+    const room = roomRef.current;
     const apiCount = merged.filter((p) => p.manualIndex == null).length;
     const next = [...snapshot];
     const have = new Set<string>();
     for (const p of merged) if (p.playerId) have.add(p.playerId);
     let added = 0, filled = 0, padded = 0, skipped = 0;
+    const held: HeldItem[] = [];
     const mergedLength = () => apiCount + next.length;
+    /** My next unfilled pick, or Infinity when I have none left. */
+    const myNext = () => {
+      const total = room.teams * room.rounds;
+      for (let n = mergedLength() + 1; n <= total; n++) {
+        if (pickOwner(n, room.teams, room.tradedPicks) === room.mySlot) return n;
+      }
+      return Infinity;
+    };
     for (const item of items) {
       if (have.has(item.player.id)) {
         skipped++;
@@ -437,7 +466,20 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
           continue;
         }
         // That pick belongs to someone we already know — append instead of clobbering.
-      } else if (n != null && n > mergedLength() + 1) {
+      }
+      if (opts.holdMine) {
+        const mine = myNext();
+        const landsAt = n != null && n > mergedLength() ? n : mergedLength() + 1;
+        if (landsAt === mine) {
+          held.push({ item, reason: "mine" });
+          continue;
+        }
+        if (landsAt > mine) {
+          held.push({ item, reason: "afterMine" });
+          continue;
+        }
+      }
+      if (n != null && n > mergedLength() + 1) {
         const gap = n - mergedLength() - 1;
         for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
         padded += gap;
@@ -446,8 +488,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       have.add(item.player.id);
       added++;
     }
-    setManualPicks(next);
-    return { added, filled, padded, skipped, snapshot };
+    if (added + filled + padded > 0) setManualPicks(next);
+    return { added, filled, padded, skipped, held, snapshot };
   }, []);
 
   const restoreManual = useCallback((snapshot: DraftPick[]) => {

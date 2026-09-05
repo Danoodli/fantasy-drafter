@@ -29,7 +29,7 @@ import PasteImport from "./PasteImport";
 import Shortlist from "./Shortlist";
 import ScreenSync from "./ScreenSync";
 import { parsePastedPicks } from "../lib/draft/pasteImport";
-import type { ImportItem } from "../lib/client/useDraft";
+import type { ImportItem, ImportOptions, ImportOutcome } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -389,17 +389,19 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   }
 
   /** Commit a batch of picks (paste / screen sync) with one undo for the lot. */
-  function commitImport(items: ImportItem[], source: string) {
-    if (items.length === 0) return;
-    const out = draft.applyImport(items);
+  function commitImport(items: ImportItem[], source: string, opts: ImportOptions = {}): ImportOutcome | undefined {
+    if (items.length === 0) return undefined;
+    const out = draft.applyImport(items, opts);
+    const changed = out.added + out.filled + out.padded;
+    if (changed === 0 && (out.held.length > 0 || out.skipped === items.length)) return out; // nothing to announce
     const parts = [
       out.added + out.filled > 0 ? `${out.added + out.filled} marked` : null,
       out.padded > 0 ? `${out.padded} unknown` : null,
       out.skipped > 0 ? `${out.skipped} already gone` : null,
+      out.held.length > 0 ? `${out.held.length} waiting on your pick` : null,
     ].filter(Boolean);
-    showToast(`${source}: ${parts.join(" · ") || "nothing new"}.`, out.added + out.filled + out.padded > 0, () =>
-      draft.restoreManual(out.snapshot)
-    );
+    showToast(`${source}: ${parts.join(" · ") || "nothing new"}.`, changed > 0, () => draft.restoreManual(out.snapshot));
+    return out;
   }
 
   // Paste anywhere: a multi-line clipboard (or several names) opens the import
@@ -1202,10 +1204,16 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           players={gradedBoard.players}
           draftedIds={draft.draftedIds}
           teams={config.teams}
+          myTurn={myTurn}
           onImport={(items, source) => {
-            for (const it of items) scoreAgainstShortlist(it.player);
-            commitImport(items, source);
+            const out = commitImport(items, source, { holdMine: true });
+            if (out) {
+              const heldIds = new Set(out.held.map((h) => h.item.player.id));
+              for (const it of items) if (!heldIds.has(it.player.id)) scoreAgainstShortlist(it.player);
+            }
+            return out;
           }}
+          onDraftMine={(p) => mark(p, true)}
           onClose={() => setScreenSync(false)}
         />
       )}

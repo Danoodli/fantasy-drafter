@@ -10,8 +10,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
-import type { ImportItem } from "../lib/client/useDraft";
+import type { HeldItem, ImportItem, ImportOutcome } from "../lib/client/useDraft";
 import { FrameAgreement, matchOcrLines, type OcrLine } from "../lib/draft/ocrMatch";
+import { POS_COLOR } from "../lib/client/pos";
 import {
   FULL_FRAME,
   captureSupported,
@@ -29,7 +30,12 @@ interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
   teams: number;
-  onImport: (items: ImportItem[], source: string) => void;
+  /** True while the room waits on my pick — the panel explains why reads are queued. */
+  myTurn: boolean;
+  /** Apply other teams' picks. Returns what was held back because it would touch my pick. */
+  onImport: (items: ImportItem[], source: string) => ImportOutcome | void;
+  /** The user confirms a held name as their own pick. */
+  onDraftMine: (player: BoardPlayer) => void;
   onClose: () => void;
 }
 
@@ -38,7 +44,7 @@ type Phase = "idle" | "sharing" | "watching" | "paused";
 const INTERVAL_MS = 2500;
 const PREVIEW_W = 520;
 
-export default function ScreenSync({ players, draftedIds, teams, onImport, onClose }: Props) {
+export default function ScreenSync({ players, draftedIds, teams, myTurn, onImport, onDraftMine, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -55,12 +61,21 @@ export default function ScreenSync({ players, draftedIds, teams, onImport, onClo
   const [marked, setMarked] = useState(0);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [showLarge, setShowLarge] = useState(true);
+  /** Reads held back because they would touch MY pick — mine to confirm or ignore. */
+  const [pending, setPending] = useState<HeldItem[]>([]);
+  const pendingRef = useRef<HeldItem[]>([]);
+  const ignoredRef = useRef(new Set<string>());
 
   // Latest props for the async loop without re-subscribing every render.
   const latest = useRef({ players, draftedIds, teams, region, newestFirst, onImport });
   useEffect(() => {
     latest.current = { players, draftedIds, teams, region, newestFirst, onImport };
   }, [players, draftedIds, teams, region, newestFirst, onImport]);
+  useEffect(() => {
+    pendingRef.current = pending;
+  }, [pending]);
+  // Anything I drafted (or that got marked some other way) leaves the queue.
+  const visiblePending = pending.filter((h) => !draftedIds.has(h.item.player.id));
 
   const stopAll = useCallback(() => {
     stopCapture(streamRef.current, videoRef.current);
@@ -152,18 +167,24 @@ export default function ScreenSync({ players, draftedIds, teams, onImport, onClo
         const lines = await recognizeLines(worker, frame);
         if (cancelled) return;
         const { matches } = matchOcrLines(lines, players, draftedIds, { teams });
-        const fresh = agreementRef.current?.observe(matches) ?? [];
+        const fresh = (agreementRef.current?.observe(matches) ?? []).filter((m) => !ignoredRef.current.has(m.player.id));
         setReads((n) => n + 1);
         setLastLines(lines);
         setLastNames(matches.map((m) => m.player.name));
         setStatus(`Read ${lines.length} lines · ${matches.length} names on screen · ${new Date().toLocaleTimeString()}`);
-        if (fresh.length > 0) {
-          // Numbered picks land exactly; unnumbered ones follow panel order.
-          const numbered = fresh.filter((m) => m.pickNo != null);
-          const rest = fresh.filter((m) => m.pickNo == null).sort((a, b) => (newestFirst ? b.y - a.y : a.y - b.y));
-          const items: ImportItem[] = [...numbered, ...rest].map((m) => ({ player: m.player, pickNo: m.pickNo }));
-          onImport(items, "Screen sync");
-          setMarked((n) => n + items.length);
+        // Numbered picks land exactly; unnumbered ones follow panel order. Reads
+        // held back earlier (my pick) are retried every tick until I act.
+        const numbered = fresh.filter((m) => m.pickNo != null);
+        const rest = fresh.filter((m) => m.pickNo == null).sort((a, b) => (newestFirst ? b.y - a.y : a.y - b.y));
+        const retry = pendingRef.current.map((h) => h.item).filter((it) => !draftedIds.has(it.player.id));
+        const items: ImportItem[] = [...retry, ...[...numbered, ...rest].map((m) => ({ player: m.player, pickNo: m.pickNo }))];
+        const unique = [...new Map(items.map((it) => [it.player.id, it])).values()];
+        if (unique.length > 0) {
+          const out = onImport(unique, "Screen sync");
+          const held = out?.held ?? [];
+          setPending(held);
+          const applied = out ? out.added + out.filled : 0;
+          if (applied > 0) setMarked((n) => n + applied);
         }
       } catch (err) {
         if (!cancelled) setError(`Read failed: ${(err as Error).message}`);
@@ -293,6 +314,51 @@ export default function ScreenSync({ players, draftedIds, teams, onImport, onClo
                 newest at top
               </label>
             </div>
+            {visiblePending.length > 0 && (
+              <div className="mt-2 rounded border border-warn/40 bg-warn/10 p-2">
+                <p className="text-xs text-warn">
+                  {myTurn ? "Your pick — " : "Waiting on your pick — "}
+                  screen sync never fills your slot. Seen on screen:
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {visiblePending.map(({ item, reason }) => (
+                    <li key={item.player.id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-mono text-[10px]" style={{ color: POS_COLOR[item.player.pos] }}>{item.player.pos}</span>
+                      <span>{item.player.name}</span>
+                      {item.pickNo != null && <span className="font-mono text-[10px] text-ink-faint">#{item.pickNo}</span>}
+                      {reason === "afterMine" && <span className="font-mono text-[10px] text-ink-faint">after your pick</span>}
+                      <span className="ml-auto flex gap-1">
+                        {reason === "mine" && (
+                          <button
+                            onClick={() => {
+                              setPending((prev) => prev.filter((h) => h.item.player.id !== item.player.id));
+                              onDraftMine(item.player);
+                            }}
+                            className="rounded bg-rb px-2 py-0.5 text-xs font-semibold text-field"
+                            title="That's my pick — put him on my roster"
+                          >
+                            Draft
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            ignoredRef.current.add(item.player.id);
+                            setPending((prev) => prev.filter((h) => h.item.player.id !== item.player.id));
+                          }}
+                          className="rounded border border-line px-2 py-0.5 text-xs text-ink-dim hover:text-ink"
+                          title="Misread — never mark this name from the screen"
+                        >
+                          Ignore
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {visiblePending.some((h) => h.reason === "afterMine") && (
+                  <p className="mt-1 text-[11px] text-ink-faint">Names after your pick apply automatically once you&apos;ve drafted.</p>
+                )}
+              </div>
+            )}
             <p className="mt-2 min-h-[1rem] text-xs text-ink-dim">{status}</p>
             {(reads > 0 || marked > 0) && (
               <p className="font-mono text-[11px] text-ink-faint">
