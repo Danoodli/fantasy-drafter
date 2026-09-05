@@ -1159,7 +1159,7 @@ git commit -m "Roster completion: need-aware opponents (modeled with my own obje
 - Modify: `lib/types.ts` (Strategy, EngineState, Recommendation)
 - Modify: `lib/engine/recommend.ts`
 - Modify: `lib/client/useDraft.ts` (expose `opponentRosters` from live picks), `components/Cockpit.tsx` (pass it to `recommend`), `lib/engine/replay.ts` (pass bot rosters)
-- Modify: `config/strategies.json` (set `"valueModel": "unified"` and `"lambdaBestBall"` on `balanced` only, for A/B)
+- Do NOT touch `config/strategies.json` here: the live app must keep the shipped `lineup` model until the gates pass. Tests construct `{ ...byId("balanced"), valueModel: "unified" }` explicitly and the backtest uses `--model=unified`.
 - Test: `tests/engine.test.ts` (new `describe("unified model")`), `tests/perf.test.ts` (add a unified-model timing)
 
 **Interfaces:**
@@ -1794,8 +1794,9 @@ Replace the "a 15-round best-ball auto-draft never ends below any floor" test's 
 
 - [ ] **Step 3: Run everything**
 
-Run: `npx tsc --noEmit && npx eslint lib components scripts app tests && pnpm test && pnpm build && pnpm backtest:gate --rooms=6`
-Expected: all green; gate PASS again on the shipped default (6 rooms is a smoke re-run; the 12-room result from Task 7 is the record).
+Run: `npx tsc --noEmit && npx eslint lib components scripts app tests && pnpm test && pnpm build`, then the four shipped-default smoke runs:
+`pnpm backtest:season 2024 --strategy=balanced --rooms=6`, `pnpm backtest:season 2025 --strategy=balanced --rooms=6`, and both with `--bestball`.
+Expected: all green; each run's delta within 1σ of the Task 7 record in `docs/backtest-gates.md` and 0 floor violations. (The gate script's `lineup`/`robust-rb` baselines no longer exist after Task 9; the 12-room Task 7 result is the record of the comparison.)
 
 - [ ] **Step 4: Docs**
 
@@ -1812,6 +1813,10 @@ git fetch origin && git rebase origin/main && pnpm test && git push origin main
 ```
 
 ---
+
+## Review log
+
+- 2026-09-04 (second pass, before execution): removed the Task 5 `strategies.json` change so the live app cannot pick up the unproven model before the gates pass; Task 10 smoke run no longer depends on deleted baseline strategies; Task 4/5 revised for need-aware opponents fed by real rosters from `useDraft` and `replay`. Perf risk noted: the opponent walk calls `positionGainTable` ~22× per iteration (≈1.5k ops each) — expected total ≈ 10–20 M ops; if Task 5's perf test fails, lower `UNIFIED_ITERATIONS` to 80 first, then `UNIFIED_SHORTLIST` to 10, then cache `positionGainTable` per opponent between their picks.
 
 ## Self-review
 
