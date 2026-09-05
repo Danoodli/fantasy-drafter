@@ -1831,6 +1831,7 @@ git fetch origin && git rebase origin/main && pnpm test && git push origin main
   - **Shortlist**: top-5 by the insurance-aware gain table ∪ top-5 by closed-form lineup delta (each is blind to what the other sees) ∪ best per position.
   - **Tests**: fixtures that encoded wrong premises were corrected rather than the model bent to them (an open FLEX cannot show bye cover; season-level variance swamps weekly stacking correlation; a K/DST threshold of round 12 was a guess — the model's honest answer is 11).
   - Perf: 37 ms best-of-5 at pick 5 on the 530-player board.
+  - **Follow-up (not blocking):** the completion schedule assigns opponent picks by base snake order (`pickOwner(n, teams, [])`) and ignores traded picks, so in Sleeper leagues with trades an opponent's future picks can be attributed to the wrong roster. My own picks already honor trades (`myPicks`). Fix: thread `tradedPicks` through `EngineState` and use it in `unifiedRecommend`'s schedule; `useDraft` already has them.
 
 ## Self-review
 
