@@ -912,6 +912,13 @@ describe("unified model (fluid, no static rules)", () => {
     expect(a.recommendations.map((r) => r.player.id)).toEqual(b.recommendations.map((r) => r.player.id));
   });
 
+  it("explains the pick in points, cover and survival — not in tiers and ADP", () => {
+    const out = recommend(st());
+    const r = out.recommendations[0];
+    expect(r.reason).toMatch(/expected points|survives|won't be there|covers/i);
+    for (const alt of out.recommendations.slice(1)) expect(alt.reason.length).toBeGreaterThan(0);
+  });
+
   it("re-evaluates the whole board when the room changes — opponents' rosters move my pick", () => {
     // Same board, same my-roster, pick 31. Room A: every opponent holds 2 RB / 0 WR.
     // Room B: every opponent holds 0 RB / 2 WR. Need-aware opponents will take WRs in A

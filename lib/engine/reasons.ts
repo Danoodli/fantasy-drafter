@@ -20,6 +20,20 @@ export function buildReason(
   const p = rec.player;
   const clauses: string[] = [];
 
+  // Unified model: explain in the objective's own terms — expected points,
+  // the holes he covers, and whether waiting is an option.
+  if (rec.expectedPoints != null) {
+    const gain = rec.gainOverNext ?? 0;
+    if (gain >= 3) clauses.push(`+${Math.round(gain)} expected points over the next-best pick.`);
+    if ((rec.byeCoverWeeks ?? 0) >= 2 && p.pos !== "K" && p.pos !== "DST")
+      clauses.push(`Covers ${Math.round(rec.byeCoverWeeks!)} weeks your ${POS_LABEL[p.pos]}s would sit empty.`);
+    const pct = Math.round(rec.survivalToNextPick * 100);
+    if (pct <= 4) clauses.push(`He won't be there at pick ${nextPick}.`);
+    else if (pct <= 60) clauses.push(`${pct}% he survives to pick ${nextPick}.`);
+    if (clauses.length === 0) clauses.push(`Best expected points for your roster (${Math.round(rec.expectedPoints)} projected).`);
+    return clauses.slice(0, 2).join(" ");
+  }
+
   // Tier context
   const tierMates = available.filter(
     (a) => a.pos === p.pos && a.tier === p.tier && a.id !== p.id
@@ -71,6 +85,16 @@ export function buildAlternateReason(
 
   if (p.pos !== top.player.pos) {
     clauses.push(`Different build — fills ${POS_LABEL[p.pos]} instead.`);
+  }
+  if (alt.expectedPoints != null && top.expectedPoints != null) {
+    const d = Math.round(alt.expectedPoints - top.expectedPoints);
+    if (Math.abs(d) >= 2) {
+      clauses.push(
+        d < 0
+          ? `${-d} fewer expected points, ${(alt.pointsSd ?? 0) < (top.pointsSd ?? 0) ? "but a safer floor." : "more variance."}`
+          : `${d} more expected points but more variance.`
+      );
+    }
   }
   if (alt.simStdev < top.simStdev * 0.85) {
     clauses.push("Safer floor than the top pick.");
