@@ -225,6 +225,20 @@ export interface Strategy {
    *   dominate; kept as an explicit opt-in for comparison.
    */
   valueModel?: "lineup" | "blend";
+  /**
+   * League types this strategy is the evidence-backed default for. The season
+   * backtest ranks strategies very differently by format — Robust RB is the
+   * best best-ball build in both 2024 and 2025 (+321 avg vs the ADP bot) and
+   * one of the weakest in redraft (+134), while Balanced/Safe Floor invert
+   * that — so the app picks per format instead of asking you to.
+   */
+  recommendedFor?: LeagueType[];
+  /**
+   * Keep out of the strategy picker. Still available to the backtest via
+   * `--strategy=all`, so a hidden preset can be re-measured each season
+   * rather than lost.
+   */
+  hidden?: boolean;
 }
 
 // ---------------------------------------------------------------------------

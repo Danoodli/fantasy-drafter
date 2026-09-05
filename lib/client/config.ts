@@ -21,6 +21,20 @@ export const DEFAULT_CONFIG: LeagueConfig = {
   strategy: "balanced",
 };
 
+/**
+ * Strategy the app selects on its own, per league type. Backed by
+ * `pnpm backtest:season` across 2024 and 2025: two-year mean realized-points
+ * delta vs an ADP bot in the same seat was Robust RB +321 in best ball (vs
+ * Tournament Ceiling +169, the previous default) and Balanced +184 in redraft.
+ */
+export const BESTBALL_DEFAULT_STRATEGY = "robust-rb";
+export const REDRAFT_DEFAULT_STRATEGY = "balanced";
+
+/** The strategy id to auto-select for a league type. */
+export function defaultStrategyFor(leagueType: LeagueConfig["leagueType"]): string {
+  return leagueType === "bestball" ? BESTBALL_DEFAULT_STRATEGY : REDRAFT_DEFAULT_STRATEGY;
+}
+
 /** Common best-ball tournament formats, selectable in manual setup. */
 export const BESTBALL_PRESETS: {
   id: string;
@@ -36,7 +50,7 @@ export const BESTBALL_PRESETS: {
       rounds: 18,
       scoring: "half-ppr",
       rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
-      strategy: "tournament-ceiling",
+      strategy: BESTBALL_DEFAULT_STRATEGY,
     },
   },
   {
@@ -48,7 +62,7 @@ export const BESTBALL_PRESETS: {
       rounds: 20,
       scoring: "ppr",
       rosterSlots: { QB: 1, RB: 1, WR: 2, TE: 1, FLEX: 1, K: 0, DST: 0 },
-      strategy: "tournament-ceiling",
+      strategy: BESTBALL_DEFAULT_STRATEGY,
     },
   },
 ];

@@ -2,7 +2,7 @@
   {
     "id": "balanced",
     "label": "Balanced",
-    "blurb": "Best overall roster. Values starters by what they add to your lineup versus waiting, bench by insurance \u2014 adapts to the board as it empties. The control.",
+    "blurb": "Best overall redraft roster. Weighs every pick against what's left and what you can still get at your next pick.",
     "lambda": 0.5,
     "baselineBlend": 0.5,
     "adpDiscipline": 0.5,
@@ -12,7 +12,10 @@
       "TE": 2,
       "K": 1,
       "DST": 1
-    }
+    },
+    "recommendedFor": [
+      "redraft"
+    ]
   },
   {
     "id": "zero-rb",
@@ -51,7 +54,7 @@
   {
     "id": "robust-rb",
     "label": "Robust RB",
-    "blurb": "Hammer RBs while they exist, WRs in the middle rounds.",
+    "blurb": "Heavy early RB, then receivers. Best best-ball result in both 2024 and 2025 backtests.",
     "lambda": 0.55,
     "baselineBlend": 0.65,
     "adpDiscipline": 0.5,
@@ -80,7 +83,10 @@
       "TE": 2,
       "K": 1,
       "DST": 1
-    }
+    },
+    "recommendedFor": [
+      "bestball"
+    ]
   },
   {
     "id": "hero-rb",
@@ -142,7 +148,8 @@
       "TE": 2,
       "K": 1,
       "DST": 1
-    }
+    },
+    "hidden": true
   },
   {
     "id": "bpa",

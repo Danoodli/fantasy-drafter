@@ -185,6 +185,20 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     return strategies.find((s) => s.id === strategyId) ?? strategies[0];
   }, [strategyId, strategies, custom, bestball]);
 
+  // The strategy the backtest says to use for THIS format, and the options
+  // worth offering. A hidden preset stays in config for the backtest but is
+  // kept out of the picker — nine near-identical choices was the problem.
+  const recommendedId = useMemo(
+    () =>
+      strategies.find((s) => s.recommendedFor?.includes(config.leagueType))?.id ??
+      strategies[0]?.id,
+    [strategies, config.leagueType]
+  );
+  const pickable = useMemo(
+    () => strategies.filter((s) => !s.hidden || s.id === strategyId),
+    [strategies, strategyId]
+  );
+
   const totalPicks = config.teams * config.rounds;
   const draftOver = draft.currentPick > totalPicks || endedEarly;
   // Recap opens itself when the draft ends; header button opens it any time.
@@ -447,10 +461,14 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             id="strategy"
             value={strategyId}
             onChange={(e) => setStrategyId(e.target.value)}
+            title={strategy.blurb}
             className="rounded border border-line bg-panel px-2 py-1.5 text-sm"
           >
-            {strategies.map((s) => (
-              <option key={s.id} value={s.id}>{s.label}</option>
+            {pickable.map((s) => (
+              <option key={s.id} value={s.id} title={s.blurb}>
+                {s.label}
+                {s.id === recommendedId ? " · recommended" : ""}
+              </option>
             ))}
             <option value="custom">Custom</option>
           </select>

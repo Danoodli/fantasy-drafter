@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import type { LeagueConfig, Position, ScoringFormat } from "../lib/types";
 import { fetchDraftInfo, parseDraftId, fetchLeagueDrafts } from "../lib/draft/sleeper";
-import { DEFAULT_CONFIG, BESTBALL_PRESETS } from "../lib/client/config";
+import { DEFAULT_CONFIG, BESTBALL_PRESETS, defaultStrategyFor } from "../lib/client/config";
 import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } from "../lib/client/presets";
 import { loadHistory, deleteDraft, type SavedDraft } from "../lib/client/history";
 import { loadSources, saveSources, DEFAULT_SOURCES, type SourcePrefs } from "../lib/client/sources";
@@ -122,7 +122,7 @@ export default function Setup({
       rounds: info.rounds,
       scoring,
       leagueType: info.bestBall ? "bestball" : c.leagueType,
-      strategy: info.bestBall ? "tournament-ceiling" : c.strategy,
+      strategy: info.bestBall ? defaultStrategyFor("bestball") : c.strategy,
       rosterSlots: hasLeague
         ? {
             QB: slots.QB ?? 0,
