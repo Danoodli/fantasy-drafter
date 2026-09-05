@@ -496,39 +496,13 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <label className="sr-only" htmlFor="strategy">Strategy</label>
-          <select
-            data-tour="strategy"
-            id="strategy"
-            value={strategyId}
-            onChange={(e) => setStrategyId(e.target.value)}
-            title={strategy.blurb}
-            className="rounded border border-line bg-panel px-2 py-1.5 text-sm"
-          >
-            {pickable.map((s) => (
-              <option key={s.id} value={s.id} title={s.blurb}>
-                {s.label}
-                {s.id === recommendedId ? " · recommended" : ""}
-              </option>
-            ))}
-            <option value="custom">Custom</option>
-          </select>
-          {strategyId === "custom" && (
-            <button
-              onClick={() => setShowDials((v) => !v)}
-              className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
-              aria-expanded={showDials}
-            >
-              Dials
-            </button>
-          )}
           <button
-            onClick={() => startWalkthrough()}
-            title="Replay the feature tour"
-            aria-label="Replay the feature tour"
-            className="rounded border border-line bg-panel px-2 py-1.5 font-mono text-sm text-ink-dim hover:text-ink"
+            onClick={() => { draft.undo(); showToast("Undone."); }}
+            disabled={!draft.canUndo}
+            className="rounded border border-line bg-panel px-2.5 py-1.5 text-sm font-semibold text-ink-dim hover:text-ink disabled:opacity-30"
+            title="Undo last manual mark (⌘Z)"
           >
-            ?
+            Undo
           </button>
           <button
             data-tour="recap"
@@ -541,11 +515,51 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           <details data-tour="controls" className="relative">
             <summary
               className="cursor-pointer list-none rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink"
-              title="Draft controls"
+              title="Strategy, tour, and draft controls"
             >
               ⋯
             </summary>
-            <div className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl">
+            <div className="absolute right-0 z-30 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl">
+              {/* Strategy: auto-picked per format; here for the curious, out of the way for everyone else. */}
+              <div className="border-b border-line px-3 py-2" data-tour="strategy">
+                <label className="block text-xs text-ink-faint" htmlFor="strategy">
+                  Strategy <span className="text-ink-faint">· auto-picked for {bestball ? "best ball" : "redraft"}</span>
+                </label>
+                <select
+                  id="strategy"
+                  value={strategyId}
+                  onChange={(e) => setStrategyId(e.target.value)}
+                  title={strategy.blurb}
+                  className="mt-1 w-full rounded border border-line bg-panel px-2 py-1 text-sm"
+                >
+                  {pickable.map((s) => (
+                    <option key={s.id} value={s.id} title={s.blurb}>
+                      {s.label}
+                      {s.id === recommendedId ? " · recommended" : ""}
+                    </option>
+                  ))}
+                  <option value="custom">Custom</option>
+                </select>
+                {strategyId === "custom" && (
+                  <button
+                    onClick={() => setShowDials((v) => !v)}
+                    className="mt-1.5 text-xs text-wr hover:underline"
+                    aria-expanded={showDials}
+                  >
+                    {showDials ? "Hide dials" : "Show dials"}
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={(e) => {
+                  (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
+                  startWalkthrough();
+                }}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
+              >
+                Feature tour
+                <span className="block text-xs text-ink-faint">Replay the walkthrough</span>
+              </button>
               <button
                 onClick={(e) => {
                   (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
@@ -606,14 +620,6 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
               </button>
             </div>
           </details>
-          <button
-            onClick={() => { draft.undo(); showToast("Undone."); }}
-            disabled={!draft.canUndo}
-            className="rounded border border-line bg-panel px-2 py-1.5 text-sm text-ink-dim hover:text-ink disabled:opacity-30"
-            title="Undo last manual mark (⌘Z)"
-          >
-            Undo
-          </button>
           <span
             className="hidden rounded bg-panel px-2 py-1.5 font-mono text-xs text-ink-faint sm:inline"
             title="This draft's format — change it from the setup screen"
