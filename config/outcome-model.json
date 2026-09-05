@@ -1,0 +1,60 @@
+{
+  "fittedOn": [
+    2024,
+    2025
+  ],
+  "weeks": 17,
+  "gamesPerSeason": 16,
+  "byPos": {
+    "QB": {
+      "seasonEndingProb": 0.15517241379310345,
+      "healthyMissProb": 0.13520408163265307,
+      "projLogSigma": 0.18070935506984664,
+      "projMedianRatio": 1.147510347410667,
+      "weeklyLogSigma": 0.37631033791684343,
+      "projReliability": 0.3815789473684211
+    },
+    "RB": {
+      "seasonEndingProb": 0.184,
+      "healthyMissProb": 0.15379901960784315,
+      "projLogSigma": 0.3886878530447861,
+      "projMedianRatio": 1.2294580763789862,
+      "weeklyLogSigma": 0.5151119349080403,
+      "projReliability": 0.688082460865515
+    },
+    "WR": {
+      "seasonEndingProb": 0.18125,
+      "healthyMissProb": 0.17891221374045801,
+      "projLogSigma": 0.2921518583119655,
+      "projMedianRatio": 1.1188969727517637,
+      "weeklyLogSigma": 0.512741736527167,
+      "projReliability": 0.6140676193795748
+    },
+    "TE": {
+      "seasonEndingProb": 0.1702127659574468,
+      "healthyMissProb": 0.1858974358974359,
+      "projLogSigma": 0.2577519117302512,
+      "projMedianRatio": 1.203389121076547,
+      "weeklyLogSigma": 0.5104226362615635,
+      "projReliability": 0.5178538390379278
+    },
+    "K": {
+      "seasonEndingProb": 0.15151515151515152,
+      "healthyMissProb": 0.125,
+      "projLogSigma": 0.16415074613108968,
+      "projMedianRatio": 1.1181171624340311,
+      "weeklyLogSigma": 0.46172191177249344,
+      "projReliability": 0.07368035190615836
+    },
+    "DST": {
+      "seasonEndingProb": 0,
+      "healthyMissProb": 0,
+      "projLogSigma": 0.2608803609535407,
+      "projMedianRatio": 1.3157835261740045,
+      "weeklyLogSigma": 0.5435661991826165,
+      "projReliability": 0.2854341736694678
+    }
+  },
+  "teamCorrelation": 0.30765951688909776,
+  "marketWeight": 0
+}

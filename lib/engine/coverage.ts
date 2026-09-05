@@ -57,7 +57,7 @@ function expectedUnfilled(bodies: number, slots: number, avail: number): number 
 export function coverageSlotWeeks(
   pos: Position,
   bye: number | null,
-  roster: BoardPlayer[],
+  roster: { pos: Position; bye: number | null }[],
   config: LeagueConfig
 ): number {
   const slots = config.rosterSlots[pos] ?? 0;
@@ -97,7 +97,7 @@ export function coverageValue(
  * Used by the season backtest to make a fragile roster visible instead of
  * averaged away in a points total.
  */
-export function rosterFragility(roster: BoardPlayer[], config: LeagueConfig): number {
+export function rosterFragility(roster: { pos: Position; bye: number | null }[], config: LeagueConfig): number {
   let total = 0;
   for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
     const slots = config.rosterSlots[pos] ?? 0;

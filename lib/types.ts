@@ -200,6 +200,8 @@ export interface Strategy {
   blurb: string;
   /** Risk aversion λ: score = E[value] − λ·stdev. Lower tolerates variance. */
   lambda: number;
+  /** Risk term for best ball; negative = chase ceiling (tournaments pay for 1st, not for the mean). */
+  lambdaBestBall?: number;
   /** 0 = pure VOLS, 1 = pure VORP. */
   baselineBlend: number;
   /** 0 = pure value, 1 = never reach past ADP. */
@@ -224,7 +226,7 @@ export interface Strategy {
    *   player, starter or bench. League-wide scarcity, so steep RB curves
    *   dominate; kept as an explicit opt-in for comparison.
    */
-  valueModel?: "lineup" | "blend";
+  valueModel?: "unified" | "lineup" | "blend";
   /**
    * League types this strategy is the evidence-backed default for. The season
    * backtest ranks strategies very differently by format — Robust RB is the
@@ -256,6 +258,10 @@ export interface EngineState {
   drift: Partial<Record<Position, number>>;
   /** Opponent position counts by draft slot (1-indexed), for the sim's roster-need model. */
   opponentCounts?: Record<number, Partial<Record<Position, number>>>;
+  /** What every other team holds, by draft slot — so opponents are modeled by need, not by ADP alone. */
+  opponentRosters?: Record<number, { pos: Position; bye: number | null }[]>;
+  /** Outcome-model parameters; defaults to config/outcome-model.json. Tests and the backtest inject alternatives. */
+  outcome?: import("./engine/outcomeModel").OutcomeParams;
 }
 
 export interface Recommendation {
@@ -266,10 +272,19 @@ export interface Recommendation {
   survivalToNextPick: number; // P(available at my next pick)
   simMean: number;
   simStdev: number;
+  /** Unified model: expected season lineup points of the completed roster if I take him now. */
+  expectedPoints?: number;
+  pointsSd?: number;
+  /** expectedPoints minus the runner-up's. */
+  gainOverNext?: number;
+  /** Slot-weeks of bye/injury cover he adds to the current roster (≈0 for a starter). */
+  byeCoverWeeks?: number;
 }
 
 export interface EngineOutput {
   recommendations: Recommendation[]; // ranked, [0] is the pick
+  /** Unified model: every scored candidate, ranked — the full comparison behind the top 3. */
+  scored?: Recommendation[];
   strategyWarning: string | null; // "Your strategy is no longer optimal…"
   computeMs: number;
 }

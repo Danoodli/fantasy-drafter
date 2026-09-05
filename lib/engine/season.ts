@@ -1,43 +1,17 @@
-// Season simulation: port of the ffsimulator idea — run a roster through
-// hundreds of simulated seasons and report a distribution, not a point total.
-// Weekly scores are lognormal around each player's projected weekly mean with
-// position-typical volatility; the optimal lineup is computed every week
-// (which is literally how best ball scores). Pure and seeded — testable.
+// Season simulation: run a roster through hundreds of simulated seasons and
+// report a distribution, not a point total. Player-seasons come from the
+// calibrated outcome model (lib/engine/outcome.ts); the optimal lineup is
+// computed every week (which is literally how best ball scores). Pure and
+// seeded — testable.
 
 import type { BoardPlayer, LeagueConfig, Position } from "../types";
 import { makeRng } from "./montecarlo";
+import { sampleSeason, makeTeamShocks } from "./outcome";
+import outcomeJson from "../../config/outcome-model.json";
+import type { OutcomeParams } from "./outcomeModel";
 
-/**
- * Weekly volatility (lognormal sigma) by position, tuned to public analyses
- * of weekly fantasy scoring spread. WR/TE spike hardest — that's why they
- * shine in best ball.
- */
-export const WEEKLY_SIGMA: Record<Position, number> = {
-  QB: 0.42,
-  RB: 0.62,
-  WR: 0.72,
-  TE: 0.78,
-  K: 0.45,
-  DST: 0.6,
-};
+const DEFAULT_OUTCOME = outcomeJson as OutcomeParams;
 
-const WEEKS = 17;
-
-function gaussian(rng: () => number): number {
-  let u = 0;
-  while (u === 0) u = rng();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
-}
-
-/** One player's sampled score for one week (0 on bye). */
-function weeklyScore(p: BoardPlayer, week: number, rng: () => number): number {
-  if (p.bye === week) return 0;
-  const mean = p.projPoints / (WEEKS - 1);
-  if (mean <= 0) return 0;
-  const sigma = WEEKLY_SIGMA[p.pos];
-  // lognormal with the target mean: E[exp(N(m, s))] = exp(m + s²/2)
-  return Math.exp(Math.log(mean) - (sigma * sigma) / 2 + sigma * gaussian(rng));
-}
 
 /** Optimal lineup total for one week's scores — greedy is exact for one flex. */
 export function optimalLineupTotal(
@@ -81,20 +55,26 @@ export interface SeasonSimResult {
   totals: number[];
 }
 
-/** Simulate one roster across `sims` seasons. */
+/**
+ * Simulate one roster across `sims` seasons — with the same outcome model the
+ * draft engine optimizes (skill error, availability incl. season-ending events,
+ * weekly variance, team correlation, exact byes). One model, everywhere.
+ */
 export function simulateSeasons(
   roster: BoardPlayer[],
   config: LeagueConfig,
   sims: number,
-  seed = 1
+  seed = 1,
+  params: OutcomeParams = DEFAULT_OUTCOME
 ): SeasonSimResult {
-  const rng = makeRng(seed);
   const totals: number[] = [];
   for (let s = 0; s < sims; s++) {
+    const rng = makeRng((seed * 7919 + s * 104729) >>> 0);
+    const shocks = makeTeamShocks(rng, params.weeks);
+    const draws = roster.map((p) => sampleSeason(p, params, rng, shocks));
     let season = 0;
-    for (let week = 1; week <= WEEKS; week++) {
-      const scores = roster.map((p) => ({ pos: p.pos, score: weeklyScore(p, week, rng) }));
-      season += optimalLineupTotal(scores, config);
+    for (let w = 0; w < params.weeks; w++) {
+      season += optimalLineupTotal(roster.map((p, i) => ({ pos: p.pos, score: draws[i].weekly[w] })), config);
     }
     totals.push(season);
   }

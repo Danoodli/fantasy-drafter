@@ -1297,7 +1297,7 @@ Add imports:
 import outcomeJson from "../../config/outcome-model.json";
 import type { OutcomeParams } from "./outcomeModel";
 import { expectedWeekly, healthyRate, availability } from "./outcome";
-import { evaluateCompletions, marginalGainNow, type WaiverLine } from "./rosterValue";
+import { evaluateCompletions, marginalGainNow, positionGainTable, type WaiverLine } from "./rosterValue";
 import { completeRosters, type CompletionPlayer, type CompletionShared } from "./completion";
 import { coverageSlotWeeks } from "./coverage";
 ```
@@ -1380,15 +1380,19 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
     }
   }
 
-  // Shortlist: best marginal gain now, plus the best at every position so a
-  // cross-position comparison always happens.
+  // Shortlist: two proxies, because each is blind to something. The closed-form
+  // lineup delta sees FLEX upgrades but only BYE cover (in expectation a starter is
+  // never "out"); the insurance-aware gain table sees injury cover but approximates
+  // FLEX. Take the top of both, plus the best at every position so a cross-position
+  // comparison always happens. The completed-roster simulation decides.
+  const table = positionGainTable(state.myRoster, params, config, waiver);
+  const byTable = [...legal].sort((a, b) => table[b.pos](expectedWeekly(b, params, projOf(b))) - table[a.pos](expectedWeekly(a, params, projOf(a))));
   const gains = new Map(legal.map((p) => [p.id, marginalGainNow(p, state.myRoster, params, config, waiver, projOf)]));
-  const ranked = [...legal].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
-  const shortlist = ranked.slice(0, UNIFIED_SHORTLIST);
-  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) {
-    const best = ranked.find((p) => p.pos === pos);
-    if (best && !shortlist.includes(best)) shortlist.push(best);
-  }
+  const byEv = [...legal].sort((a, b) => gains.get(b.id)! - gains.get(a.id)!);
+  const shortlist: BoardPlayer[] = [];
+  const add = (p: BoardPlayer | undefined) => { if (p && !shortlist.includes(p)) shortlist.push(p); };
+  for (let i = 0; i < UNIFIED_SHORTLIST / 2; i++) { add(byTable[i]); add(byEv[i]); }
+  for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as Position[]) add(byTable.find((p) => p.pos === pos));
 
   // Roster completion from the current board.
   const nextPick = myPicks.find((n) => n > currentPick) ?? currentPick + 2 * config.teams;
@@ -1817,6 +1821,26 @@ git fetch origin && git rebase origin/main && pnpm test && git push origin main
 ## Review log
 
 - 2026-09-04 (second pass, before execution): removed the Task 5 `strategies.json` change so the live app cannot pick up the unproven model before the gates pass; Task 10 smoke run no longer depends on deleted baseline strategies; Task 4/5 revised for need-aware opponents fed by real rosters from `useDraft` and `replay`. Perf risk noted: the opponent walk calls `positionGainTable` ~22× per iteration (≈1.5k ops each) — expected total ≈ 10–20 M ops; if Task 5's perf test fails, lower `UNIFIED_ITERATIONS` to 80 first, then `UNIFIED_SHORTLIST` to 10, then cache `positionGainTable` per opponent between their picks.
+
+- 2026-09-04 (during execution, Tasks 1–7). Every change below was forced by a measured failure in unit tests or a 3-room smoke run of the backtest, and is recorded so the model stays one coherent thing:
+  - **Calibration**: `projMedianRatio` is a PER-GAME ratio (season ratio double-counted missed games); a reconciliation check (observed mean season/proj vs model) prints on every run. K/DST are fitted from data; a DST plays every non-bye week (0-point weeks are not absences). `projReliability` per position added (Spearman of projection vs per-game actual, n ≥ 6 games) and projections are shrunk toward their **ADP-neighborhood** mean — shrinking toward the position mean inflated a 97-point deep-pool QB to 210.
+  - **Evaluation**: redraft lineups are chosen ex ante (expected rate, known absences), best ball realized-optimal — hindsight lineups made a 2nd DST worth +100 in both engine and harness. One streamer per position per week.
+  - **Wire**: 3rd-best undrafted by projection (not hindsight-best each week), always present (deepest-ADP fallback — the 2025 board had no kicker deep enough, `waiver[K]` was undefined, and every seat drafted two kickers), charged `WAIVER_FRICTION` 2.5/week in engine and harness alike.
+  - **Opponents**: a marginal body covers one slot whether a team has one hole or three, so `gain × open slots` still let a large RB margin beat a 2-RB/0-WR team's WR need; opponents now fill open starting slots first (most holes first, market order), then depth by gain. The walk uses a bye-blind count table (`makeCountGainTable`) so ~150 remaining picks cost O(1) each; my shortlist and the final evaluation stay bye-exact.
+  - **Noise**: late-round margins are 10–60 points against a ~2800 ± 380 total; iterations scale ∝ 1/remaining picks (80 → 400) and close calls in the back half are refined with 2× iterations for the top 3. `EngineOutput.scored` exposes the full ranked shortlist.
+  - **Shortlist**: top-5 by the insurance-aware gain table ∪ top-5 by closed-form lineup delta (each is blind to what the other sees) ∪ best per position.
+  - **Tests**: fixtures that encoded wrong premises were corrected rather than the model bent to them (an open FLEX cannot show bye cover; season-level variance swamps weekly stacking correlation; a K/DST threshold of round 12 was a guess — the model's honest answer is 11).
+  - Perf: 37 ms best-of-5 at pick 5 on the 530-player board.
+  - **Latency by round (measured during the gate run, so CPU-contended):** rounds 1–7 ≈ 45–52 ms, rounds 8–14 ≈ 110–190 ms. The iteration budget scales ∝ 1/remaining picks on the assumption that completion dominates cost, but per-iteration evaluation cost (sampling + 17 lineup evaluations per candidate) is roughly constant, so 5× iterations ≈ 3× time. Fix after the gate: cap the scaling at ~2× (80 → 160) and shrink the shortlist to the top 6 (+ best per position) once ≤ 6 picks remain, where candidates sit within ~10 points of each other anyway. Re-measure unloaded; the 50 ms requirement applies at every pick, not only pick 5 — extend `tests/perf.test.ts` to a round-12 state.
+  - **Follow-up (not blocking):** the completion schedule assigns opponent picks by base snake order (`pickOwner(n, teams, [])`) and ignores traded picks, so in Sleeper leagues with trades an opponent's future picks can be attributed to the wrong roster. My own picks already honor trades (`myPicks`). Fix: thread `tradedPicks` through `EngineState` and use it in `unifiedRecommend`'s schedule; `useDraft` already has them.
+
+- 2026-09-04, definitive gate #1 (12 rooms, waiver-aware ex-ante yardstick): **2024 redraft PASS** on all four gates (unified +99±13 vs lineup +110±16; 0% below floor; fragility 4.1 vs bot 6.5; ρ .33 vs .35). **2024 best ball FAIL** (+189±27 vs robust-rb +283±40; 1st 28% vs 53%; 3% of seats below minimum counts). **2025 redraft FAIL** (+106±15 vs lineup +213±25; ρ .39 vs .60). Fragility and 2/3/3 legality pass everywhere. Pattern: unified's edge over the ADP bot is consistently *smaller* than the lineup model's — it behaves more like the market. Two measured causes and one hypothesis, to be separated by a controlled experiment before any change ships:
+  1. **Shrinkage mis-specified.** Reliability was applied as if a rank correlation were a regression slope. Measured OLS slopes of per-game actual on projection: RB .86, WR .76, TE 1.03, QB .38 (used: .69/.61/.52/.38) — RB/WR/TE were over-shrunk toward the ADP curve, which mechanically shrinks any edge over an ADP bot. Deviation-from-local-mean slopes: RB .67, WR .43, TE ~1 (n=46), QB ≈ 0.
+  2. **Dud weeks.** Observed P(week < 0.25× player mean) = 6.5% for RB/WR/TE vs 0.7% under the lognormal; the upper tail is close (RB slightly fatter). Under best ball's realized-max lineups, depth's value comes from covering duds and absences; the model under-generates duds, so it under-values RB/WR depth relative to a 3rd QB/TE (unified 2.9 QB / 3.1 TE vs robust-rb 2 / 2). Fix staged: mean-preserving dud mixture with σ fitted to the observed 2× tail (`/tmp/duds.py`).
+  3. **Hypothesis: λ = 0.25 on a ~300-point sd** penalizes high-variance completions (RB-heavy ones) by tens of points — comparable to the marginal differences between candidates. Test with `--lambda=0`.
+  Experiment (6 rooms, both years, redraft): unified as-is · reliability = 1 · reliability = deviation slopes · λ = 0; then the dud mixture on best ball vs robust-rb. Only a variant that improves *both* years earns a re-gate.
+
+- 2026-09-05, experiment results and decision. Redraft, 6 rooms, unified variants (as-is / reliability 1 / deviation-slope reliability / λ 0): 2024 +94 / +48 / +54 / +102, 2025 +85 / +102 / +62 / +84 — all within noise of each other, none near the lineup model's 2025 (+213). Opponents reverted to market order with saturation skip (QB points vs bot went from −26…−106 to +21/+56): 2024 +103, 2025 +64. 240 iterations instead of 80: 2025 +71 (noise is not the cause). Calibrated dud-week mixture: redraft 2024 +93 / 2025 +53, best ball 2025 +174 (worse than +244) — reverted, finding kept. Best-ball construction under the objective stays TE-heavy (3.9 TE, 61–67% below minimum counts): the model believes TE depth pays under realized-max lineups; two seasons of reality say RB/WR depth does. Most likely remaining cause: the per-game ratio is fitted on players who played ≥ 12 games (starters) and applied uniformly, overstating deep TEs/RBs whose per-game rate when they do play is far below a starter's — a projection-level-dependent ratio is the next calibration step, but it needs more than two seasons to fit without overfitting. **Decision: gates failed → the default is not flipped (Tasks 9 and 10 not executed). Shipped: calibration + outcome model (recap simulator), the yardstick and gate harness, and the unified engine behind `valueModel: "unified"`.**
 
 ## Self-review
 

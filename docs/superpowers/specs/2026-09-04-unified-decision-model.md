@@ -1,6 +1,6 @@
 # Unified draft decision model — design
 
-**Status:** proposed, awaiting review. Implementation plan: `docs/superpowers/plans/2026-09-04-unified-decision-model.md`.
+**Status (2026-09-05): implemented behind `Strategy.valueModel = "unified"`; NOT the default.** The acceptance gates (`docs/backtest-gates.md`) failed: 2024 redraft is a statistical tie with the shipped lineup model (+99±13 vs +110±16) and passes every gate; 2025 redraft (+106±15 vs +213±25) and best ball in both years (+189 vs +283; +260 vs +399, with 61–67% of best-ball rosters below the minimum counts — 3.9 TE per roster) do not. A controlled experiment ruled out shrinkage, the risk term, opponent modeling, Monte Carlo noise and a calibrated dud-week mixture as the cause (plan review log). What shipped from this work: the calibrated outcome model (also powering the recap simulator), the honest backtest yardstick (ex-ante lineups, projection-based contested wire with friction, legality/fragility gates, hold-out calibration), and the engine path itself for continued work. Next: a projection-level-dependent per-game ratio (deep TEs/RBs are overstated by a ratio fit on starters), a third season, and the user-offered datasets. Implementation plan: `docs/superpowers/plans/2026-09-04-unified-decision-model.md`.
 
 ## The problem this replaces
 
@@ -17,6 +17,12 @@ Score(c) = U( LineupPoints( FinalRoster(c) ) )
 - **FinalRoster(c)** = my current roster + `c` + the players I will add at my remaining picks, simulated: opponents draft from the remaining pool by ADP with noise and roster need (live room drift applied), and my own future picks are filled greedily under the same value the objective uses.
 - **LineupPoints(R)** = the season total of each week's optimal starting lineup for roster R under the league's slots, with the week's realized points drawn from a calibrated **outcome model** (below). Redraft: any starting slot the roster cannot fill in a week is filled from the waiver wire at that position's expected streamable rate. Best ball: no waivers, no lineup management — exactly how best ball scores.
 - **U** = utility over the distribution of LineupPoints across simulations: `mean − λ·sd`. Redraft λ is a small risk aversion; large-field best-ball tournaments use negative λ (ceiling-seeking), because the payout is for finishing 1st, not for the mean.
+
+Three refinements came out of building it, each forced by a measured failure (see the plan's review log):
+
+- **Redraft lineups are set before kickoff.** Starters are chosen by expected weekly rate among players known to be active that week; realized points then accrue. Best ball keeps the realized-optimal lineup (the platform picks it). Without this, any two interchangeable high-variance players — a second DST — looked valuable purely through hindsight, in both the engine and the backtest.
+- **The waiver wire is contested and costs something.** It is the 3rd-best undrafted player *by projection* at the position (a pickup is made on projections, not hindsight), it always exists (deepest-ADP fallback), and every streamed slot-week is charged `WAIVER_FRICTION` = 2.5 points — a roster move, waiver priority, a pickup a little worse than his projection. That single term is why a rostered QB2 for the bye beats a plan to stream one. Engine and harness apply it identically.
+- **Projections are shrunk toward their ADP-neighborhood mean by (1 − reliability)**, with reliability fitted per position as Spearman(projection, per-game actual): QB .38, RB .69, WR .61, TE .52, K .07, DST .29. That is the regression to the mean the data demands — and it is what makes kickers and defenses last picks with no rule.
 
 One unit (expected points my completed roster scores this season), one uncertainty model, one place where opponents live. Everything the old stack hard-coded becomes emergent:
 
@@ -38,7 +44,7 @@ One unit (expected points my completed roster scores this season), one uncertain
 
 The recommendation is recomputed from scratch on every board change — there is no ranked queue that "falls to #3" when #1 and #2 go. Each recompute rebuilds the completion model from the live room: every opponent's actual roster (from the draft feed), the live ADP drift, and the remaining pool.
 
-Opponents are modeled **with the same objective I use for myself**. An opponent's next pick is the earliest player in market (effective-ADP) order whose expected lineup gain *for that opponent's roster* is meaningful — i.e., the best available player they actually need. A team holding 5 RB and 0 WR is predicted to take a WR; a team with every starter filled is predicted to take the best player left. This replaces the fixed position caps, so "what will be left at my next pick" reflects how the league is panning out, pick by pick.
+Opponents are modeled **with the same objective I use for myself**. An opponent fills open starting slots first — the position with the most holes first, the earliest player in market (effective-ADP) order who fills it — and once the starters are set drafts depth by expected lineup gain *for that opponent's roster*. A team holding 2 RB and 0 WR is predicted to take a WR; an empty roster wants RB/WR (three holes each, with FLEX) before a QB (one), which is why QBs go later than RB/WR in rounds 1–2 without any rule; a team with every starter filled takes the best player left. This replaces the fixed position caps, so "what will be left at my next pick" reflects how the league is panning out, pick by pick.
 
 ## The outcome model (calibrated, not guessed)
 
@@ -79,7 +85,7 @@ Measured by `pnpm backtest:season` with the waiver-aware yardstick, 12 rooms × 
 1. **Redraft, both years:** Adaptive ≥ shipped (+48 ± 18 / +140 ± 18) − 1σ each, and better on the two-year mean. 0 of 288 seats below 2 QB / 3 RB / 3 WR — as an *emergent* property. Expected empty slot-weeks ≤ the ADP bot's.
 2. **Best ball, both years:** Adaptive 1st-place rate and delta ≥ the shipped best-ball default (Robust RB) − 1σ. 0 seats below the best-ball minimum counts.
 3. **Hold-out:** calibrate on 2024 → 2025 result within 1σ of calibrate-on-both; and the reverse.
-4. **Objective calibration:** across seats, ρ(engine's pre-draft E[LineupPoints], realized lineup points) ≥ 0.5.
+4. **Objective calibration:** across seats (engine and bot rosters pooled), ρ(model's E[LineupPoints] for a finished roster, its realized lineup points) within 0.10 of the shipped model's ρ on the same data. *(Originally "≥ 0.5"; the first gate run showed the shipped model itself at 0.35 — realized totals are dominated by which players busted, which no draft-day model can order — so an absolute bar measured the statistic's noise ceiling, not the model. Amended before the definitive run.)*
 5. **Performance:** full recompute on the 530-player board < 50 ms best-of-5 (target < 30).
 6. **Tests:** suite green; every test that encoded a static rule is replaced by one that asserts the fluid behavior.
 7. **Live:** one Sleeper mock by the user; roster has a bench at QB/RB/WR.

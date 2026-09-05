@@ -26,6 +26,10 @@ import { buildHistoricalBoard, type CrossRow } from "../lib/etl/historicalBoard"
 import { biggestMisses, projectionReport, realizedValue, type ProjRow } from "../lib/engine/evaluate";
 import { replayRoom } from "../lib/engine/replay";
 import { rosterFragility } from "../lib/engine/coverage";
+import { evaluateCompletions, WAIVER_FRICTION } from "../lib/engine/rosterValue";
+import { spearman } from "../lib/engine/evaluate";
+import outcomeJson from "../config/outcome-model.json";
+import type { OutcomeParams } from "../lib/engine/outcomeModel";
 import { requiredFloor, BESTBALL_TARGETS } from "../lib/engine/recommend";
 import type { BoardPlayer, LeagueConfig, Position, ScoringFormat, Strategy } from "../lib/types";
 
@@ -56,6 +60,12 @@ const teams = Number(flags.get("teams") ?? 12);
 const rounds = Number(flags.get("rounds") ?? (bestball ? 20 : 15));
 const rooms = Number(flags.get("rooms") ?? (strategyArg === "all" ? 4 : 12));
 const seed = Number(flags.get("seed") ?? 42);
+/** Force every strategy onto one value model (A/B against the shipped default). */
+const modelOverride = flags.get("model") as "unified" | "lineup" | "blend" | undefined;
+/** Alternative outcome-model parameters, e.g. a hold-out fit on one season. */
+const calibPath = flags.get("calib");
+const outcome: OutcomeParams | undefined = calibPath ? (JSON.parse(readFileSync(calibPath, "utf8")) as OutcomeParams) : undefined;
+const paramsForCalib: OutcomeParams = outcome ?? (outcomeJson as OutcomeParams);
 
 // ---- formatting -----------------------------------------------------------
 
@@ -147,7 +157,17 @@ async function main() {
 
   // ---- B. decision quality -------------------------------------------
   const strategies: Strategy[] = JSON.parse(readFileSync(join(process.cwd(), "config", "strategies.json"), "utf8"));
-  const chosen = strategyArg === "all" ? strategies : strategies.filter((s) => s.id === strategyArg);
+  const lambdaOverride = flags.has("lambda") ? Number(flags.get("lambda")) : undefined;
+  const lambdaBbOverride = flags.has("lambdaBestBall") ? Number(flags.get("lambdaBestBall")) : undefined;
+  const chosen = (strategyArg === "all" ? strategies : strategies.filter((s) => s.id === strategyArg)).map((s) => ({
+    ...s,
+    ...(modelOverride ? { valueModel: modelOverride } : {}),
+    ...(lambdaOverride != null ? { lambda: lambdaOverride } : {}),
+    ...(lambdaBbOverride != null ? { lambdaBestBall: lambdaBbOverride } : {}),
+  }));
+  if (lambdaOverride != null || lambdaBbOverride != null) console.log(`risk override: lambda=${lambdaOverride ?? "-"} lambdaBestBall=${lambdaBbOverride ?? "-"}`);
+  if (modelOverride) console.log(`value model forced to "${modelOverride}" for every strategy`);
+  if (calibPath) console.log(`outcome model: ${calibPath} (fitted on ${paramsForCalib.fittedOn.join(", ")})`);
   if (chosen.length === 0) {
     console.error(`unknown strategy ${strategyArg}. Options: all, ${strategies.map((s) => s.id).join(", ")}`);
     process.exit(1);
@@ -165,29 +185,36 @@ async function main() {
 
   // Waiver wire. Redraft managers stream: an empty slot in week 6 is filled
   // from free agency, not left at zero. Without this the harness overvalues
-  // rostered depth and would grade "stream your TE2" as a loss. Model: one
-  // waiver-level body per position per week — the realized points of the
-  // 3rd-best undrafted player at that position that week (what a typical
-  // pickup actually returns, not the best one in hindsight). Best ball has
-  // no waivers, so it gets none.
-  const WAIVER_RANK = 3;
-  const waiverLine = (drafted: Set<string>): Record<Position, (number | null)[]> => {
-    const out = {} as Record<Position, (number | null)[]>;
+  // rostered depth and would grade "stream your TE2" as a loss. But a pickup
+  // is made on PROJECTIONS, not hindsight: the streamable pool is the three
+  // best undrafted players by preseason projection, and the wire pays the best
+  // of those three each week (a manager can choose among a few known names by
+  // matchup). Same definition the engine prices. Best ball has no waivers.
+  // Redraft: the manager streams the HIGHEST-PROJECTED of the three who is
+  // active that week (a choice made on expectation, not hindsight).
+  const WAIVER_POOL = 3;
+  const waiverLine = (drafted: Set<string>): Record<Position, { weekly: (number | null)[]; expected: number }> => {
+    const out = {} as Record<Position, { weekly: (number | null)[]; expected: number }>;
     for (const pos of POSITIONS) {
-      const pool = board.filter((p) => p.pos === pos && !drafted.has(p.id));
-      const weeks = Array.from({ length: 18 }, (_, w) => {
-        const pts = pool.map((p) => realized.get(p.id)?.weekly[w] ?? 0).sort((a, b) => b - a);
-        return pts[WAIVER_RANK - 1] ?? 0;
+      const pool = board
+        .filter((p) => p.pos === pos && !drafted.has(p.id))
+        .sort((a, b) => b.projPoints - a.projPoints)
+        .slice(0, WAIVER_POOL);
+      // Streaming costs a roster move and a worse-than-projected pickup: the same
+      // friction the engine charges (lib/engine/rosterValue.ts).
+      const weekly = Array.from({ length: 18 }, (_, w) => {
+        const active = pool.find((p) => (realized.get(p.id)?.weekly[w] ?? 0) > 0);
+        return active ? Math.max(0, realized.get(active.id)!.weekly[w]! - WAIVER_FRICTION) : 0;
       });
-      out[pos] = weeks;
+      out[pos] = { weekly, expected: pool.length ? Math.max(0, pool[0].projPoints / 16 - WAIVER_FRICTION) : 0 };
     }
     return out;
   };
   const value = (roster: BoardPlayer[], drafted: Set<string>) => {
-    const players = roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [] }));
+    const players = roster.map((p) => ({ pos: p.pos, weekly: realized.get(p.id)?.weekly ?? [], expected: p.projPoints / 16 }));
     if (withWaivers) {
       const line = waiverLine(drafted);
-      for (const pos of POSITIONS) if ((config.rosterSlots[pos] ?? 0) > 0) players.push({ pos, weekly: line[pos] });
+      for (const pos of POSITIONS) if ((config.rosterSlots[pos] ?? 0) > 0) players.push({ pos, weekly: line[pos].weekly, expected: line[pos].expected });
     }
     return realizedValue(players, config).weeklyLineup;
   };
@@ -221,18 +248,23 @@ async function main() {
   };
   interface Legality { engineViol: number; botViol: number; engineFrag: number; botFrag: number; worst: string; worstN: number; seats: number }
   const legality = new Map<string, Legality>();
+  // Objective calibration: does the model's own expected-points number for a
+  // finished roster predict what that roster really scored? Spearman across seats.
+  const calib = new Map<string, { expected: number[]; realized: number[] }>();
+  const modelExpected = (roster: BoardPlayer[]): number =>
+    roster.length === 0 ? 0 : evaluateCompletions([], [roster[0]], [Array.from({ length: 120 }, () => roster.slice(1))], paramsForCalib, config, {}, 1)[0].mean;
   const engineTaken = new Map<string, Map<string, { n: number; pickSum: number }>>(); // strategy → playerId → stats
 
   for (let r = 0; r < rooms; r++) {
     const roomSeed = seed * 1000 + r;
-    const baseline = replayRoom({ board, config, strategy: chosen[0], engineSlot: null, seed: roomSeed });
+    const baseline = replayRoom({ board, config, strategy: chosen[0], engineSlot: null, seed: roomSeed, outcome });
     const baseDrafted = new Set(baseline.picks.map((p) => p.playerId));
     const botValues = baseline.rosters.map((r) => value(r, baseDrafted));
     for (const strategy of chosen) {
       const taken = engineTaken.get(strategy.id) ?? new Map();
       engineTaken.set(strategy.id, taken);
       for (let slot = 1; slot <= teams; slot++) {
-        const room = replayRoom({ board, config, strategy, engineSlot: slot, seed: roomSeed });
+        const room = replayRoom({ board, config, strategy, engineSlot: slot, seed: roomSeed, outcome });
         const roomDrafted = new Set(room.picks.map((p) => p.playerId));
         const values = room.rosters.map((r) => value(r, roomDrafted));
         const engine = values[slot - 1];
@@ -263,6 +295,12 @@ async function main() {
         if (violations(baseline.rosters[slot - 1]).length) lg.botViol++;
         lg.engineFrag += rosterFragility(room.rosters[slot - 1], config);
         lg.botFrag += rosterFragility(baseline.rosters[slot - 1], config);
+        // Pool the engine's roster with the bot's in the same seat: rosters that
+        // differ systematically are what a calibration test needs.
+        const cal = calib.get(strategy.id) ?? { expected: [], realized: [] };
+        calib.set(strategy.id, cal);
+        cal.expected.push(modelExpected(room.rosters[slot - 1]), modelExpected(baseline.rosters[slot - 1]));
+        cal.realized.push(engine, botValues[slot - 1]);
         for (const p of room.picks.filter((p) => p.byEngine)) {
           const t = taken.get(p.playerId) ?? { n: 0, pickSum: 0 };
           t.n++;
@@ -309,6 +347,10 @@ async function main() {
       seats: n,
       roomLo,
       roomHi,
+      violations: (legality.get(strategy.id)?.engineViol ?? 0) / Math.max(1, legality.get(strategy.id)?.seats ?? 1),
+      fragility: (legality.get(strategy.id)?.engineFrag ?? 0) / Math.max(1, legality.get(strategy.id)?.seats ?? 1),
+      botFragility: (legality.get(strategy.id)?.botFrag ?? 0) / Math.max(1, legality.get(strategy.id)?.seats ?? 1),
+      objectiveRho: spearman(calib.get(strategy.id)?.expected ?? [], calib.get(strategy.id)?.realized ?? []),
     };
     summary.push(row);
     console.log(
@@ -360,6 +402,11 @@ async function main() {
   console.log(
     "'empty' = expected weeks x slots where the roster starts nobody (byes exact, injuries by position rate). Lower is better; the bot is the yardstick."
   );
+  console.log("\nobjective calibration — Spearman between the model's expected points for the engine's finished roster and what it really scored, across seats:");
+  for (const strategy of chosen) {
+    const c = calib.get(strategy.id);
+    if (c && c.expected.length > 2) console.log(`  ${padR(strategy.id, 20)} ρ = ${spearman(c.expected, c.realized).toFixed(2)}  (n=${c.expected.length})`);
+  }
   if (illegal) {
     console.log("\n⚠️  ILLEGAL ROSTERS: the engine finished at least one seat below a construction floor. This is a bug in the value model, not a strategy choice.");
     process.exitCode = 1;

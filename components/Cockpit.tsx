@@ -255,8 +255,9 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       strategy,
       drift: draft.drift,
       opponentCounts: draft.opponentCounts,
+      opponentRosters: draft.opponentRosters,
     });
-  }, [gradedBoard, draft.draftedIds, draft.myRoster, planningPick, draft.myPicks, config, strategy, draftOver, draft.drift, draft.opponentCounts]);
+  }, [gradedBoard, draft.draftedIds, draft.myRoster, planningPick, draft.myPicks, config, strategy, draftOver, draft.drift, draft.opponentCounts, draft.opponentRosters]);
 
   const top = output?.recommendations[0];
   const alternates = output?.recommendations.slice(1) ?? [];
@@ -326,6 +327,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           strategy,
           drift: draft.drift,
           opponentCounts: draft.opponentCounts,
+          opponentRosters: draft.opponentRosters,
         });
         choice = out.recommendations[0]?.player;
         if (choice) roster.push(choice);

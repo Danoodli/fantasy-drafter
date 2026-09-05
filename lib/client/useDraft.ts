@@ -63,6 +63,8 @@ export interface DraftApi {
   myRoster: BoardPlayer[];
   draftedIds: Set<string>;
   opponentCounts: Record<number, Partial<Record<Position, number>>>;
+  /** Every other team's roster by draft slot — the engine models them by need. */
+  opponentRosters: Record<number, BoardPlayer[]>;
   drift: Partial<Record<Position, number>>;
   tradedPicks: TradedPick[];
   live: boolean;
@@ -256,10 +258,11 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     untilMeRef.current = untilMe;
   }, [untilMe]);
 
-  const { myRoster, draftedIds, opponentCounts } = useMemo(() => {
+  const { myRoster, draftedIds, opponentCounts, opponentRosters } = useMemo(() => {
     const roster: BoardPlayer[] = [];
     const drafted = new Set<string>();
     const opp: Record<number, Partial<Record<Position, number>>> = {};
+    const oppRosters: Record<number, BoardPlayer[]> = {};
     for (const pick of picks) {
       if (pick.playerId) drafted.add(pick.playerId);
       const owner = pickOwner(pick.pickNo, teams, tradedPicks);
@@ -269,9 +272,10 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       } else if (player) {
         const counts = (opp[owner] ??= {});
         counts[player.pos] = (counts[player.pos] ?? 0) + 1;
+        (oppRosters[owner] ??= []).push(player);
       }
     }
-    return { myRoster: roster, draftedIds: drafted, opponentCounts: opp };
+    return { myRoster: roster, draftedIds: drafted, opponentCounts: opp, opponentRosters: oppRosters };
   }, [picks, teams, tradedPicks, mySlot, boardIndexes]);
 
   const drift = useMemo(
@@ -346,6 +350,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     myRoster,
     draftedIds,
     opponentCounts,
+    opponentRosters,
     drift,
     tradedPicks,
     live,
