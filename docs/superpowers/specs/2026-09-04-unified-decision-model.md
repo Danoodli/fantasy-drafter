@@ -1,6 +1,6 @@
 # Unified draft decision model — design
 
-**Status:** proposed, awaiting review. Implementation plan: `docs/superpowers/plans/2026-09-04-unified-decision-model.md`.
+**Status (2026-09-05): implemented behind `Strategy.valueModel = "unified"`; NOT the default.** The acceptance gates (`docs/backtest-gates.md`) failed: 2024 redraft is a statistical tie with the shipped lineup model (+99±13 vs +110±16) and passes every gate; 2025 redraft (+106±15 vs +213±25) and best ball in both years (+189 vs +283; +260 vs +399, with 61–67% of best-ball rosters below the minimum counts — 3.9 TE per roster) do not. A controlled experiment ruled out shrinkage, the risk term, opponent modeling, Monte Carlo noise and a calibrated dud-week mixture as the cause (plan review log). What shipped from this work: the calibrated outcome model (also powering the recap simulator), the honest backtest yardstick (ex-ante lineups, projection-based contested wire with friction, legality/fragility gates, hold-out calibration), and the engine path itself for continued work. Next: a projection-level-dependent per-game ratio (deep TEs/RBs are overstated by a ratio fit on starters), a third season, and the user-offered datasets. Implementation plan: `docs/superpowers/plans/2026-09-04-unified-decision-model.md`.
 
 ## The problem this replaces
 
