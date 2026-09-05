@@ -1,5 +1,5 @@
 allowBuilds:
   esbuild: true
   sharp: false
-  tesseract.js: set this to true or false
+  tesseract.js: false
   unrs-resolver: false
