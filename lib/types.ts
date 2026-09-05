@@ -91,6 +91,8 @@ export interface BoardPlayer {
   tier: number; // within position, 1 = best
   /** Sleeper injury status at build time: "Questionable" | "Doubtful" | "Out" | "IR" | "PUP" | "Sus" | null */
   injury: string | null;
+  /** True when `injury` was escalated from live news rather than the build-time snapshot. */
+  injuryLive?: boolean;
   /** Depth-chart order at the position (1 = starter), from Sleeper. */
   depthOrder: number | null;
   /** Schedule easiness percentile 0-1 (1 = softest), full season. Null for K/DST. */

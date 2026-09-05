@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardPlayer, LeagueConfig, Position, Strategy } from "../lib/types";
 import { recommend, BESTBALL_TARGETS } from "../lib/engine/recommend";
+import { classifyNews, liveInjuryStatus } from "../lib/engine/newsSignal";
 import { survivalProb } from "../lib/engine/survival";
 import { useDraft } from "../lib/client/useDraft";
 import { POS_COLOR } from "../lib/client/pos";
@@ -151,6 +152,27 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       disconnect();
     };
   }, [board]);
+
+  // Live news, graded. classifyNews reads only unambiguous hard signals — ruled
+  // out, placed on IR, suspended, arrested, carted off — and maps them onto the
+  // same injury statuses the ETL bakes in. That means the engine's existing
+  // exclude-and-penalize path grades breaking news with no engine change and no
+  // loss of purity: recommend() still sees a plain board, just a truer one.
+  const gradedBoard = useMemo<Board>(() => {
+    if (boardNews.size === 0) return board;
+    let changed = 0;
+    const players = board.players.map((p) => {
+      const item = boardNews.get(p.id);
+      if (!item) return p;
+      const live = classifyNews(item.headline);
+      if (!live) return p;
+      const merged = liveInjuryStatus(p.injury, live);
+      if (merged === p.injury) return p;
+      changed++;
+      return { ...p, injury: merged, injuryLive: true };
+    });
+    return changed ? { ...board, players } : board;
+  }, [board, boardNews]);
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -210,7 +232,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
   const output = useMemo(() => {
     if (draftOver || draft.myPicks.length === 0) return null;
     return recommend({
-      board: board.players,
+      board: gradedBoard.players,
       draftedIds: draft.draftedIds,
       myRoster: draft.myRoster,
       currentPick: planningPick,
@@ -220,7 +242,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       drift: draft.drift,
       opponentCounts: draft.opponentCounts,
     });
-  }, [board, draft.draftedIds, draft.myRoster, planningPick, draft.myPicks, config, strategy, draftOver, draft.drift, draft.opponentCounts]);
+  }, [gradedBoard, draft.draftedIds, draft.myRoster, planningPick, draft.myPicks, config, strategy, draftOver, draft.drift, draft.opponentCounts]);
 
   const top = output?.recommendations[0];
   const alternates = output?.recommendations.slice(1) ?? [];
@@ -275,13 +297,13 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     const drafted = new Set(draft.draftedIds);
     const roster = [...draft.myRoster];
     const additions: BoardPlayer[] = [];
-    const adpOrder = [...board.players].sort((a, b) => a.adp - b.adp);
+    const adpOrder = [...gradedBoard.players].sort((a, b) => a.adp - b.adp);
     for (let pickNo = draft.currentPick; pickNo <= totalPicks; pickNo++) {
       const owner = pickOwner(pickNo, config.teams, draft.tradedPicks);
       let choice: BoardPlayer | undefined;
       if (owner === (config.myDraftSlot ?? 1)) {
         const out = recommend({
-          board: board.players,
+          board: gradedBoard.players,
           draftedIds: drafted,
           myRoster: roster,
           currentPick: pickNo,
@@ -313,7 +335,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     for(p: BoardPlayer) {
       return playerBlurb(p, {
         ...this,
-        tierMatesLeft: board.players.filter(
+        tierMatesLeft: gradedBoard.players.filter(
           (a) => a.pos === p.pos && a.tier === p.tier && a.id !== p.id && !draft.draftedIds.has(a.id)
         ).length,
       });
@@ -350,7 +372,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
     const n2 = draft.myPicks[1];
     if (!n2 || draftOver) return null;
     const rows = (["QB", "RB", "WR", "TE"] as Position[]).map((pos) => {
-      const cands = board.players
+      const cands = gradedBoard.players
         .filter((p) => p.pos === pos && !draft.draftedIds.has(p.id))
         .sort((a, b) => b.projPoints - a.projPoints)
         .slice(0, 8)
@@ -360,7 +382,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
       return { pos, best, likely };
     });
     return { n2, rows };
-  }, [board, draft.draftedIds, draft.myPicks, draft.drift, draftOver]);
+  }, [gradedBoard, draft.draftedIds, draft.myPicks, draft.drift, draftOver]);
 
   // Roster slot fill (starters first, then bench)
   const rosterView = useMemo(() => {
@@ -741,7 +763,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
           <div data-tour="search">
           <SearchBox
             ref={searchRef}
-            players={board.players}
+            players={gradedBoard.players}
             draftedIds={draft.draftedIds}
             onMark={(p) => mark(p)}
             onQueryChange={setBoardQuery}
@@ -882,7 +904,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
         {/* Tier board */}
         <section data-tour="board" className="min-h-0 min-w-0 flex-1" aria-label="Tier board">
           <TierBoard
-            players={board.players}
+            players={gradedBoard.players}
             draftedIds={draft.draftedIds}
             myIds={myIds}
             onMark={(p) => mark(p)}
@@ -891,7 +913,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             blurbFor={(p) => blurbCtx.for(p)}
             filterIds={
               boardQuery.trim()
-                ? new Set(searchPlayers(boardQuery, board.players, 40).map((p) => p.id))
+                ? new Set(searchPlayers(boardQuery, gradedBoard.players, 40).map((p) => p.id))
                 : null
             }
             trendingIds={trendingIds}
@@ -932,7 +954,7 @@ export default function Cockpit({ board, config, strategies, onReconfigure }: Pr
             currentPick: blurbCtx.currentPick,
             nextPick: blurbCtx.nextPick,
             drift: blurbCtx.drift,
-            tierMatesLeft: board.players.filter(
+            tierMatesLeft: gradedBoard.players.filter(
               (a) =>
                 a.pos === modalPlayer.pos &&
                 a.tier === modalPlayer.tier &&
