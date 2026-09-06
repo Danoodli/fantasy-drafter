@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import type { Board, LeagueConfig, Strategy } from "../lib/types";
 import { loadConfig, saveConfig, clearConfig } from "../lib/client/config";
+import { clearPersistedPicks } from "../lib/client/useDraft";
 import { SCORING_PRESETS, scoringFromSleeper } from "../lib/scoring";
 import { rescoreBoard, scoringDiffers } from "../lib/client/rescore";
 import { loadSources } from "../lib/client/sources";
@@ -61,6 +62,9 @@ export default function Page() {
   const [shared, setShared] = useState<LeagueConfig | null>(null);
   const [viewingDraft, setViewingDraft] = useState<SavedDraft | null>(null);
   const [viewingPortfolio, setViewingPortfolio] = useState(false);
+  // Home keeps the config (and the board, and the saved picks) — the setup
+  // screen shows a resume card. Only "start a new draft" clears state.
+  const [screen, setScreen] = useState<"setup" | "cockpit">("cockpit");
 
   useEffect(() => {
     // A shared link carries the whole config in the URL — decode it, show
@@ -143,18 +147,33 @@ export default function Page() {
 
   if (config === "unset") return null;
 
-  if (!config) {
+  if (!config || screen === "setup") {
     return (
       <>
       {walkthrough}
       <Setup
-        initialConfig={shared}
+        initialConfig={shared ?? config ?? null}
+        resume={
+          config
+            ? {
+                config,
+                onResume: () => setScreen("cockpit"),
+                onDiscard: () => {
+                  clearPersistedPicks();
+                  clearConfig();
+                  setConfig(null);
+                  setBoard(null);
+                },
+              }
+            : null
+        }
         onViewDraft={setViewingDraft}
         onViewPortfolio={() => setViewingPortfolio(true)}
         onDone={(c) => {
           saveConfig(c);
           setConfig(c);
           setShared(null);
+          setScreen("cockpit");
         }}
       />
       </>
@@ -185,11 +204,7 @@ export default function Page() {
       board={board}
       config={config}
       strategies={strategies}
-      onReconfigure={() => {
-        clearConfig();
-        setConfig(null);
-        setBoard(null);
-      }}
+      onHome={() => setScreen("setup")}
     />
     </>
   );

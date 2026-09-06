@@ -787,7 +787,9 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
 
   const strategyWarning = checkStrategyViability(state, scored, round, myCounts);
   const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
-  return { recommendations: top, strategyWarning, computeMs: t1 - t0 };
+  // `scored` is every simulated candidate in rank order — the on-the-clock
+  // shortlist for another seat reads it; the top three carry reasons.
+  return { recommendations: top, scored: recommendations, strategyWarning, computeMs: t1 - t0 };
 }
 
 /**

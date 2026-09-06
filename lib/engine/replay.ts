@@ -2,7 +2,7 @@
 // with the engine optionally sitting in one of them.
 //
 // Pure and seeded. The bots sample each player's "effective draft position"
-// ONCE per room (adp + stdev·gaussian — the same room model the Monte Carlo
+// ONCE per room (adp + tail-model noise — the same room model the Monte Carlo
 // uses) and always take the lowest available. Because that sample depends only
 // on the seed, a room with the engine in slot s and the same room with a bot in
 // slot s are identical until the engine's first pick — which is what makes the
@@ -10,6 +10,7 @@
 
 import type { BoardPlayer, LeagueConfig, Position, Strategy } from "../types";
 import { makeRng } from "./montecarlo";
+import { sampleAdpNoise } from "./survival";
 import { recommend } from "./recommend";
 import { pickOwner, picksForSlot } from "../draft/snake";
 
@@ -39,11 +40,6 @@ export interface ReplayResult {
 
 const STARTERS: Position[] = ["QB", "RB", "WR", "TE", "K", "DST"];
 
-function gaussian(rng: () => number): number {
-  let u = 0;
-  while (u === 0) u = rng();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
-}
 
 /** Roster-count ceilings a sane human drafter respects, scaled to draft length. */
 function botCaps(config: LeagueConfig): Record<Position, number> {
@@ -66,7 +62,7 @@ export function replayRoom(opts: ReplayOptions): ReplayResult {
 
   // One effective-position sample per player per room — shared by every seat.
   const ordered = board
-    .map((p) => ({ p, eff: p.adp + p.adpStdev * gaussian(rng) }))
+    .map((p) => ({ p, eff: p.adp + sampleAdpNoise(rng, p.adpStdev) }))
     .sort((a, b) => a.eff - b.eff)
     .map((x) => x.p);
 

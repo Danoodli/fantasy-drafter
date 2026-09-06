@@ -1,0 +1,6 @@
+{
+  "_doc": "Tail model for ADP survival AND the simulated market's pick noise (they must agree). tailScale multiplies every player's published ADP stdev (1 = FFC as published). wideShare is the probability a pick is drawn from a distribution wideFactor times wider — a fat-tail mixture for rooms that reach and let players fall more than the mocks do. wideShare 0 with tailScale 1 is a plain normal: the lever is OFF. Fit these with `pnpm calibrate:survival <draft ids>` on real drafts before turning them on.",
+  "tailScale": 1,
+  "wideShare": 0,
+  "wideFactor": 2.5
+}

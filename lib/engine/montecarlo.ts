@@ -4,7 +4,7 @@
 //
 // Two structural optimizations keep the full recompute inside the 50ms budget:
 // 1. Each player's "effective draft position" is sampled ONCE per iteration
-//    (adp + stdev·gaussian) and opponents take players in that order —
+//    (adp + tail-model noise, see survival.ts) and opponents take players in that order —
 //    O(players) gaussians per iteration instead of O(players × picks).
 // 2. The opponent walk runs ONCE per iteration and is SHARED by all
 //    candidates: opponents don't react to my pick, so each candidate just
@@ -12,6 +12,7 @@
 //    sequence shifts in — exactly what the room would do).
 
 import type { Position } from "../types";
+import { sampleAdpNoise } from "./survival";
 
 /** mulberry32 — tiny fast seeded PRNG. */
 export function makeRng(seed: number): () => number {
@@ -23,13 +24,6 @@ export function makeRng(seed: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-/** Box–Muller, one value per call. */
-function gaussian(rng: () => number): number {
-  let u = 0;
-  while (u === 0) u = rng();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
 }
 
 const POS_INDEX: Record<Position, number> = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DST: 5 };
@@ -122,7 +116,7 @@ export function simulateAll(
   const totals = candidates.map(() => new Float64Array(iterations));
 
   for (let it = 0; it < iterations; it++) {
-    for (let i = 0; i < n; i++) x[i] = adp[i] + stdev[i] * gaussian(rng);
+    for (let i = 0; i < n; i++) x[i] = adp[i] + sampleAdpNoise(rng, stdev[i]);
     for (let i = 0; i < n; i++) order[i] = i;
     order.sort((a, b) => x[a] - x[b]);
 

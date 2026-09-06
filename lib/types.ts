@@ -177,6 +177,8 @@ export interface DraftPick {
   draftSlot: number; // 1-indexed column on the board
   isKeeper: boolean;
   byMe: boolean;
+  /** Index into the manual pick list when this pick was marked by hand (undo/correct by index). */
+  manualIndex?: number;
 }
 
 /** A traded pick, Sleeper shape: (season, round, original roster) now owned by owner_id. */
