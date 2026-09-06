@@ -409,23 +409,27 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     showToast(`${source}: ${parts.join(" · ") || "nothing new"}.`, changed > 0, () => draft.restoreManual(out.snapshot));
   }
 
-  /** One ordered read of the room's pick history from screen sync. */
-  function applyScreenFrame(ids: string[], ignored: Set<string>) {
-    const out = draft.applySequence(ids, ignored);
-    const placed = out.inserted + out.filled;
-    if (placed > 0) {
-      const byIdNow = byId;
-      for (const id of ids) {
-        const p = byIdNow.get(id);
-        if (p && !draft.draftedIds.has(id) && !out.held.some((h) => h.player.id === id)) scoreAgainstShortlist(p);
-      }
-      const parts = [
-        `${placed} pick${placed === 1 ? "" : "s"}`,
-        out.shifted > 0 ? `${out.shifted} re-ordered after a missed pick` : null,
-        out.held.length > 0 ? `${out.held.length} waiting on you` : null,
-      ].filter(Boolean);
-      showToast(`Screen sync: ${parts.join(" · ")}.`, true, () => draft.restoreManual(out.snapshot));
+  /**
+   * One ordered read of the room's pick history from screen sync. My own
+   * picks are recorded like everyone else's — I draft on the site, the app
+   * watches — and get the same celebration as the Draft button.
+   */
+  function applyScreenFrame(ids: string[]) {
+    const out = draft.applySequence(ids);
+    if (out.placed.length === 0) return out;
+    const mine = out.placed.filter((p) => pickOwner(p.pickNo, config.teams, draft.tradedPicks, config.draftOrder) === mySlot);
+    for (const p of out.placed) if (!mine.includes(p)) scoreAgainstShortlist(p.player);
+    if (mine.length > 0) {
+      setSnipe(null);
+      setBurst({ key: Date.now(), color: POS_COLOR[mine[mine.length - 1].player.pos] });
     }
+    const others = out.placed.length - mine.length;
+    const parts = [
+      mine.length > 0 ? `you drafted ${mine.map((p) => p.player.name).join(" and ")}` : null,
+      others > 0 ? `${others} other pick${others === 1 ? "" : "s"}` : null,
+      out.shifted > 0 ? `${out.shifted} re-ordered after a missed pick` : null,
+    ].filter(Boolean);
+    showToast(`Screen sync: ${parts.join(" · ")}.`, true, () => draft.restoreManual(out.snapshot));
     return out;
   }
 
@@ -1230,13 +1234,6 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           players={gradedBoard.players}
           draftedIds={draft.draftedIds}
           onFrame={applyScreenFrame}
-          onDraftMine={(p, pickNo) => {
-            if (draft.fillAt(pickNo, p)) {
-              setSnipe(null);
-              setBurst({ key: Date.now(), color: POS_COLOR[p.pos] });
-              showToast(`Drafted ${p.name} at pick ${pickNo}.`, true);
-            } else mark(p, true);
-          }}
           onClose={() => setScreenSync(false)}
         />
       )}

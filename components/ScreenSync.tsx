@@ -9,17 +9,15 @@
 // toggle flips panels that list newest first); that ordered list is
 // reconciled with the picks we already know (lib/draft/sequence.ts): new
 // names append in order, a pick we missed is inserted where it belongs, and
-// a name at MY slot is never placed — it waits in the panel for me to Draft
-// or Ignore, with a placeholder holding the spot so everyone after me still
-// lands on the right team. Two consecutive reads must agree before a name
-// counts. Pick numbers on screen are never read: OCR junk in front of a name
-// is not a pick number.
+// MY picks are recorded like everyone else's — I draft on the site, the app
+// just watches (back-to-back picks included). Two consecutive reads must
+// agree before a name counts. Pick numbers on screen are never read: OCR junk
+// in front of a name is not a pick number.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
-import type { HeldPick, SequenceOutcome } from "../lib/client/useDraft";
+import type { SequenceOutcome } from "../lib/client/useDraft";
 import { FrameAgreement, matchOcrLines, type OcrLine } from "../lib/draft/ocrMatch";
-import { POS_COLOR } from "../lib/client/pos";
 import {
   FULL_FRAME,
   OCR_WORKERS,
@@ -37,10 +35,8 @@ import {
 interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
-  /** Apply one ordered read of the panel. Returns what was placed and what waits on me. */
-  onFrame: (playerIds: string[], ignored: Set<string>) => SequenceOutcome | void;
-  /** The user confirms a held name as their own pick at that pick number. */
-  onDraftMine: (player: BoardPlayer, pickNo: number) => void;
+  /** Apply one ordered read of the panel. Returns what was placed. */
+  onFrame: (playerIds: string[]) => SequenceOutcome | void;
   onClose: () => void;
 }
 
@@ -59,7 +55,7 @@ function loadNewestFirst(): boolean {
   }
 }
 
-export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, onClose }: Props) {
+export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -67,9 +63,6 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
   const inFlightRef = useRef(0);
   const frameSeqRef = useRef(0);
   const appliedSeqRef = useRef(0);
-  const ignoredRef = useRef(new Set<string>());
-  /** Render-side mirror of ignoredRef (the loop reads the ref; the list reads this). */
-  const [ignoredIds, setIgnoredIds] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("idle");
   const [region, setRegion] = useState<Region>(() => loadRegion() ?? FULL_FRAME);
   const [newestFirst, setNewestFirstState] = useState<boolean>(loadNewestFirst);
@@ -79,7 +72,7 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
   const [lastNames, setLastNames] = useState<string[]>([]);
   const [reads, setReads] = useState(0);
   const [marked, setMarked] = useState(0);
-  const [held, setHeld] = useState<HeldPick[]>([]);
+  const [lastPlaced, setLastPlaced] = useState<string[]>([]);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [showLarge, setShowLarge] = useState(true);
 
@@ -197,16 +190,18 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
         // Panel order → pick order. Only names seen in two consecutive reads
         // (or already known) take part; the rest wait for the next read.
         const ordered = newestFirst ? [...matches].reverse() : matches;
-        const ids = ordered.map((m) => m.player.id).filter((id) => agreement.isConfirmed(id) && !ignoredRef.current.has(id));
+        // A pick already on the board (marked in the app, or from an earlier
+        // read) is an anchor the moment it shows up — no second read needed.
+        const ids = ordered.map((m) => m.player.id).filter((id) => agreement.isConfirmed(id) || draftedIds.has(id));
         setReads((n) => n + 1);
         setLastLines(lines);
         setLastNames(matches.map((m) => m.player.name));
         setStatus(`Read ${lines.length} lines · ${matches.length} names on screen · ${new Date().toLocaleTimeString()}`);
         if (ids.length > 0) {
-          const out = onFrame(ids, ignoredRef.current);
-          if (out) {
-            setHeld(out.held);
-            if (out.inserted + out.filled > 0) setMarked((n) => n + out.inserted + out.filled);
+          const out = onFrame(ids);
+          if (out && out.placed.length > 0) {
+            setMarked((n) => n + out.placed.length);
+            setLastPlaced(out.placed.map((p) => `#${p.pickNo} ${p.player.name}`));
           }
         }
       } catch (err) {
@@ -256,7 +251,6 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
   }
 
   const watching = phase === "watching";
-  const visibleHeld = held.filter((h) => !draftedIds.has(h.player.id) && !ignoredIds.has(h.player.id));
 
   return (
     <div
@@ -289,8 +283,8 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
           <>
             <p className="text-sm text-ink-dim">
               Share the tab or window your draft is in. The cockpit reads the pick history off the screen several times a
-              second and marks new picks in order — any site, no login, nothing leaves your browser. Your own picks are
-              never made for you.
+              second and records every pick in order — yours included, so you draft on the site and this app just
+              advises. Any site, no login, nothing leaves your browser.
             </p>
             <button onClick={share} className="btn-shimmer mt-3 w-full rounded-lg bg-rb py-2.5 font-display text-xl font-bold uppercase tracking-wide text-field">
               Share draft screen
@@ -339,43 +333,10 @@ export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, 
                 newest pick at top
               </label>
             </div>
-            {visibleHeld.length > 0 && (
-              <div className="mt-2 rounded border border-warn/40 bg-warn/10 p-2">
-                <p className="text-xs text-warn">Your pick — screen sync never fills your slot. Seen on screen:</p>
-                <ul className="mt-1 space-y-1">
-                  {visibleHeld.map(({ player, pickNo }) => (
-                    <li key={player.id} className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-mono text-[10px] text-ink-faint">#{pickNo}</span>
-                      <span className="font-mono text-[10px]" style={{ color: POS_COLOR[player.pos] }}>{player.pos}</span>
-                      <span>{player.name}</span>
-                      <span className="ml-auto flex gap-1">
-                        <button
-                          onClick={() => {
-                            setHeld((prev) => prev.filter((h) => h.player.id !== player.id));
-                            onDraftMine(player, pickNo);
-                          }}
-                          className="rounded bg-rb px-2 py-0.5 text-xs font-semibold text-field"
-                          title="That's my pick — put him on my roster at this pick"
-                        >
-                          Draft
-                        </button>
-                        <button
-                          onClick={() => {
-                            ignoredRef.current.add(player.id);
-                            setIgnoredIds(new Set(ignoredRef.current));
-                            setHeld((prev) => prev.filter((h) => h.player.id !== player.id));
-                          }}
-                          className="rounded border border-line px-2 py-0.5 text-xs text-ink-dim hover:text-ink"
-                          title="Misread — never mark this name from the screen"
-                        >
-                          Ignore
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-1 text-[11px] text-ink-faint">The slot is held for you; everyone after you is already placed.</p>
-              </div>
+            {lastPlaced.length > 0 && (
+              <p className="mt-2 font-mono text-[11px] text-live">
+                last placed: {lastPlaced.slice(-4).join(" · ")}
+              </p>
             )}
             <p className="mt-2 min-h-[1rem] text-xs text-ink-dim">{status}</p>
             {(reads > 0 || marked > 0) && (

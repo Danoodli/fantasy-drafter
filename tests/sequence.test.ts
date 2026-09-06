@@ -83,6 +83,28 @@ describe("reconcileSequence", () => {
     expect(r.inserted).toEqual([{ id: "p14", pickIndex: 13 }]);
   });
 
+  it("works both ways: a pick I made in the app first is recognised when the screen shows it, not duplicated or moved", () => {
+    // I clicked Draft on X at pick 5 in the app; the screen then shows X at pick 5.
+    const r = reconcileSequence(["a", "b", "c", "d", "x"], ["c", "d", "x", "y"], { isMine: notMine });
+    expect(r.next).toEqual(["a", "b", "c", "d", "x", "y"]);
+    expect(r.inserted).toEqual([{ id: "y", pickIndex: 5 }]);
+  });
+
+  it("works both ways: if I clicked Draft before the screen showed the pick ahead of me, that pick slides in front of mine", () => {
+    // The OCR lagged: I drafted X in the app while pick 4 (d) was not yet read, so X sits at index 3.
+    const r = reconcileSequence(["a", "b", "c", "x"], ["b", "c", "d", "x"], { isMine: notMine });
+    expect(r.next).toEqual(["a", "b", "c", "d", "x"]);
+    expect(r.inserted).toEqual([{ id: "d", pickIndex: 3 }]);
+    expect(r.shifted).toBe(1);
+  });
+
+  it("screen first: my own pick is recorded like any other, back-to-back picks included", () => {
+    // Slot 12 in a 12-team snake owns picks 12 and 13; nothing is held or skipped.
+    const known = Array.from({ length: 11 }, (_, i) => `p${i + 1}`);
+    const r = reconcileSequence(known, ["p10", "p11", "me1", "me2", "p14"], { isMine: notMine });
+    expect(r.next.slice(11)).toEqual(["me1", "me2", "p14"]);
+  });
+
   it("a whole burst of fast picks lands in order in one frame", () => {
     const r = reconcileSequence(["a"], ["a", "b", "c", "d", "e", "f"], { isMine: mineAt(3) });
     expect(r.next).toEqual(["a", "b", "c", null, "e", "f"]);

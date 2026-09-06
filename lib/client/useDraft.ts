@@ -97,20 +97,17 @@ export interface ImportOutcome {
   snapshot: DraftPick[];
 }
 
-/** A screen read that landed on one of MY picks — left as a placeholder for me. */
-export interface HeldPick {
+/** A pick placed from a screen read. */
+export interface PlacedPick {
   player: BoardPlayer;
   pickNo: number;
 }
 
 export interface SequenceOutcome {
-  /** New picks placed (appended or inserted where a pick was missed). */
-  inserted: number;
-  /** Unknown placeholders filled in. */
-  filled: number;
+  /** Picks placed this read (appended, inserted where one was missed, or filling a placeholder), by pick. */
+  placed: PlacedPick[];
   /** Picks that moved down because a missed pick was inserted before them. */
   shifted: number;
-  held: HeldPick[];
   snapshot: DraftPick[];
 }
 
@@ -179,11 +176,10 @@ export interface DraftApi {
   /**
    * Screen sync: reconcile the ORDERED list of names read off the room's pick
    * history with the picks we know (lib/draft/sequence.ts). New names append
-   * or insert in order; my own picks are never filled — they come back in
-   * `held` with a placeholder holding their spot.
+   * or insert in order — mine included: I draft on the site, the app records.
    */
-  applySequence: (playerIds: string[], ignored?: Set<string>) => SequenceOutcome;
-  /** Fill the unknown placeholder at a pick (mine, from the screen-sync hold list). */
+  applySequence: (playerIds: string[]) => SequenceOutcome;
+  /** Fill the unknown placeholder at a pick, if that pick is still unknown. */
   fillAt: (pickNo: number, player: BoardPlayer) => boolean;
   /** The most recent of my picks that is still an unknown placeholder, if any. */
   myOpenPick: number | null;
@@ -223,6 +219,17 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const restoredRef = useRef(false);
   /** Merged pick count as of the last render, for setCurrentPick. */
   const currentPickRef = useRef(1);
+  /**
+   * The authoritative manual pick list. Every mutation computes from this and
+   * commits synchronously, so screen sync (several writes a second) and a
+   * click in the app can never clobber each other by reading a stale render.
+   */
+  const manualRef = useRef<DraftPick[]>([]);
+  /** The merged list as of the last render (API picks occupy its front). */
+  const picksRef = useRef<DraftPick[]>([]);
+  /** Room geometry for pick-ownership math. */
+  const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[], order: "snake" as DraftOrder });
+  const boardRef = useRef<Map<string, BoardPlayer>>(new Map());
 
   // History-fitted drift prior, if the ETL produced one for THIS league.
   useEffect(() => {
@@ -251,6 +258,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       if (raw) {
         const saved: PersistedPicks = JSON.parse(raw);
         if (saved.draftKey === draftKeyOf(config)) {
+          manualRef.current = saved.manualPicks;
           // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time crash recovery
           setManualPicks(saved.manualPicks);
         }
@@ -368,10 +376,9 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   useEffect(() => {
     currentPickRef.current = currentPick;
     picksRef.current = picks;
-    manualRef.current = manualPicks;
     roomRef.current = { teams, rounds, mySlot, tradedPicks, order };
     boardRef.current = boardIndexes.byId;
-  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks, boardIndexes, order]);
+  }, [currentPick, picks, teams, rounds, mySlot, tradedPicks, boardIndexes, order]);
   const round = slotOnClock(Math.min(currentPick, teams * rounds), teams, order).round;
   const allMyPicks = useMemo(
     () => picksForSlot(mySlot, teams, rounds, tradedPicks, order),
@@ -414,164 +421,64 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     [picks, boardIndexes, driftPrior]
   );
 
+  // --- manual picks: one authoritative copy, committed synchronously ---------
+  const commit = useCallback((next: DraftPick[]) => {
+    manualRef.current = next;
+    setManualPicks(next);
+  }, []);
+
   const markDrafted = useCallback(
     (player: BoardPlayer) => {
-      setManualPicks((prev) => {
-        if (prev.some((p) => p.playerId === player.id)) return prev;
-        const pickNo = 0; // recomputed at merge time
-        return [
-          ...prev,
-          {
-            playerId: player.id,
-            playerName: player.name,
-            pos: player.pos,
-            pickNo,
-            round: 0,
-            draftSlot: 0,
-            isKeeper: false,
-            byMe: false,
-          },
-        ];
-      });
+      const cur = manualRef.current;
+      if (cur.some((p) => p.playerId === player.id)) return;
+      commit([...cur, manualPickOf(player)]);
     },
-    []
+    [commit]
   );
 
-  const markUnknown = useCallback((count = 1) => {
-    if (count <= 0) return;
-    setManualPicks((prev) => [...prev, ...Array.from({ length: count }, () => ({ ...UNKNOWN_PICK }))]);
-  }, []);
+  const markMany = useCallback(
+    (players: BoardPlayer[]) => {
+      const cur = manualRef.current;
+      const have = new Set(cur.map((p) => p.playerId));
+      const additions = players.filter((p) => !have.has(p.id)).map(manualPickOf);
+      if (additions.length) commit([...cur, ...additions]);
+    },
+    [commit]
+  );
 
-  // The merged list as of the last render, for the import to reason about
-  // pick numbers (API picks occupy the front of it).
-  const picksRef = useRef<DraftPick[]>([]);
-  const manualRef = useRef<DraftPick[]>([]);
-  /** Room geometry for the import's pick-ownership math. */
-  const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[], order: "snake" as DraftOrder });
-  const boardRef = useRef<Map<string, BoardPlayer>>(new Map());
-  const applyImport = useCallback((items: ImportItem[]): ImportOutcome => {
-    const snapshot = manualRef.current;
-    const merged = picksRef.current;
-    const apiCount = merged.filter((p) => p.manualIndex == null).length;
-    const next = [...snapshot];
-    const have = new Set<string>();
-    for (const p of merged) if (p.playerId) have.add(p.playerId);
-    let added = 0, filled = 0, padded = 0, skipped = 0;
-    const mergedLength = () => apiCount + next.length;
-    for (const item of items) {
-      if (have.has(item.player.id)) {
-        skipped++;
-        continue;
-      }
-      const n = item.pickNo;
-      if (n != null && n <= mergedLength()) {
-        const manualIdx = n - 1 - apiCount;
-        if (manualIdx >= 0 && next[manualIdx]?.playerId === "") {
-          next[manualIdx] = manualPickOf(item.player);
-          have.add(item.player.id);
-          filled++;
-          continue;
-        }
-        // That pick belongs to someone we already know — append instead of clobbering.
-      } else if (n != null && n > mergedLength() + 1) {
-        const gap = n - mergedLength() - 1;
-        for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
-        padded += gap;
-      }
-      next.push(manualPickOf(item.player));
-      have.add(item.player.id);
-      added++;
-    }
-    if (added + filled + padded > 0) setManualPicks(next);
-    return { added, filled, padded, skipped, snapshot };
-  }, []);
+  const markUnknown = useCallback(
+    (count = 1) => {
+      if (count <= 0) return;
+      commit([...manualRef.current, ...Array.from({ length: count }, () => ({ ...UNKNOWN_PICK }))]);
+    },
+    [commit]
+  );
 
-  const applySequence = useCallback((playerIds: string[], ignored?: Set<string>): SequenceOutcome => {
-    const snapshot = manualRef.current;
-    const merged = picksRef.current;
-    const room = roomRef.current;
-    const byId = boardRef.current;
-    const apiCount = merged.filter((p) => p.manualIndex == null).length;
-    const known: (string | null)[] = merged.map((p) => (p.playerId ? p.playerId : null));
-    const result = reconcileSequence(known, playerIds, {
-      isMine: (i) => pickOwner(i + 1, room.teams, room.tradedPicks, room.order) === room.mySlot,
-      frozen: apiCount,
-      ignored,
-    });
-    // Rebuild the manual list from the reconciled sequence, keeping the
-    // existing entry for any id that was already there.
-    const existing = new Map<string, DraftPick>();
-    for (const m of snapshot) if (m.playerId) existing.set(m.playerId, m);
-    const nextManual: DraftPick[] = result.next.slice(apiCount).map((id) => {
-      if (!id) return { ...UNKNOWN_PICK };
-      const kept = existing.get(id);
-      if (kept) return kept;
-      const player = byId.get(id);
-      return player ? manualPickOf(player) : { ...UNKNOWN_PICK };
-    });
-    const changed = result.inserted.length + result.filled.length > 0 || nextManual.length !== snapshot.length;
-    if (changed) setManualPicks(nextManual);
-    const held: HeldPick[] = result.held
-      .map((h) => ({ player: byId.get(h.id), pickNo: h.pickIndex + 1 }))
-      .filter((h): h is HeldPick => h.player != null);
-    return { inserted: result.inserted.length, filled: result.filled.length, shifted: result.shifted, held, snapshot };
-  }, []);
-
-  const fillAt = useCallback((pickNo: number, player: BoardPlayer): boolean => {
-    const merged = picksRef.current;
-    const apiCount = merged.filter((p) => p.manualIndex == null).length;
-    const idx = pickNo - 1 - apiCount;
-    const cur = manualRef.current;
-    if (idx < 0 || idx >= cur.length || cur[idx].playerId !== "") return false;
-    if (cur.some((p) => p.playerId === player.id)) return false;
-    const next = [...cur];
-    next[idx] = manualPickOf(player);
-    setManualPicks(next);
-    return true;
-  }, []);
-
-  const restoreManual = useCallback((snapshot: DraftPick[]) => {
-    setManualPicks(snapshot);
-  }, []);
-
-  const fillUnknown = useCallback((index: number, player: BoardPlayer) => {
-    setManualPicks((prev) => {
-      const target = prev[index];
-      if (!target || target.playerId !== "") return prev;
-      if (prev.some((p) => p.playerId === player.id)) return prev;
-      const next = [...prev];
+  const fillUnknown = useCallback(
+    (index: number, player: BoardPlayer) => {
+      const cur = manualRef.current;
+      const target = cur[index];
+      if (!target || target.playerId !== "") return;
+      if (cur.some((p) => p.playerId === player.id)) return;
+      const next = [...cur];
       next[index] = { ...target, playerId: player.id, playerName: player.name, pos: player.pos };
-      return next;
-    });
-  }, []);
-
-  const markMany = useCallback((players: BoardPlayer[]) => {
-    setManualPicks((prev) => {
-      const have = new Set(prev.map((p) => p.playerId));
-      const additions = players
-        .filter((p) => !have.has(p.id))
-        .map((player) => ({
-          playerId: player.id,
-          playerName: player.name,
-          pos: player.pos,
-          pickNo: 0, // recomputed at merge time
-          round: 0,
-          draftSlot: 0,
-          isKeeper: false,
-          byMe: false,
-        }));
-      return [...prev, ...additions];
-    });
-  }, []);
+      commit(next);
+    },
+    [commit]
+  );
 
   const undo = useCallback(() => {
-    setManualPicks((prev) => prev.slice(0, -1));
-  }, []);
+    commit(manualRef.current.slice(0, -1));
+  }, [commit]);
 
-  const undoMany = useCallback((n: number) => {
-    if (n <= 0) return;
-    setManualPicks((prev) => prev.slice(0, Math.max(0, prev.length - n)));
-  }, []);
+  const undoMany = useCallback(
+    (n: number) => {
+      if (n <= 0) return;
+      const cur = manualRef.current;
+      commit(cur.slice(0, Math.max(0, cur.length - n)));
+    },
+    [commit]
+  );
 
   // Resync needs the merged pick count, which lives in `picks` above — so
   // it reads through a ref set on each render.
@@ -584,12 +491,13 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       }
       if (delta < 0) {
         const remove = -delta;
-        setManualPicks((prev) => prev.slice(0, Math.max(0, prev.length - remove)));
+        const cur = manualRef.current;
+        commit(cur.slice(0, Math.max(0, cur.length - remove)));
         return remove;
       }
       return 0;
     },
-    [markUnknown]
+    [markUnknown, commit]
   );
 
   const isManuallyMarked = useCallback(
@@ -597,18 +505,117 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     [manualPicks]
   );
 
-  const unmark = useCallback((playerId: string) => {
-    if (!playerId) return; // unknown placeholders are removed by index
-    setManualPicks((prev) => prev.filter((p) => p.playerId !== playerId));
-  }, []);
+  const unmark = useCallback(
+    (playerId: string) => {
+      if (!playerId) return; // unknown placeholders are removed by index
+      commit(manualRef.current.filter((p) => p.playerId !== playerId));
+    },
+    [commit]
+  );
 
-  const removeManualAt = useCallback((index: number) => {
-    setManualPicks((prev) => (index >= 0 && index < prev.length ? prev.filter((_, i) => i !== index) : prev));
-  }, []);
+  const removeManualAt = useCallback(
+    (index: number) => {
+      const cur = manualRef.current;
+      if (index >= 0 && index < cur.length) commit(cur.filter((_, i) => i !== index));
+    },
+    [commit]
+  );
 
   const reset = useCallback(() => {
-    setManualPicks([]);
-  }, []);
+    commit([]);
+  }, [commit]);
+
+  const applyImport = useCallback(
+    (items: ImportItem[]): ImportOutcome => {
+      const snapshot = manualRef.current;
+      const merged = picksRef.current;
+      const apiCount = merged.filter((p) => p.manualIndex == null).length;
+      const next = [...snapshot];
+      const have = new Set<string>();
+      for (const p of merged) if (p.playerId) have.add(p.playerId);
+      for (const p of snapshot) if (p.playerId) have.add(p.playerId);
+      let added = 0, filled = 0, padded = 0, skipped = 0;
+      const mergedLength = () => apiCount + next.length;
+      for (const item of items) {
+        if (have.has(item.player.id)) {
+          skipped++;
+          continue;
+        }
+        const n = item.pickNo;
+        if (n != null && n <= mergedLength()) {
+          const manualIdx = n - 1 - apiCount;
+          if (manualIdx >= 0 && next[manualIdx]?.playerId === "") {
+            next[manualIdx] = manualPickOf(item.player);
+            have.add(item.player.id);
+            filled++;
+            continue;
+          }
+          // That pick belongs to someone we already know — append instead of clobbering.
+        } else if (n != null && n > mergedLength() + 1) {
+          const gap = n - mergedLength() - 1;
+          for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
+          padded += gap;
+        }
+        next.push(manualPickOf(item.player));
+        have.add(item.player.id);
+        added++;
+      }
+      if (added + filled + padded > 0) commit(next);
+      return { added, filled, padded, skipped, snapshot };
+    },
+    [commit]
+  );
+
+  const applySequence = useCallback(
+    (playerIds: string[]): SequenceOutcome => {
+      const snapshot = manualRef.current;
+      const apiIds = picksRef.current.filter((p) => p.manualIndex == null).map((p) => (p.playerId ? p.playerId : null));
+      const apiCount = apiIds.length;
+      const known: (string | null)[] = [...apiIds, ...snapshot.map((m) => (m.playerId ? m.playerId : null))];
+      const byId = boardRef.current;
+      // My own picks are placed like anyone else's: I draft on the site, the app records.
+      const result = reconcileSequence(known, playerIds, { isMine: () => false, frozen: apiCount });
+      const existing = new Map<string, DraftPick>();
+      for (const m of snapshot) if (m.playerId) existing.set(m.playerId, m);
+      const nextManual: DraftPick[] = result.next.slice(apiCount).map((id) => {
+        if (!id) return { ...UNKNOWN_PICK };
+        const kept = existing.get(id);
+        if (kept) return kept;
+        const player = byId.get(id);
+        return player ? manualPickOf(player) : { ...UNKNOWN_PICK };
+      });
+      const placedRaw = [...result.inserted, ...result.filled];
+      if (placedRaw.length > 0 || nextManual.length !== snapshot.length) commit(nextManual);
+      const placed: PlacedPick[] = placedRaw
+        .map((p) => ({ player: byId.get(p.id), pickNo: p.pickIndex + 1 }))
+        .filter((p): p is PlacedPick => p.player != null)
+        .sort((a, b) => a.pickNo - b.pickNo);
+      return { placed, shifted: result.shifted, snapshot };
+    },
+    [commit]
+  );
+
+  const fillAt = useCallback(
+    (pickNo: number, player: BoardPlayer): boolean => {
+      const apiCount = picksRef.current.filter((p) => p.manualIndex == null).length;
+      const idx = pickNo - 1 - apiCount;
+      const cur = manualRef.current;
+      if (idx < 0 || idx >= cur.length || cur[idx].playerId !== "") return false;
+      if (cur.some((p) => p.playerId === player.id)) return false;
+      const next = [...cur];
+      next[idx] = manualPickOf(player);
+      commit(next);
+      return true;
+    },
+    [commit]
+  );
+
+  const restoreManual = useCallback(
+    (snapshot: DraftPick[]) => {
+      commit(snapshot);
+    },
+    [commit]
+  );
 
   // My most recent pick that screen sync left as a placeholder for me.
   const myOpenPick = useMemo(() => {
