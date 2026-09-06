@@ -29,7 +29,7 @@ import PasteImport from "./PasteImport";
 import Shortlist from "./Shortlist";
 import ScreenSync from "./ScreenSync";
 import { parsePastedPicks } from "../lib/draft/pasteImport";
-import type { ImportItem, ImportOptions, ImportOutcome } from "../lib/client/useDraft";
+import type { ImportItem } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -374,6 +374,14 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
 
   function mark(player: BoardPlayer, mine = false, fromShortlist = false) {
     if (!mine && !fromShortlist) scoreAgainstShortlist(player);
+    // Screen sync may already have moved the room past my pick, leaving my
+    // slot as a placeholder: my pick fills THAT slot, never a later one.
+    if (mine && draft.myOpenPick != null && draft.fillAt(draft.myOpenPick, player)) {
+      setSnipe(null);
+      setBurst({ key: Date.now(), color: POS_COLOR[player.pos] });
+      showToast(`Drafted ${player.name} at pick ${draft.myOpenPick}.`, true);
+      return;
+    }
     draft.markDrafted(player);
     if (mine) {
       setSnipe(null);
@@ -388,19 +396,36 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     toastTimer.current = setTimeout(() => setToast(null), undoable ? (onUndo ? 8000 : 4500) : 2200);
   }
 
-  /** Commit a batch of picks (paste / screen sync) with one undo for the lot. */
-  function commitImport(items: ImportItem[], source: string, opts: ImportOptions = {}): ImportOutcome | undefined {
-    if (items.length === 0) return undefined;
-    const out = draft.applyImport(items, opts);
+  /** Commit a batch of picks (paste) with one undo for the lot. */
+  function commitImport(items: ImportItem[], source: string) {
+    if (items.length === 0) return;
+    const out = draft.applyImport(items);
     const changed = out.added + out.filled + out.padded;
-    if (changed === 0 && (out.held.length > 0 || out.skipped === items.length)) return out; // nothing to announce
     const parts = [
       out.added + out.filled > 0 ? `${out.added + out.filled} marked` : null,
       out.padded > 0 ? `${out.padded} unknown` : null,
       out.skipped > 0 ? `${out.skipped} already gone` : null,
-      out.held.length > 0 ? `${out.held.length} waiting on your pick` : null,
     ].filter(Boolean);
     showToast(`${source}: ${parts.join(" · ") || "nothing new"}.`, changed > 0, () => draft.restoreManual(out.snapshot));
+  }
+
+  /** One ordered read of the room's pick history from screen sync. */
+  function applyScreenFrame(ids: string[], ignored: Set<string>) {
+    const out = draft.applySequence(ids, ignored);
+    const placed = out.inserted + out.filled;
+    if (placed > 0) {
+      const byIdNow = byId;
+      for (const id of ids) {
+        const p = byIdNow.get(id);
+        if (p && !draft.draftedIds.has(id) && !out.held.some((h) => h.player.id === id)) scoreAgainstShortlist(p);
+      }
+      const parts = [
+        `${placed} pick${placed === 1 ? "" : "s"}`,
+        out.shifted > 0 ? `${out.shifted} re-ordered after a missed pick` : null,
+        out.held.length > 0 ? `${out.held.length} waiting on you` : null,
+      ].filter(Boolean);
+      showToast(`Screen sync: ${parts.join(" · ")}.`, true, () => draft.restoreManual(out.snapshot));
+    }
     return out;
   }
 
@@ -1203,17 +1228,14 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
         <ScreenSync
           players={gradedBoard.players}
           draftedIds={draft.draftedIds}
-          teams={config.teams}
-          myTurn={myTurn}
-          onImport={(items, source) => {
-            const out = commitImport(items, source, { holdMine: true });
-            if (out) {
-              const heldIds = new Set(out.held.map((h) => h.item.player.id));
-              for (const it of items) if (!heldIds.has(it.player.id)) scoreAgainstShortlist(it.player);
-            }
-            return out;
+          onFrame={applyScreenFrame}
+          onDraftMine={(p, pickNo) => {
+            if (draft.fillAt(pickNo, p)) {
+              setSnipe(null);
+              setBurst({ key: Date.now(), color: POS_COLOR[p.pos] });
+              showToast(`Drafted ${p.name} at pick ${pickNo}.`, true);
+            } else mark(p, true);
           }}
-          onDraftMine={(p) => mark(p, true)}
           onClose={() => setScreenSync(false)}
         />
       )}

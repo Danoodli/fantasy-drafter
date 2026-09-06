@@ -114,39 +114,50 @@ export function grabFrame(video: HTMLVideoElement, region: Region, scale = 2): H
 
 type TesseractModule = typeof import("tesseract.js");
 type TesseractWorker = Awaited<ReturnType<TesseractModule["createWorker"]>>;
+type TesseractScheduler = ReturnType<TesseractModule["createScheduler"]>;
 
-let workerPromise: Promise<TesseractWorker> | null = null;
+/** Parallel OCR workers: reads overlap, so the room is sampled ~2× a second. */
+export const OCR_WORKERS = 2;
 
-/** One shared worker, created on first use (lazy import keeps it out of the main bundle). */
-export function getOcrWorker(onProgress?: (status: string, progress: number) => void): Promise<TesseractWorker> {
-  if (!workerPromise) {
-    workerPromise = (async () => {
+let schedulerPromise: Promise<TesseractScheduler> | null = null;
+
+async function makeWorker(T: TesseractModule, onProgress?: (status: string, progress: number) => void): Promise<TesseractWorker> {
+  const worker = await T.createWorker("eng", 1, {
+    logger: (m) => onProgress?.(m.status, m.progress),
+  });
+  await worker.setParameters({
+    // Names, punctuation, digits — nothing else. Keeps "Ja'Marr" and "D/ST" readable.
+    tessedit_char_whitelist:
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'’.-/#()&, ",
+    preserve_interword_spaces: "1",
+    user_defined_dpi: "144",
+  });
+  return worker;
+}
+
+/** One shared scheduler with OCR_WORKERS workers, created on first use (lazy import keeps it out of the main bundle). */
+export function getOcrScheduler(onProgress?: (status: string, progress: number) => void): Promise<TesseractScheduler> {
+  if (!schedulerPromise) {
+    schedulerPromise = (async () => {
       const T = await import("tesseract.js");
-      const worker = await T.createWorker("eng", 1, {
-        logger: (m) => onProgress?.(m.status, m.progress),
-      });
-      await worker.setParameters({
-        // Names, punctuation, digits — nothing else. Keeps "Ja'Marr" and "D/ST" readable.
-        tessedit_char_whitelist:
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'’.-/#()&, ",
-        preserve_interword_spaces: "1",
-        user_defined_dpi: "144",
-      });
-      return worker;
+      const scheduler = T.createScheduler();
+      const workers = await Promise.all(Array.from({ length: OCR_WORKERS }, (_, i) => makeWorker(T, i === 0 ? onProgress : undefined)));
+      for (const w of workers) scheduler.addWorker(w);
+      return scheduler;
     })().catch((err) => {
-      workerPromise = null;
+      schedulerPromise = null;
       throw err;
     });
   }
-  return workerPromise;
+  return schedulerPromise;
 }
 
-export async function terminateOcrWorker(): Promise<void> {
-  const p = workerPromise;
-  workerPromise = null;
+export async function terminateOcr(): Promise<void> {
+  const p = schedulerPromise;
+  schedulerPromise = null;
   if (p) {
     try {
-      (await p).terminate();
+      await (await p).terminate();
     } catch {
       // already gone
     }
@@ -163,8 +174,8 @@ interface TessBlock {
 }
 
 /** OCR a canvas into lines with vertical order preserved. */
-export async function recognizeLines(worker: TesseractWorker, canvas: HTMLCanvasElement): Promise<OcrLine[]> {
-  const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+export async function recognizeLines(scheduler: TesseractScheduler, canvas: HTMLCanvasElement): Promise<OcrLine[]> {
+  const { data } = await scheduler.addJob("recognize", canvas, {}, { text: true, blocks: true });
   const out: OcrLine[] = [];
   const blocks = (data as unknown as { blocks?: TessBlock[] | null }).blocks;
   if (blocks && blocks.length) {

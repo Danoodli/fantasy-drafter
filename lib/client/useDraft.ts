@@ -18,6 +18,7 @@ import type {
 import { fetchDraftInfo, fetchPicks, type SleeperDraftInfo } from "../draft/sleeper";
 import { picksForSlot, pickOwner, slotOnClock } from "../draft/snake";
 import { computeDrift, type DriftPrior } from "../engine/drift";
+import { reconcileSequence } from "../draft/sequence";
 import { mergeName } from "../etl/names";
 
 const STORAGE_KEY = "draft-cockpit-picks-v1";
@@ -87,28 +88,29 @@ export interface ImportItem {
   pickNo: number | null;
 }
 
-export interface HeldItem {
-  item: ImportItem;
-  /** "mine": it would land on my own pick. "afterMine": the room can't pass my pick until I make it. */
-  reason: "mine" | "afterMine";
-}
-
 export interface ImportOutcome {
   added: number;
   filled: number;
   padded: number;
   skipped: number;
-  /** Items not applied because of `holdMine` (screen sync leaves my picks to me). */
-  held: HeldItem[];
   snapshot: DraftPick[];
 }
 
-export interface ImportOptions {
-  /**
-   * Never fill my own pick and never advance the room past it: anything that
-   * would is returned in `held` for the user to draft (or ignore) themselves.
-   */
-  holdMine?: boolean;
+/** A screen read that landed on one of MY picks — left as a placeholder for me. */
+export interface HeldPick {
+  player: BoardPlayer;
+  pickNo: number;
+}
+
+export interface SequenceOutcome {
+  /** New picks placed (appended or inserted where a pick was missed). */
+  inserted: number;
+  /** Unknown placeholders filled in. */
+  filled: number;
+  /** Picks that moved down because a missed pick was inserted before them. */
+  shifted: number;
+  held: HeldPick[];
+  snapshot: DraftPick[];
 }
 
 function manualPickOf(player: BoardPlayer): DraftPick {
@@ -167,12 +169,23 @@ export interface DraftApi {
   /** Replace the unknown placeholder at a manual index with the real player. */
   fillUnknown: (index: number, player: BoardPlayer) => void;
   /**
-   * Batch import (paste / screen sync). Items with a pick number land at that
-   * pick: gaps are padded with unknowns, an unknown already sitting there is
-   * filled in. Items without one append in order. Returns what happened plus
-   * a snapshot that `restoreManual` can roll back to.
+   * Batch import (paste). Items with a pick number land at that pick: gaps
+   * are padded with unknowns, an unknown already sitting there is filled in.
+   * Items without one append in order. Returns what happened plus a snapshot
+   * that `restoreManual` can roll back to.
    */
-  applyImport: (items: ImportItem[], opts?: ImportOptions) => ImportOutcome;
+  applyImport: (items: ImportItem[]) => ImportOutcome;
+  /**
+   * Screen sync: reconcile the ORDERED list of names read off the room's pick
+   * history with the picks we know (lib/draft/sequence.ts). New names append
+   * or insert in order; my own picks are never filled — they come back in
+   * `held` with a placeholder holding their spot.
+   */
+  applySequence: (playerIds: string[], ignored?: Set<string>) => SequenceOutcome;
+  /** Fill the unknown placeholder at a pick (mine, from the screen-sync hold list). */
+  fillAt: (pickNo: number, player: BoardPlayer) => boolean;
+  /** The most recent of my picks that is still an unknown placeholder, if any. */
+  myOpenPick: number | null;
   /** Roll the manual pick list back to a snapshot (undo a whole import). */
   restoreManual: (snapshot: DraftPick[]) => void;
   undo: () => void;
@@ -355,7 +368,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     picksRef.current = picks;
     manualRef.current = manualPicks;
     roomRef.current = { teams, rounds, mySlot, tradedPicks };
-  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks]);
+    boardRef.current = boardIndexes.byId;
+  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks, boardIndexes]);
   const round = slotOnClock(Math.min(currentPick, teams * rounds), teams).round;
   const allMyPicks = useMemo(
     () => picksForSlot(mySlot, teams, rounds, tradedPicks),
@@ -432,25 +446,16 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const manualRef = useRef<DraftPick[]>([]);
   /** Room geometry for the import's pick-ownership math. */
   const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[] });
-  const applyImport = useCallback((items: ImportItem[], opts: ImportOptions = {}): ImportOutcome => {
+  const boardRef = useRef<Map<string, BoardPlayer>>(new Map());
+  const applyImport = useCallback((items: ImportItem[]): ImportOutcome => {
     const snapshot = manualRef.current;
     const merged = picksRef.current;
-    const room = roomRef.current;
     const apiCount = merged.filter((p) => p.manualIndex == null).length;
     const next = [...snapshot];
     const have = new Set<string>();
     for (const p of merged) if (p.playerId) have.add(p.playerId);
     let added = 0, filled = 0, padded = 0, skipped = 0;
-    const held: HeldItem[] = [];
     const mergedLength = () => apiCount + next.length;
-    /** My next unfilled pick, or Infinity when I have none left. */
-    const myNext = () => {
-      const total = room.teams * room.rounds;
-      for (let n = mergedLength() + 1; n <= total; n++) {
-        if (pickOwner(n, room.teams, room.tradedPicks) === room.mySlot) return n;
-      }
-      return Infinity;
-    };
     for (const item of items) {
       if (have.has(item.player.id)) {
         skipped++;
@@ -466,20 +471,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
           continue;
         }
         // That pick belongs to someone we already know — append instead of clobbering.
-      }
-      if (opts.holdMine) {
-        const mine = myNext();
-        const landsAt = n != null && n > mergedLength() ? n : mergedLength() + 1;
-        if (landsAt === mine) {
-          held.push({ item, reason: "mine" });
-          continue;
-        }
-        if (landsAt > mine) {
-          held.push({ item, reason: "afterMine" });
-          continue;
-        }
-      }
-      if (n != null && n > mergedLength() + 1) {
+      } else if (n != null && n > mergedLength() + 1) {
         const gap = n - mergedLength() - 1;
         for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
         padded += gap;
@@ -489,7 +481,51 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       added++;
     }
     if (added + filled + padded > 0) setManualPicks(next);
-    return { added, filled, padded, skipped, held, snapshot };
+    return { added, filled, padded, skipped, snapshot };
+  }, []);
+
+  const applySequence = useCallback((playerIds: string[], ignored?: Set<string>): SequenceOutcome => {
+    const snapshot = manualRef.current;
+    const merged = picksRef.current;
+    const room = roomRef.current;
+    const byId = boardRef.current;
+    const apiCount = merged.filter((p) => p.manualIndex == null).length;
+    const known: (string | null)[] = merged.map((p) => (p.playerId ? p.playerId : null));
+    const result = reconcileSequence(known, playerIds, {
+      isMine: (i) => pickOwner(i + 1, room.teams, room.tradedPicks) === room.mySlot,
+      frozen: apiCount,
+      ignored,
+    });
+    // Rebuild the manual list from the reconciled sequence, keeping the
+    // existing entry for any id that was already there.
+    const existing = new Map<string, DraftPick>();
+    for (const m of snapshot) if (m.playerId) existing.set(m.playerId, m);
+    const nextManual: DraftPick[] = result.next.slice(apiCount).map((id) => {
+      if (!id) return { ...UNKNOWN_PICK };
+      const kept = existing.get(id);
+      if (kept) return kept;
+      const player = byId.get(id);
+      return player ? manualPickOf(player) : { ...UNKNOWN_PICK };
+    });
+    const changed = result.inserted.length + result.filled.length > 0 || nextManual.length !== snapshot.length;
+    if (changed) setManualPicks(nextManual);
+    const held: HeldPick[] = result.held
+      .map((h) => ({ player: byId.get(h.id), pickNo: h.pickIndex + 1 }))
+      .filter((h): h is HeldPick => h.player != null);
+    return { inserted: result.inserted.length, filled: result.filled.length, shifted: result.shifted, held, snapshot };
+  }, []);
+
+  const fillAt = useCallback((pickNo: number, player: BoardPlayer): boolean => {
+    const merged = picksRef.current;
+    const apiCount = merged.filter((p) => p.manualIndex == null).length;
+    const idx = pickNo - 1 - apiCount;
+    const cur = manualRef.current;
+    if (idx < 0 || idx >= cur.length || cur[idx].playerId !== "") return false;
+    if (cur.some((p) => p.playerId === player.id)) return false;
+    const next = [...cur];
+    next[idx] = manualPickOf(player);
+    setManualPicks(next);
+    return true;
   }, []);
 
   const restoreManual = useCallback((snapshot: DraftPick[]) => {
@@ -572,6 +608,16 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     setManualPicks([]);
   }, []);
 
+  // My most recent pick that screen sync left as a placeholder for me.
+  const myOpenPick = useMemo(() => {
+    for (let i = picks.length - 1; i >= 0; i--) {
+      const p = picks[i];
+      if (p.playerId) continue;
+      if (pickOwner(p.pickNo, teams, tradedPicks) === mySlot) return p.pickNo;
+    }
+    return null;
+  }, [picks, teams, tradedPicks, mySlot]);
+
   return {
     picks,
     currentPick,
@@ -593,6 +639,9 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     setCurrentPick,
     fillUnknown,
     applyImport,
+    applySequence,
+    fillAt,
+    myOpenPick,
     restoreManual,
     undo,
     undoMany,

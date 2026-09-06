@@ -1,22 +1,30 @@
 "use client";
 
-// Screen sync: share the draft-room tab, drag a box around its drafted-players
-// panel, and the cockpit reads new picks off the screen every few seconds.
-// Works for any site — ESPN, Yahoo, Underdog, DraftKings, a league-mate's
-// screen share — because it never talks to the site at all.
+// Screen sync: share the draft-room tab, drag a box around its pick history,
+// and the cockpit reads the room off the screen continuously. Works for any
+// site — ESPN, Yahoo, Underdog, DraftKings, a league-mate's screen share —
+// because it never talks to the site at all.
 //
-// Flow: Share → (optional) drag region → Watch. Two consecutive reads must
-// agree before a name is marked; every mark shows in the toast with undo.
+// What it trusts is ORDER. Each read is the panel's names top to bottom (a
+// toggle flips panels that list newest first); that ordered list is
+// reconciled with the picks we already know (lib/draft/sequence.ts): new
+// names append in order, a pick we missed is inserted where it belongs, and
+// a name at MY slot is never placed — it waits in the panel for me to Draft
+// or Ignore, with a placeholder holding the spot so everyone after me still
+// lands on the right team. Two consecutive reads must agree before a name
+// counts. Pick numbers on screen are never read: OCR junk in front of a name
+// is not a pick number.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
-import type { HeldItem, ImportItem, ImportOutcome } from "../lib/client/useDraft";
+import type { HeldPick, SequenceOutcome } from "../lib/client/useDraft";
 import { FrameAgreement, matchOcrLines, type OcrLine } from "../lib/draft/ocrMatch";
 import { POS_COLOR } from "../lib/client/pos";
 import {
   FULL_FRAME,
+  OCR_WORKERS,
   captureSupported,
-  getOcrWorker,
+  getOcrScheduler,
   grabFrame,
   loadRegion,
   recognizeLines,
@@ -29,53 +37,66 @@ import {
 interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
-  teams: number;
-  /** True while the room waits on my pick — the panel explains why reads are queued. */
-  myTurn: boolean;
-  /** Apply other teams' picks. Returns what was held back because it would touch my pick. */
-  onImport: (items: ImportItem[], source: string) => ImportOutcome | void;
-  /** The user confirms a held name as their own pick. */
-  onDraftMine: (player: BoardPlayer) => void;
+  /** Apply one ordered read of the panel. Returns what was placed and what waits on me. */
+  onFrame: (playerIds: string[], ignored: Set<string>) => SequenceOutcome | void;
+  /** The user confirms a held name as their own pick at that pick number. */
+  onDraftMine: (player: BoardPlayer, pickNo: number) => void;
   onClose: () => void;
 }
 
 type Phase = "idle" | "sharing" | "watching" | "paused";
 
-const INTERVAL_MS = 2500;
+/** Minimum gap between read starts; with OCR_WORKERS in flight the room is sampled several times a second. */
+const READ_GAP_MS = 350;
 const PREVIEW_W = 520;
+const NEWEST_FIRST_KEY = "draft-cockpit-screen-newest-first-v1";
 
-export default function ScreenSync({ players, draftedIds, teams, myTurn, onImport, onDraftMine, onClose }: Props) {
+function loadNewestFirst(): boolean {
+  try {
+    return localStorage.getItem(NEWEST_FIRST_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export default function ScreenSync({ players, draftedIds, onFrame, onDraftMine, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const agreementRef = useRef<FrameAgreement | null>(null);
-  const busyRef = useRef(false);
+  const inFlightRef = useRef(0);
+  const frameSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
+  const ignoredRef = useRef(new Set<string>());
+  /** Render-side mirror of ignoredRef (the loop reads the ref; the list reads this). */
+  const [ignoredIds, setIgnoredIds] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("idle");
   const [region, setRegion] = useState<Region>(() => loadRegion() ?? FULL_FRAME);
-  const [newestFirst, setNewestFirst] = useState(true);
+  const [newestFirst, setNewestFirstState] = useState<boolean>(loadNewestFirst);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [lastLines, setLastLines] = useState<OcrLine[]>([]);
   const [lastNames, setLastNames] = useState<string[]>([]);
   const [reads, setReads] = useState(0);
   const [marked, setMarked] = useState(0);
+  const [held, setHeld] = useState<HeldPick[]>([]);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [showLarge, setShowLarge] = useState(true);
-  /** Reads held back because they would touch MY pick — mine to confirm or ignore. */
-  const [pending, setPending] = useState<HeldItem[]>([]);
-  const pendingRef = useRef<HeldItem[]>([]);
-  const ignoredRef = useRef(new Set<string>());
+
+  const setNewestFirst = (v: boolean) => {
+    setNewestFirstState(v);
+    try {
+      localStorage.setItem(NEWEST_FIRST_KEY, v ? "1" : "0");
+    } catch {
+      // fine
+    }
+  };
 
   // Latest props for the async loop without re-subscribing every render.
-  const latest = useRef({ players, draftedIds, teams, region, newestFirst, onImport });
+  const latest = useRef({ players, draftedIds, region, newestFirst, onFrame });
   useEffect(() => {
-    latest.current = { players, draftedIds, teams, region, newestFirst, onImport };
-  }, [players, draftedIds, teams, region, newestFirst, onImport]);
-  useEffect(() => {
-    pendingRef.current = pending;
-  }, [pending]);
-  // Anything I drafted (or that got marked some other way) leaves the queue.
-  const visiblePending = pending.filter((h) => !draftedIds.has(h.item.player.id));
+    latest.current = { players, draftedIds, region, newestFirst, onFrame };
+  }, [players, draftedIds, region, newestFirst, onFrame]);
 
   const stopAll = useCallback(() => {
     stopCapture(streamRef.current, videoRef.current);
@@ -103,10 +124,10 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
       agreementRef.current = new FrameAgreement(latest.current.draftedIds);
       setPhase("sharing");
       setShowLarge(true);
-      setStatus("Drag a box around the drafted-players list, then Watch. Or watch the whole frame.");
+      setStatus("Drag a box around the pick history (drafted players only), then Watch.");
       // Warm the OCR engine while the user picks the region.
-      getOcrWorker((s, p) => setStatus(`Loading OCR engine… ${s} ${Math.round(p * 100)}%`)).then(
-        () => setStatus((cur) => (cur.startsWith("Loading OCR") ? "OCR engine ready. Drag a box, then Watch." : cur)),
+      getOcrScheduler((s, p) => setStatus(`Loading OCR engine… ${s} ${Math.round(p * 100)}%`)).then(
+        () => setStatus((cur) => (cur.startsWith("Loading OCR") ? "OCR engine ready. Drag a box around the pick history, then Watch." : cur)),
         (err) => setError(`OCR engine failed to load: ${(err as Error).message}`)
       );
     } catch (err) {
@@ -150,50 +171,52 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
     return () => cancelAnimationFrame(raf);
   }, [phase, region, drag]);
 
-  // The read loop.
+  // The read loop: keep OCR_WORKERS reads in flight, start a new one every
+  // READ_GAP_MS. Results are applied in capture order; a read that finishes
+  // after a newer one has been applied is dropped.
   useEffect(() => {
     if (phase !== "watching") return;
     let cancelled = false;
-    const tick = async () => {
-      if (cancelled || busyRef.current) return;
-      busyRef.current = true;
+    const read = async () => {
+      if (cancelled || inFlightRef.current >= OCR_WORKERS) return;
+      const video = videoRef.current;
+      if (!video) return;
+      const { players, draftedIds, region, newestFirst, onFrame } = latest.current;
+      const frame = grabFrame(video, region);
+      if (!frame) return;
+      const seq = ++frameSeqRef.current;
+      inFlightRef.current++;
       try {
-        const video = videoRef.current;
-        if (!video) return;
-        const { players, draftedIds, teams, region, newestFirst, onImport } = latest.current;
-        const frame = grabFrame(video, region);
-        if (!frame) return;
-        const worker = await getOcrWorker();
-        const lines = await recognizeLines(worker, frame);
-        if (cancelled) return;
-        const { matches } = matchOcrLines(lines, players, draftedIds, { teams });
-        const fresh = (agreementRef.current?.observe(matches) ?? []).filter((m) => !ignoredRef.current.has(m.player.id));
+        const scheduler = await getOcrScheduler();
+        const lines = await recognizeLines(scheduler, frame);
+        if (cancelled || seq <= appliedSeqRef.current) return;
+        appliedSeqRef.current = seq;
+        const { matches } = matchOcrLines(lines, players, draftedIds);
+        const agreement = agreementRef.current!;
+        agreement.observe(matches);
+        // Panel order → pick order. Only names seen in two consecutive reads
+        // (or already known) take part; the rest wait for the next read.
+        const ordered = newestFirst ? [...matches].reverse() : matches;
+        const ids = ordered.map((m) => m.player.id).filter((id) => agreement.isConfirmed(id) && !ignoredRef.current.has(id));
         setReads((n) => n + 1);
         setLastLines(lines);
         setLastNames(matches.map((m) => m.player.name));
         setStatus(`Read ${lines.length} lines · ${matches.length} names on screen · ${new Date().toLocaleTimeString()}`);
-        // Numbered picks land exactly; unnumbered ones follow panel order. Reads
-        // held back earlier (my pick) are retried every tick until I act.
-        const numbered = fresh.filter((m) => m.pickNo != null);
-        const rest = fresh.filter((m) => m.pickNo == null).sort((a, b) => (newestFirst ? b.y - a.y : a.y - b.y));
-        const retry = pendingRef.current.map((h) => h.item).filter((it) => !draftedIds.has(it.player.id));
-        const items: ImportItem[] = [...retry, ...[...numbered, ...rest].map((m) => ({ player: m.player, pickNo: m.pickNo }))];
-        const unique = [...new Map(items.map((it) => [it.player.id, it])).values()];
-        if (unique.length > 0) {
-          const out = onImport(unique, "Screen sync");
-          const held = out?.held ?? [];
-          setPending(held);
-          const applied = out ? out.added + out.filled : 0;
-          if (applied > 0) setMarked((n) => n + applied);
+        if (ids.length > 0) {
+          const out = onFrame(ids, ignoredRef.current);
+          if (out) {
+            setHeld(out.held);
+            if (out.inserted + out.filled > 0) setMarked((n) => n + out.inserted + out.filled);
+          }
         }
       } catch (err) {
         if (!cancelled) setError(`Read failed: ${(err as Error).message}`);
       } finally {
-        busyRef.current = false;
+        inFlightRef.current--;
       }
     };
-    tick();
-    const timer = setInterval(tick, INTERVAL_MS);
+    read();
+    const timer = setInterval(read, READ_GAP_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -233,6 +256,7 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
   }
 
   const watching = phase === "watching";
+  const visibleHeld = held.filter((h) => !draftedIds.has(h.player.id) && !ignoredIds.has(h.player.id));
 
   return (
     <div
@@ -264,8 +288,9 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
         {phase === "idle" && (
           <>
             <p className="text-sm text-ink-dim">
-              Share the tab or window your draft is in. The cockpit reads the drafted-players list off the screen every
-              few seconds and marks new names — any site, no login, nothing leaves your browser.
+              Share the tab or window your draft is in. The cockpit reads the pick history off the screen several times a
+              second and marks new picks in order — any site, no login, nothing leaves your browser. Your own picks are
+              never made for you.
             </p>
             <button onClick={share} className="btn-shimmer mt-3 w-full rounded-lg bg-rb py-2.5 font-display text-xl font-bold uppercase tracking-wide text-field">
               Share draft screen
@@ -286,7 +311,7 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
                 onMouseUp={onUp}
                 onMouseLeave={() => drag && setDrag(null)}
                 className="w-full cursor-crosshair rounded border border-line bg-field"
-                title="Drag a box around the drafted-players list"
+                title="Drag a box around the pick history"
               />
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -309,41 +334,36 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
               <button onClick={stopAll} className="rounded border border-line bg-panel px-2 py-1.5 text-xs text-ink-dim hover:text-warn">
                 stop sharing
               </button>
-              <label className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-dim" title="Only matters when the panel shows no pick numbers">
+              <label className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-dim" title="ESPN lists oldest at top, newest at bottom. Tick this if your room shows the newest pick at the top.">
                 <input type="checkbox" checked={newestFirst} onChange={(e) => setNewestFirst(e.target.checked)} />
-                newest at top
+                newest pick at top
               </label>
             </div>
-            {visiblePending.length > 0 && (
+            {visibleHeld.length > 0 && (
               <div className="mt-2 rounded border border-warn/40 bg-warn/10 p-2">
-                <p className="text-xs text-warn">
-                  {myTurn ? "Your pick — " : "Waiting on your pick — "}
-                  screen sync never fills your slot. Seen on screen:
-                </p>
+                <p className="text-xs text-warn">Your pick — screen sync never fills your slot. Seen on screen:</p>
                 <ul className="mt-1 space-y-1">
-                  {visiblePending.map(({ item, reason }) => (
-                    <li key={item.player.id} className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-mono text-[10px]" style={{ color: POS_COLOR[item.player.pos] }}>{item.player.pos}</span>
-                      <span>{item.player.name}</span>
-                      {item.pickNo != null && <span className="font-mono text-[10px] text-ink-faint">#{item.pickNo}</span>}
-                      {reason === "afterMine" && <span className="font-mono text-[10px] text-ink-faint">after your pick</span>}
+                  {visibleHeld.map(({ player, pickNo }) => (
+                    <li key={player.id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-mono text-[10px] text-ink-faint">#{pickNo}</span>
+                      <span className="font-mono text-[10px]" style={{ color: POS_COLOR[player.pos] }}>{player.pos}</span>
+                      <span>{player.name}</span>
                       <span className="ml-auto flex gap-1">
-                        {reason === "mine" && (
-                          <button
-                            onClick={() => {
-                              setPending((prev) => prev.filter((h) => h.item.player.id !== item.player.id));
-                              onDraftMine(item.player);
-                            }}
-                            className="rounded bg-rb px-2 py-0.5 text-xs font-semibold text-field"
-                            title="That's my pick — put him on my roster"
-                          >
-                            Draft
-                          </button>
-                        )}
                         <button
                           onClick={() => {
-                            ignoredRef.current.add(item.player.id);
-                            setPending((prev) => prev.filter((h) => h.item.player.id !== item.player.id));
+                            setHeld((prev) => prev.filter((h) => h.player.id !== player.id));
+                            onDraftMine(player, pickNo);
+                          }}
+                          className="rounded bg-rb px-2 py-0.5 text-xs font-semibold text-field"
+                          title="That's my pick — put him on my roster at this pick"
+                        >
+                          Draft
+                        </button>
+                        <button
+                          onClick={() => {
+                            ignoredRef.current.add(player.id);
+                            setIgnoredIds(new Set(ignoredRef.current));
+                            setHeld((prev) => prev.filter((h) => h.player.id !== player.id));
                           }}
                           className="rounded border border-line px-2 py-0.5 text-xs text-ink-dim hover:text-ink"
                           title="Misread — never mark this name from the screen"
@@ -354,9 +374,7 @@ export default function ScreenSync({ players, draftedIds, teams, myTurn, onImpor
                     </li>
                   ))}
                 </ul>
-                {visiblePending.some((h) => h.reason === "afterMine") && (
-                  <p className="mt-1 text-[11px] text-ink-faint">Names after your pick apply automatically once you&apos;ve drafted.</p>
-                )}
+                <p className="mt-1 text-[11px] text-ink-faint">The slot is held for you; everyone after you is already placed.</p>
               </div>
             )}
             <p className="mt-2 min-h-[1rem] text-xs text-ink-dim">{status}</p>

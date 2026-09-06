@@ -29,19 +29,17 @@ describe("normalizeOcr", () => {
 
 describe("matchOcrLines", () => {
   it("reads clean full names with position and team noise", () => {
-    const r = matchOcrLines(lines("1.01 Ja'Marr Chase WR CIN", "1.02 Bijan Robinson RB ATL"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("1.01 Ja'Marr Chase WR CIN", "1.02 Bijan Robinson RB ATL"), players, none);
     expect(names(r)).toEqual(["Ja'Marr Chase", "Bijan Robinson"]);
-    expect(r.matches.map((m) => m.pickNo)).toEqual([1, 2]);
-    expect(r.maxPickNo).toBe(2);
   });
 
   it("survives one-edit OCR noise in the surname and a garbled first name", () => {
-    const r = matchOcrLines(lines("Bijan Rob1nson", "JaMarr Chasse", "Jahmyr Glbbs"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("Bijan Rob1nson", "JaMarr Chasse", "Jahmyr Glbbs"), players, none);
     expect(names(r)).toEqual(["Bijan Robinson", "Ja'Marr Chase", "Jahmyr Gibbs"]);
   });
 
   it("accepts initial + surname when the surname is unique on the board", () => {
-    const r = matchOcrLines(lines("J. Gibbs"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("J. Gibbs"), players, none);
     expect(names(r)).toEqual(["Jahmyr Gibbs"]);
   });
 
@@ -56,62 +54,53 @@ describe("matchOcrLines", () => {
   const twins = [twin("Bo Rivers", "ATL"), twin("Ben Rivers", "WAS")];
 
   it("skips an initial + shared surname that two same-position players share", () => {
-    const r = matchOcrLines(lines("B. Rivers RB"), twins, none, { teams: 12 });
+    const r = matchOcrLines(lines("B. Rivers RB"), twins, none);
     expect(r.matches.length).toBe(0);
   });
 
   it("uses the team to pin a shared surname", () => {
-    const r = matchOcrLines(lines("B. Rivers RB WAS"), twins, none, { teams: 12 });
+    const r = matchOcrLines(lines("B. Rivers RB WAS"), twins, none);
     expect(names(r)).toEqual(["Ben Rivers"]);
   });
 
-  it("ignores headers, owners, and already-drafted players", () => {
+  it("ignores headers and owners; drafted players are still returned (they anchor the sequence)", () => {
     const chase = players.find((p) => p.name === "Ja'Marr Chase")!;
-    const r = matchOcrLines(lines("Round 2", "Team Dan", "Ja'Marr Chase", "Puka Nacua"), players, new Set([chase.id]), { teams: 12 });
-    expect(names(r)).toEqual(["Puka Nacua"]);
+    const r = matchOcrLines(lines("Round 2", "Team Dan", "Ja'Marr Chase", "Puka Nacua"), players, new Set([chase.id]));
+    expect(names(r)).toEqual(["Ja'Marr Chase", "Puka Nacua"]);
   });
 
   it("reads team defenses", () => {
-    const r = matchOcrLines(lines("Seahawks D/ST", "DEN DEF"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("Seahawks D/ST", "DEN DEF"), players, none);
     expect(names(r)).toEqual(["Seattle Defense", "Denver Defense"]);
   });
 
   it("reports each player once, keeping the best read, in panel order", () => {
-    const r = matchOcrLines(lines("Puka Nacua", "Puka Nacua WR LAR", "Ja'Marr Chase"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("Puka Nacua", "Puka Nacua WR LAR", "Ja'Marr Chase"), players, none);
     expect(names(r)).toEqual(["Puka Nacua", "Ja'Marr Chase"]);
   });
 
-  it("ignores unnumbered reads when the panel numbers its picks (the available list leaking into the box)", () => {
+
+
+  it("reads ESPN-style 'Name / TEAM POS' lines with OCR junk in front, in panel order", () => {
     const r = matchOcrLines(
-      lines("1.01 Ja'Marr Chase WR CIN", "1.02 Bijan Robinson RB ATL", "1.03 Jahmyr Gibbs RB DET", "Puka Nacua", "CeeDee Lamb"),
-      players, none, { teams: 12 }
+      lines("NI", "g    Ja'Marr Chase / CIN WR", "Jonathan Taylor / IND RB", "g   James Cook Ill / BUF RB", "/", "8    Bijan Robinson / ATL RB",
+        "PB.   Justin Jefferson / MIN WR", "Vv 3", "g   Amon-Ra St. Brown / DET WR", "h4  Puka Nacua / LAR WR", "4      A", "AR  CeeDee Lamb / DAL WR", "fa Omarion Hampton / LAC RB"),
+      players, none
     );
-    expect(names(r)).toEqual(["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"]);
-  });
-
-  it("attaches a label-only line's pick number to the name line beside it (ESPN below, Sleeper above)", () => {
-    const espn = matchOcrLines(
-      lines("Puka Nacua / LAR WR", "R1, P2 - Team 7", "Ja'Marr Chase / CIN WR", "R1, P3 - Team 10"),
-      players, none, { teams: 12 }
-    );
-    expect(espn.matches.map((m) => [m.player.name, m.pickNo])).toEqual([["Puka Nacua", 2], ["Ja'Marr Chase", 3]]);
-    const sleeper = matchOcrLines(lines("1.02", "Puka Nacua", "1.03", "Ja'Marr Chase"), players, none, { teams: 12 });
-    expect(sleeper.matches.map((m) => [m.player.name, m.pickNo])).toEqual([["Puka Nacua", 2], ["Ja'Marr Chase", 3]]);
-  });
-
-  it("reads ESPN-style 'Name / TEAM POS' lines", () => {
-    const r = matchOcrLines(lines("Puka Nacua / LAR WR", "Amon-Ra St. Brown / DET WR"), players, none, { teams: 12 });
-    expect(names(r)).toEqual(["Puka Nacua", "Amon-Ra St. Brown"]);
+    expect(names(r)).toEqual([
+      "Ja'Marr Chase", "Jonathan Taylor", "James Cook III", "Bijan Robinson", "Justin Jefferson",
+      "Amon-Ra St. Brown", "Puka Nacua", "CeeDee Lamb", "Omarion Hampton",
+    ]);
   });
 
   it("a drafted player's line does not re-read as his surname-mate", () => {
     const bijan = players.find((p) => p.name === "Bijan Robinson")!;
-    const r = matchOcrLines(lines("Bijan Robinson / ATL RB", "R1, P4 - Team 12"), players, new Set([bijan.id]), { teams: 12 });
-    expect(r.matches.length).toBe(0);
+    const r = matchOcrLines(lines("Bijan Robinson / ATL RB", "R1, P4 - Team 12"), players, new Set([bijan.id]));
+    expect(names(r)).toEqual(["Bijan Robinson"]);
   });
 
   it("does not match a lone common surname", () => {
-    const r = matchOcrLines(lines("Smith", "Williams"), players, none, { teams: 12 });
+    const r = matchOcrLines(lines("Smith", "Williams"), players, none);
     expect(r.matches.length).toBe(0);
   });
 });
@@ -119,7 +108,7 @@ describe("matchOcrLines", () => {
 describe("FrameAgreement", () => {
   it("confirms on the second consecutive sighting and reports once", () => {
     const fa = new FrameAgreement();
-    const chase = matchOcrLines(lines("Ja'Marr Chase"), players, none, { teams: 12 }).matches;
+    const chase = matchOcrLines(lines("Ja'Marr Chase"), players, none).matches;
     expect(fa.observe(chase)).toEqual([]);
     expect(fa.observe(chase).map((m) => m.player.name)).toEqual(["Ja'Marr Chase"]);
     expect(fa.observe(chase)).toEqual([]);
@@ -127,7 +116,7 @@ describe("FrameAgreement", () => {
 
   it("resets when a frame misses the player, and forgets on undo", () => {
     const fa = new FrameAgreement();
-    const chase = matchOcrLines(lines("Ja'Marr Chase"), players, none, { teams: 12 }).matches;
+    const chase = matchOcrLines(lines("Ja'Marr Chase"), players, none).matches;
     fa.observe(chase);
     fa.observe([]); // dropped frame
     expect(fa.observe(chase)).toEqual([]); // needs two in a row again
