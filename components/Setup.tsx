@@ -4,7 +4,8 @@
 // typed values are the fallback, not the source of truth.
 
 import { useEffect, useState } from "react";
-import type { LeagueConfig, Position, ScoringFormat } from "../lib/types";
+import type { DraftOrder, LeagueConfig, Position, ScoringFormat } from "../lib/types";
+import { DRAFT_ORDER_LABEL } from "../lib/draft/snake";
 import { fetchDraftInfo, parseDraftId, fetchLeagueDrafts } from "../lib/draft/sleeper";
 import { DEFAULT_CONFIG, BESTBALL_PRESETS, defaultStrategyFor } from "../lib/client/config";
 import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } from "../lib/client/presets";
@@ -136,6 +137,7 @@ export default function Setup({
       ...c,
       platform: "sleeper",
       draftId,
+      draftOrder: info.draftOrder,
       leagueId: leagueId ?? info.leagueId ?? "",
       teams: info.teams,
       rounds: info.rounds,
@@ -376,6 +378,20 @@ export default function Setup({
               onChange={(e) => setConfig((c) => ({ ...c, rounds: Number(e.target.value) }))}
               className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono"
             />
+          </label>
+          <label className="col-span-2 text-sm text-ink-dim">
+            Draft order
+            <select
+              value={config.draftOrder ?? "snake"}
+              onChange={(e) => setConfig((c) => ({ ...c, draftOrder: e.target.value as DraftOrder }))}
+              className="mt-1 w-full rounded border border-line bg-field px-3 py-2"
+            >
+              {(Object.keys(DRAFT_ORDER_LABEL) as DraftOrder[]).map((o) => (
+                <option key={o} value={o}>
+                  {DRAFT_ORDER_LABEL[o]}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="col-span-2 text-sm text-ink-dim">
             Scoring

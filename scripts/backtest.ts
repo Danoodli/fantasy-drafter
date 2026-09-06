@@ -49,6 +49,7 @@ async function main() {
 
   const config: LeagueConfig = {
     platform: "sleeper",
+    draftOrder: info.draftOrder,
     leagueId: info.leagueId ?? "",
     draftId,
     myDraftSlot: mySlot,
@@ -63,7 +64,7 @@ async function main() {
     strategy: strategyId,
   };
 
-  const myPickNos = picksForSlot(mySlot, info.teams, info.rounds, info.tradedPicks);
+  const myPickNos = picksForSlot(mySlot, info.teams, info.rounds, info.tradedPicks, info.draftOrder);
   const drafted = new Set<string>();
   const engineRoster: BoardPlayer[] = [];
   const actualRoster: BoardPlayer[] = [];
@@ -75,7 +76,7 @@ async function main() {
 
   for (const pick of realPicks) {
     const player = resolve(pick.playerId, pick.playerName, pick.pos);
-    const owner = pickOwner(pick.pickNo, info.teams, info.tradedPicks);
+    const owner = pickOwner(pick.pickNo, info.teams, info.tradedPicks, info.draftOrder);
 
     if (owner === mySlot) {
       if (player) actualRoster.push(player);

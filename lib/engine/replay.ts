@@ -71,7 +71,7 @@ export function replayRoom(opts: ReplayOptions): ReplayResult {
   const rosters: BoardPlayer[][] = Array.from({ length: teams }, () => []);
   const counts: Partial<Record<Position, number>>[] = Array.from({ length: teams }, () => ({}));
   const picks: ReplayPick[] = [];
-  const enginePicks = engineSlot ? picksForSlot(engineSlot, teams, rounds, []) : [];
+  const enginePicks = engineSlot ? picksForSlot(engineSlot, teams, rounds, [], config.draftOrder) : [];
 
   const take = (slot: number, player: BoardPlayer, pickNo: number, byEngine: boolean) => {
     drafted.add(player.id);
@@ -108,7 +108,7 @@ export function replayRoom(opts: ReplayOptions): ReplayResult {
 
   const total = teams * rounds;
   for (let pickNo = 1; pickNo <= total; pickNo++) {
-    const slot = pickOwner(pickNo, teams, []);
+    const slot = pickOwner(pickNo, teams, [], config.draftOrder);
     const round = Math.ceil(pickNo / teams);
 
     if (engineSlot && slot === engineSlot) {

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Board,
   BoardPlayer,
+  DraftOrder,
   DraftPick,
   LeagueConfig,
   Position,
@@ -330,6 +331,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const teams = draftInfo?.teams ?? config?.teams ?? 12;
   const rounds = draftInfo?.rounds ?? config?.rounds ?? 15;
   const mySlot = config?.myDraftSlot ?? 1;
+  const order = draftInfo?.draftOrder ?? config?.draftOrder ?? "snake";
   const tradedPicks = useMemo(() => draftInfo?.tradedPicks ?? [], [draftInfo]);
 
   const boardIndexes = useMemo(() => {
@@ -356,24 +358,24 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     manualPicks.forEach((m, manualIndex) => {
       if (m.playerId && known.has(m.playerId)) return; // the API caught up with this mark
       const pickNo = merged.length + 1;
-      const { round, slot } = slotOnClock(pickNo, teams);
+      const { round, slot } = slotOnClock(pickNo, teams, order);
       merged.push({ ...m, pickNo, round, draftSlot: slot, manualIndex });
     });
     return merged;
-  }, [apiPicks, manualPicks, boardIndexes, teams]);
+  }, [apiPicks, manualPicks, boardIndexes, teams, order]);
 
   const currentPick = picks.length + 1;
   useEffect(() => {
     currentPickRef.current = currentPick;
     picksRef.current = picks;
     manualRef.current = manualPicks;
-    roomRef.current = { teams, rounds, mySlot, tradedPicks };
+    roomRef.current = { teams, rounds, mySlot, tradedPicks, order };
     boardRef.current = boardIndexes.byId;
-  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks, boardIndexes]);
-  const round = slotOnClock(Math.min(currentPick, teams * rounds), teams).round;
+  }, [currentPick, picks, manualPicks, teams, rounds, mySlot, tradedPicks, boardIndexes, order]);
+  const round = slotOnClock(Math.min(currentPick, teams * rounds), teams, order).round;
   const allMyPicks = useMemo(
-    () => picksForSlot(mySlot, teams, rounds, tradedPicks),
-    [mySlot, teams, rounds, tradedPicks]
+    () => picksForSlot(mySlot, teams, rounds, tradedPicks, order),
+    [mySlot, teams, rounds, tradedPicks, order]
   );
   const myPicks = useMemo(
     () => allMyPicks.filter((n) => n >= currentPick),
@@ -394,7 +396,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     const oppRosters: Record<number, BoardPlayer[]> = {};
     for (const pick of picks) {
       if (pick.playerId) drafted.add(pick.playerId);
-      const owner = pickOwner(pick.pickNo, teams, tradedPicks);
+      const owner = pickOwner(pick.pickNo, teams, tradedPicks, order);
       const player = boardIndexes.byId.get(pick.playerId);
       if (owner === mySlot) {
         if (player) roster.push(player);
@@ -405,7 +407,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       }
     }
     return { myRoster: roster, draftedIds: drafted, opponentCounts: opp, opponentRosters: oppRosters };
-  }, [picks, teams, tradedPicks, mySlot, boardIndexes]);
+  }, [picks, teams, tradedPicks, mySlot, boardIndexes, order]);
 
   const drift = useMemo(
     () => computeDrift(picks, boardIndexes.byId, driftPrior),
@@ -445,7 +447,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const picksRef = useRef<DraftPick[]>([]);
   const manualRef = useRef<DraftPick[]>([]);
   /** Room geometry for the import's pick-ownership math. */
-  const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[] });
+  const roomRef = useRef({ teams: 12, rounds: 15, mySlot: 1, tradedPicks: [] as TradedPick[], order: "snake" as DraftOrder });
   const boardRef = useRef<Map<string, BoardPlayer>>(new Map());
   const applyImport = useCallback((items: ImportItem[]): ImportOutcome => {
     const snapshot = manualRef.current;
@@ -492,7 +494,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     const apiCount = merged.filter((p) => p.manualIndex == null).length;
     const known: (string | null)[] = merged.map((p) => (p.playerId ? p.playerId : null));
     const result = reconcileSequence(known, playerIds, {
-      isMine: (i) => pickOwner(i + 1, room.teams, room.tradedPicks) === room.mySlot,
+      isMine: (i) => pickOwner(i + 1, room.teams, room.tradedPicks, room.order) === room.mySlot,
       frozen: apiCount,
       ignored,
     });
@@ -613,10 +615,10 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     for (let i = picks.length - 1; i >= 0; i--) {
       const p = picks[i];
       if (p.playerId) continue;
-      if (pickOwner(p.pickNo, teams, tradedPicks) === mySlot) return p.pickNo;
+      if (pickOwner(p.pickNo, teams, tradedPicks, order) === mySlot) return p.pickNo;
     }
     return null;
-  }, [picks, teams, tradedPicks, mySlot]);
+  }, [picks, teams, tradedPicks, mySlot, order]);
 
   return {
     picks,
@@ -632,7 +634,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
     live,
     syncError,
     draftInfo,
-    onClockSlot: pickOwner(Math.min(currentPick, teams * rounds), teams, tradedPicks),
+    onClockSlot: pickOwner(Math.min(currentPick, teams * rounds), teams, tradedPicks, order),
     markDrafted,
     markMany,
     markUnknown,

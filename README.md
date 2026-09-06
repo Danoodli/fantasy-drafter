@@ -72,6 +72,7 @@ The engine is only as good as its picture of the room, and on any site but Sleep
 - **On-the-clock shortlist.** When it isn't your turn (and the room isn't syncing itself), the engine runs for the seat picking now — its roster, its remaining picks, the format's default strategy — and shows the top ten as one-click ✕ chips. The panel keeps its own hit rate (how often the real pick was on the list) so you can judge whether it's earning its space.
 - **Recent picks + resync.** The strip under the header lists the last six picks with slot and position; manual marks have a ✕, and an **unknown** placeholder can be filled in by name. **+ unknown pick** advances the counter when someone takes a player you can't find; **set pick #** jumps the counter to whatever the real room says (forward pads unknowns, backward removes recent marks).
 - **Room strip.** Every seat's position counts in one row, the seat on the clock pulsing, you in green; click a seat for its roster. In manual mode this is the check that picks landed on the right teams.
+- **Draft order.** Snake by default; manual setup also offers **snake with third-round reversal** and **linear**, and Sleeper drafts report theirs. Every pick-to-seat mapping — screen sync, paste, the engine's opponent schedule, the room strip, recaps — follows the configured order and any traded picks.
 
 Sleeper drafts still sync from the API with none of this needed.
 

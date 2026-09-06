@@ -141,8 +141,13 @@ export interface RosterSlots {
  */
 export type LeagueType = "redraft" | "bestball";
 
+/** How pick numbers map to seats. Snake unless the room says otherwise. */
+export type DraftOrder = "snake" | "snake3rr" | "linear";
+
 export interface LeagueConfig {
   platform: "sleeper" | "manual";
+  /** Draft order; undefined means snake (older saved configs). */
+  draftOrder?: DraftOrder;
   leagueId: string;
   draftId: string;
   myDraftSlot: number | null; // 1-indexed

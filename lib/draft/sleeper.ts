@@ -8,7 +8,7 @@
 // below is cache-busted and sent with `cache: "no-store"`, which is what
 // actually makes the board feel live.
 
-import type { DraftPick, Position, TradedPick } from "../types";
+import type { DraftOrder, DraftPick, Position, TradedPick } from "../types";
 
 const BASE = "https://api.sleeper.app/v1";
 
@@ -42,6 +42,8 @@ export interface SleeperDraftInfo {
   status: string;
   /** NFL season the draft belongs to ("2025"), when Sleeper reports it. */
   season: string | null;
+  /** Sleeper's draft type + reversal_round, as our order. */
+  draftOrder: DraftOrder;
 }
 
 export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo> {
@@ -105,6 +107,12 @@ export async function fetchDraftInfo(draftId: string): Promise<SleeperDraftInfo>
     tradedPicks,
     status: draft.status ?? "unknown",
     season: draft.season != null ? String(draft.season) : null,
+    draftOrder:
+      draft.type === "linear"
+        ? "linear"
+        : Number(draft.settings?.reversal_round ?? 0) === 3
+          ? "snake3rr"
+          : "snake",
   };
 }
 

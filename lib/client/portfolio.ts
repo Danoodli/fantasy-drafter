@@ -33,7 +33,7 @@ export function computePortfolio(
 
   for (const d of drafts) {
     const mine = d.picks.filter(
-      (pk) => pickOwner(pk.pickNo, d.config.teams, d.tradedPicks ?? []) === d.mySlot
+      (pk) => pickOwner(pk.pickNo, d.config.teams, d.tradedPicks ?? [], d.config.draftOrder) === d.mySlot
     );
     const roster = mine.map((pk) => ({
       id: pk.playerId,

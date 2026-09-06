@@ -39,7 +39,7 @@ export default function Recap({ board, config, picks, tradedPicks, mySlot, draft
     [picks, byId, config, tradedPicks]
   );
   const supers = useMemo(
-    () => superlatives(picks, byId, config.teams, tradedPicks),
+    () => superlatives(picks, byId, config.teams, tradedPicks, config.draftOrder),
     [picks, byId, config, tradedPicks]
   );
 

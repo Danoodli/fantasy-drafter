@@ -66,7 +66,7 @@ async function main() {
       unmatched++;
       continue;
     }
-    const owner = pickOwner(pick.pickNo, info.teams, info.tradedPicks);
+    const owner = pickOwner(pick.pickNo, info.teams, info.tradedPicks, info.draftOrder);
     rosters[owner - 1].push(player);
   }
   if (unmatched > 0) console.log(`(${unmatched} picks not on the 2026 board — ignored)`);

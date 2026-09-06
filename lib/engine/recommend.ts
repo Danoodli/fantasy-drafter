@@ -605,7 +605,7 @@ export function unifiedRecommend(state: EngineState, seed = 42): EngineOutput {
   const simEnd = future.length ? future[future.length - 1] : currentPick;
   const schedule: CompletionShared["schedule"] = [];
   for (let n = currentPick + 1; n <= simEnd; n++) {
-    schedule.push({ pickNo: n, slot: pickOwner(n, config.teams, []), mine: future.includes(n) });
+    schedule.push({ pickNo: n, slot: pickOwner(n, config.teams, [], config.draftOrder), mine: future.includes(n) });
   }
   const toCp = (p: BoardPlayer): CompletionPlayer => ({
     id: p.id, pos: p.pos, adp: p.adp + (drift[p.pos] ?? 0), stdev: p.adpStdev, bye: p.bye,
@@ -705,7 +705,7 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
   const available = board.filter((p) => !draftedIds.has(p.id));
   const myCounts: Partial<Record<Position, number>> = {};
   for (const p of state.myRoster) myCounts[p.pos] = (myCounts[p.pos] ?? 0) + 1;
-  const round = slotOnClock(currentPick, config.teams).round;
+  const round = slotOnClock(currentPick, config.teams, config.draftOrder).round;
 
   const bestball = config.leagueType === "bestball";
   const valueFn = makeValueFn(board, strategy, bestball);
@@ -729,7 +729,7 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
   // Shared sim scaffolding: one player pool + sampled drafts for all candidates.
   const schedule: SimShared["schedule"] = [];
   for (let n = currentPick + 1; n <= simEnd; n++) {
-    const owner = pickOwner(n, config.teams, []);
+    const owner = pickOwner(n, config.teams, [], config.draftOrder);
     schedule.push({ pickNo: n, slot: owner, mine: horizon.includes(n) });
   }
   const poolSorted = [...available].sort((a, b) => a.adp - b.adp).slice(0, 160);
@@ -742,7 +742,7 @@ export function recommend(state: EngineState, seed = 42): EngineOutput {
     // starter quality (VOLS), not RB-inflated replacement scarcity.
     value: Math.max(0, lineupValue ? a.vols : valueFn(a)),
   }));
-  const nextRound = slotOnClock(nextPick, config.teams).round;
+  const nextRound = slotOnClock(nextPick, config.teams, config.draftOrder).round;
   const myPosWeight = (pos: Position, counts: Partial<Record<Position, number>>) =>
     positionMultiplier(strategy, pos, nextRound) * needWeight(pos, counts, state);
 

@@ -101,7 +101,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
       for (const pick of draft.picks) {
         const pl = byId.get(pick.playerId);
         if (!pl) continue;
-        const owner = pickOwner(pick.pickNo, config.teams, draft.tradedPicks);
+        const owner = pickOwner(pick.pickNo, config.teams, draft.tradedPicks, config.draftOrder);
         rosters[owner - 1]?.push(pl);
       }
       const { winRate } = simulateRoom(rosters, config, 200, Date.now() & 0x7fffffff);
@@ -283,10 +283,10 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const nextPickBySlot = useMemo(() => {
     const out: Record<number, number | undefined> = {};
     for (let s = 1; s <= config.teams; s++) {
-      out[s] = picksForSlot(s, config.teams, config.rounds, draft.tradedPicks).find((n) => n >= draft.currentPick);
+      out[s] = picksForSlot(s, config.teams, config.rounds, draft.tradedPicks, config.draftOrder).find((n) => n >= draft.currentPick);
     }
     return out;
-  }, [config.teams, config.rounds, draft.tradedPicks, draft.currentPick]);
+  }, [config.teams, config.rounds, config.draftOrder, draft.tradedPicks, draft.currentPick]);
 
   // The seat on the clock, modeled with the engine from ITS roster and ITS
   // remaining picks (default strategy for the format — opponents don't share
@@ -296,7 +296,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     if (!shortlistNeeded) return null;
     const slot = draft.onClockSlot;
     const theirs = rostersBySlot[slot] ?? [];
-    const theirPicks = picksForSlot(slot, config.teams, config.rounds, draft.tradedPicks).filter((n) => n >= draft.currentPick);
+    const theirPicks = picksForSlot(slot, config.teams, config.rounds, draft.tradedPicks, config.draftOrder).filter((n) => n >= draft.currentPick);
     if (theirPicks.length === 0) return null;
     const others: Record<number, BoardPlayer[]> = {};
     const counts: Record<number, Partial<Record<Position, number>>> = {};
@@ -458,7 +458,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     const additions: BoardPlayer[] = [];
     const adpOrder = [...gradedBoard.players].sort((a, b) => a.adp - b.adp);
     for (let pickNo = draft.currentPick; pickNo <= totalPicks; pickNo++) {
-      const owner = pickOwner(pickNo, config.teams, draft.tradedPicks);
+      const owner = pickOwner(pickNo, config.teams, draft.tradedPicks, config.draftOrder);
       let choice: BoardPlayer | undefined;
       if (owner === (config.myDraftSlot ?? 1)) {
         const out = recommend({
@@ -748,6 +748,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
             title="This draft's format — change it from the setup screen"
           >
             {config.teams}tm · {config.scoring} · {bestball ? "best ball" : "redraft"}
+            {config.draftOrder === "snake3rr" ? " · 3RR" : config.draftOrder === "linear" ? " · linear" : ""}
           </span>
           {config.platform === "sleeper" && (
             <span

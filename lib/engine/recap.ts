@@ -1,7 +1,7 @@
 // Post-draft recap: who actually won the draft. Pure functions — the UI
 // layer just renders these.
 
-import type { BoardPlayer, DraftPick, LeagueConfig, TradedPick } from "../types";
+import type { BoardPlayer, DraftOrder, DraftPick, LeagueConfig, TradedPick } from "../types";
 import { pickOwner } from "../draft/snake";
 import { optimalLineupTotal } from "./season";
 
@@ -28,7 +28,7 @@ export function buildRecap(
   for (const pick of picks) {
     const player = byId.get(pick.playerId);
     if (!player) continue;
-    const owner = pickOwner(pick.pickNo, config.teams, tradedPicks);
+    const owner = pickOwner(pick.pickNo, config.teams, tradedPicks, config.draftOrder);
     rosters.get(owner)?.push(player);
   }
   const benchWeight = config.leagueType === "bestball" ? 0.45 : 0.2;
@@ -77,7 +77,8 @@ export function superlatives(
   picks: DraftPick[],
   byId: Map<string, BoardPlayer>,
   teams: number,
-  tradedPicks: TradedPick[]
+  tradedPicks: TradedPick[],
+  order: DraftOrder = "snake"
 ): Superlative[] {
   let steal: { pick: DraftPick; p: BoardPlayer; delta: number } | null = null;
   let reach: { pick: DraftPick; p: BoardPlayer; delta: number } | null = null;
@@ -94,7 +95,7 @@ export function superlatives(
     out.push({
       label: "Steal of the draft",
       player: steal.p,
-      slot: pickOwner(steal.pick.pickNo, teams, tradedPicks),
+      slot: pickOwner(steal.pick.pickNo, teams, tradedPicks, order),
       pickNo: steal.pick.pickNo,
       detail: `fell ${Math.round(steal.delta)} past ADP ${steal.p.adp.toFixed(0)}`,
     });
@@ -103,7 +104,7 @@ export function superlatives(
     out.push({
       label: "Biggest reach",
       player: reach.p,
-      slot: pickOwner(reach.pick.pickNo, teams, tradedPicks),
+      slot: pickOwner(reach.pick.pickNo, teams, tradedPicks, order),
       pickNo: reach.pick.pickNo,
       detail: `taken ${Math.round(-reach.delta)} before ADP ${reach.p.adp.toFixed(0)}`,
     });
