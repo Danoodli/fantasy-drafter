@@ -373,6 +373,34 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     return out;
   }
 
+  /**
+   * One read of a draft BOARD grid from screen sync: every cell carries its
+   * pick number, so it takes the numbered import path (a placeholder at that
+   * number is filled, a missed pick is inserted in front). Same celebration
+   * and shortlist scoring as a list read.
+   */
+  function applyScreenGrid(items: ImportItem[]) {
+    const fresh = items.filter((it) => !draft.draftedIds.has(it.player.id));
+    const out = draft.applyImport(items);
+    const changed = out.added + out.filled + out.padded + out.inserted;
+    if (changed === 0) return out;
+    const mine = fresh.filter((it) => it.pickNo != null && pickOwner(it.pickNo, config.teams, draft.tradedPicks, config.draftOrder) === mySlot);
+    for (const it of fresh) if (!mine.includes(it)) scoreAgainstShortlist(it.player);
+    if (mine.length > 0) {
+      setSnipe(null);
+      setBurst({ key: Date.now(), color: POS_COLOR[mine[mine.length - 1].player.pos] });
+    }
+    const others = fresh.length - mine.length;
+    const parts = [
+      mine.length > 0 ? `you drafted ${mine.map((it) => it.player.name).join(" and ")}` : null,
+      others > 0 ? `${others} other pick${others === 1 ? "" : "s"}` : null,
+      out.inserted > 0 ? `${out.inserted} backfilled, ${out.shifted} moved down` : null,
+      out.padded > 0 ? `${out.padded} unknown` : null,
+    ].filter(Boolean);
+    showToast(`Screen sync: ${parts.join(" · ") || `${changed} marked`}.`, true, () => draft.restoreManual(out.snapshot));
+    return out;
+  }
+
   // Paste anywhere: a multi-line clipboard (or several names) opens the import
   // preview. A single name pasted into the search box stays a normal paste.
   useEffect(() => {
@@ -1182,7 +1210,9 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
         <ScreenSync
           players={gradedBoard.players}
           draftedIds={draft.draftedIds}
+          teams={config.teams}
           onFrame={applyScreenFrame}
+          onGrid={applyScreenGrid}
           onClose={() => setScreenSync(false)}
         />
       )}

@@ -96,10 +96,10 @@ export class FrameAgreement {
     for (const id of alreadyDrafted) this.confirmed.add(id);
   }
 
-  /** Feed one frame's matches; get back the ones that just became confirmed. */
-  observe(matches: OcrMatch[]): OcrMatch[] {
+  /** Feed one frame's matches (list lines or grid cells); get back the ones that just became confirmed. */
+  observe<T extends { player: { id: string } }>(matches: T[]): T[] {
     const now = new Set(matches.map((m) => m.player.id));
-    const fresh: OcrMatch[] = [];
+    const fresh: T[] = [];
     for (const m of matches) {
       if (this.confirmed.has(m.player.id)) continue;
       if (this.seenLast.has(m.player.id)) {

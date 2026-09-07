@@ -11,6 +11,7 @@
 // no keys.
 
 import type { OcrLine } from "../draft/ocrMatch";
+import type { OcrWord } from "../draft/ocrGrid";
 
 /** Fractions of the captured frame: the panel the user dragged out. */
 export interface Region {
@@ -164,32 +165,61 @@ export async function terminateOcr(): Promise<void> {
   }
 }
 
+interface TessBbox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+interface TessWord {
+  text: string;
+  confidence: number;
+  bbox: TessBbox;
+}
 interface TessLine {
   text: string;
   confidence: number;
   bbox: { y0: number };
+  words?: TessWord[];
 }
 interface TessBlock {
   paragraphs?: { lines?: TessLine[] }[];
 }
 
-/** OCR a canvas into lines with vertical order preserved. */
-export async function recognizeLines(scheduler: TesseractScheduler, canvas: HTMLCanvasElement): Promise<OcrLine[]> {
+export interface FrameRead {
+  /** Lines in vertical order — what a pick LIST is read from. */
+  lines: OcrLine[];
+  /** Every word with its box — what a board GRID is read from (lib/draft/ocrGrid.ts). */
+  words: OcrWord[];
+}
+
+/** OCR a canvas once into both lines (vertical order preserved) and words with boxes. */
+export async function recognizeFrame(scheduler: TesseractScheduler, canvas: HTMLCanvasElement): Promise<FrameRead> {
   const { data } = await scheduler.addJob("recognize", canvas, {}, { text: true, blocks: true });
-  const out: OcrLine[] = [];
+  const lines: OcrLine[] = [];
+  const words: OcrWord[] = [];
   const blocks = (data as unknown as { blocks?: TessBlock[] | null }).blocks;
   if (blocks && blocks.length) {
     for (const b of blocks)
       for (const p of b.paragraphs ?? [])
         for (const l of p.lines ?? []) {
-          if (l.text?.trim()) out.push({ text: l.text.trim(), confidence: l.confidence ?? 0, y: l.bbox?.y0 ?? out.length });
+          if (l.text?.trim()) lines.push({ text: l.text.trim(), confidence: l.confidence ?? 0, y: l.bbox?.y0 ?? lines.length });
+          for (const w of l.words ?? []) {
+            const text = w.text?.trim();
+            if (text && w.bbox) words.push({ text, confidence: w.confidence ?? 0, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 });
+          }
         }
   }
-  if (out.length === 0 && data.text) {
+  if (lines.length === 0 && data.text) {
     data.text.split("\n").forEach((t, i) => {
-      if (t.trim()) out.push({ text: t.trim(), confidence: 50, y: i });
+      if (t.trim()) lines.push({ text: t.trim(), confidence: 50, y: i });
     });
   }
-  out.sort((a, b) => a.y - b.y);
-  return out;
+  lines.sort((a, b) => a.y - b.y);
+  return { lines, words };
+}
+
+/** OCR a canvas into lines with vertical order preserved. */
+export async function recognizeLines(scheduler: TesseractScheduler, canvas: HTMLCanvasElement): Promise<OcrLine[]> {
+  return (await recognizeFrame(scheduler, canvas)).lines;
 }

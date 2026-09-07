@@ -11,13 +11,20 @@
 // names append in order, a pick we missed is inserted where it belongs, and
 // MY picks are recorded like everyone else's — I draft on the site, the app
 // just watches (back-to-back picks included). Two consecutive reads must
-// agree before a name counts. Pick numbers on screen are never read: OCR junk
-// in front of a name is not a pick number.
+// agree before a name counts. Pick numbers in front of a LIST entry are never
+// read: OCR junk in front of a name is not a pick number.
+//
+// A draft BOARD (DraftKings, Yahoo) is a grid, not a list: one cell per pick,
+// rounds snaking left and right, so order says nothing. But every cell wears
+// its own "round.pick" label, and those ARE trusted: once a frame shows two
+// such labels the grid reader (lib/draft/ocrGrid.ts) takes over and each
+// cell's name goes through the numbered import path with its pick number.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
-import type { SequenceOutcome } from "../lib/client/useDraft";
+import type { ImportItem, ImportOutcome, SequenceOutcome } from "../lib/client/useDraft";
 import { FrameAgreement, matchOcrLines, type OcrLine } from "../lib/draft/ocrMatch";
+import { readGrid } from "../lib/draft/ocrGrid";
 import {
   FULL_FRAME,
   OCR_WORKERS,
@@ -25,7 +32,7 @@ import {
   getOcrScheduler,
   grabFrame,
   loadRegion,
-  recognizeLines,
+  recognizeFrame,
   saveRegion,
   startCapture,
   stopCapture,
@@ -35,8 +42,12 @@ import {
 interface Props {
   players: BoardPlayer[];
   draftedIds: Set<string>;
-  /** Apply one ordered read of the panel. Returns what was placed. */
+  /** League size: a board grid's "round.pick" labels need it for the overall pick number. */
+  teams: number;
+  /** Apply one ordered read of a pick LIST. Returns what was placed. */
   onFrame: (playerIds: string[]) => SequenceOutcome | void;
+  /** Apply one read of a board GRID: every cell carries its pick number. Returns what changed. */
+  onGrid: (items: ImportItem[]) => ImportOutcome | void;
   onClose: () => void;
 }
 
@@ -55,7 +66,7 @@ function loadNewestFirst(): boolean {
   }
 }
 
-export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Props) {
+export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -69,6 +80,7 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [lastLines, setLastLines] = useState<OcrLine[]>([]);
+  const [mode, setMode] = useState<"list" | "grid" | null>(null);
   const [lastNames, setLastNames] = useState<string[]>([]);
   const [reads, setReads] = useState(0);
   const [marked, setMarked] = useState(0);
@@ -86,10 +98,10 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
   };
 
   // Latest props for the async loop without re-subscribing every render.
-  const latest = useRef({ players, draftedIds, region, newestFirst, onFrame });
+  const latest = useRef({ players, draftedIds, region, newestFirst, teams, onFrame, onGrid });
   useEffect(() => {
-    latest.current = { players, draftedIds, region, newestFirst, onFrame };
-  }, [players, draftedIds, region, newestFirst, onFrame]);
+    latest.current = { players, draftedIds, region, newestFirst, teams, onFrame, onGrid };
+  }, [players, draftedIds, region, newestFirst, teams, onFrame, onGrid]);
 
   const stopAll = useCallback(() => {
     stopCapture(streamRef.current, videoRef.current);
@@ -117,7 +129,7 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
       agreementRef.current = new FrameAgreement(latest.current.draftedIds);
       setPhase("sharing");
       setShowLarge(true);
-      setStatus("Drag a box around the pick history (drafted players only), then Watch.");
+      setStatus("Drag a box around the pick history or the draft board grid, then Watch.");
       // Warm the OCR engine while the user picks the region.
       getOcrScheduler((s, p) => setStatus(`Loading OCR engine… ${s} ${Math.round(p * 100)}%`)).then(
         () => setStatus((cur) => (cur.startsWith("Loading OCR") ? "OCR engine ready. Drag a box around the pick history, then Watch." : cur)),
@@ -174,18 +186,45 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
       if (cancelled || inFlightRef.current >= OCR_WORKERS) return;
       const video = videoRef.current;
       if (!video) return;
-      const { players, draftedIds, region, newestFirst, onFrame } = latest.current;
+      const { players, draftedIds, region, newestFirst, teams, onFrame, onGrid } = latest.current;
       const frame = grabFrame(video, region);
       if (!frame) return;
       const seq = ++frameSeqRef.current;
       inFlightRef.current++;
       try {
         const scheduler = await getOcrScheduler();
-        const lines = await recognizeLines(scheduler, frame);
+        const { lines, words } = await recognizeFrame(scheduler, frame);
         if (cancelled || seq <= appliedSeqRef.current) return;
         appliedSeqRef.current = seq;
-        const { matches } = matchOcrLines(lines, players, draftedIds);
         const agreement = agreementRef.current!;
+        const stamp = new Date().toLocaleTimeString();
+        setReads((n) => n + 1);
+        setLastLines(lines);
+        // A board GRID: cells labelled "round.pick". Two labels in the frame
+        // and the grid reader takes over — the labels are the pick numbers,
+        // so snake direction and panel order never matter.
+        const grid = readGrid(words, players, { teams });
+        if (grid.anchors >= 2) {
+          setMode("grid");
+          agreement.observe(grid.picks);
+          const items: ImportItem[] = grid.picks
+            .filter((p) => agreement.isConfirmed(p.player.id) || draftedIds.has(p.player.id))
+            .map((p) => ({ player: p.player, pickNo: p.pickNo }));
+          setLastNames(grid.picks.map((p) => `${p.round}.${p.pick} ${p.player.name}`));
+          setStatus(`Board grid · ${grid.anchors} cells labelled · ${grid.picks.length} names read · ${stamp}`);
+          const fresh = items.filter((it) => !draftedIds.has(it.player.id));
+          if (fresh.length > 0) {
+            const out = onGrid(items);
+            const changed = out ? out.added + out.filled + out.padded + out.inserted : 0;
+            if (changed > 0) {
+              setMarked((n) => n + changed);
+              setLastPlaced(fresh.map((it) => `#${it.pickNo} ${it.player.name}`));
+            }
+          }
+          return;
+        }
+        setMode("list");
+        const { matches } = matchOcrLines(lines, players, draftedIds);
         agreement.observe(matches);
         // Panel order → pick order. Only names seen in two consecutive reads
         // (or already known) take part; the rest wait for the next read.
@@ -193,10 +232,8 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
         // A pick already on the board (marked in the app, or from an earlier
         // read) is an anchor the moment it shows up — no second read needed.
         const ids = ordered.map((m) => m.player.id).filter((id) => agreement.isConfirmed(id) || draftedIds.has(id));
-        setReads((n) => n + 1);
-        setLastLines(lines);
         setLastNames(matches.map((m) => m.player.name));
-        setStatus(`Read ${lines.length} lines · ${matches.length} names on screen · ${new Date().toLocaleTimeString()}`);
+        setStatus(`Read ${lines.length} lines · ${matches.length} names on screen · ${stamp}`);
         if (ids.length > 0) {
           const out = onFrame(ids);
           if (out && out.placed.length > 0) {
@@ -283,8 +320,8 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
           <>
             <p className="text-sm text-ink-dim">
               Share the tab or window your draft is in. The cockpit reads the pick history off the screen several times a
-              second and records every pick in order — yours included, so you draft on the site and this app just
-              advises. Any site, no login, nothing leaves your browser.
+              second and records every pick — yours included, so you draft on the site and this app just advises. A pick
+              list or a draft board grid (DraftKings) both work. Any site, no login, nothing leaves your browser.
             </p>
             <button onClick={share} className="btn-shimmer mt-3 w-full rounded-lg bg-rb py-2.5 font-display text-xl font-bold uppercase tracking-wide text-field">
               Share draft screen
@@ -328,10 +365,16 @@ export default function ScreenSync({ players, draftedIds, onFrame, onClose }: Pr
               <button onClick={stopAll} className="rounded border border-line bg-panel px-2 py-1.5 text-xs text-ink-dim hover:text-warn">
                 stop sharing
               </button>
-              <label className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-dim" title="ESPN lists oldest at top, newest at bottom. Tick this if your room shows the newest pick at the top.">
-                <input type="checkbox" checked={newestFirst} onChange={(e) => setNewestFirst(e.target.checked)} />
-                newest pick at top
-              </label>
+              {mode === "grid" ? (
+                <span className="ml-auto rounded bg-live/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-live" title="Cells labelled round.pick — the labels are the pick numbers, so order doesn't matter.">
+                  board grid
+                </span>
+              ) : (
+                <label className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-dim" title="ESPN lists oldest at top, newest at bottom. Tick this if your room shows the newest pick at the top.">
+                  <input type="checkbox" checked={newestFirst} onChange={(e) => setNewestFirst(e.target.checked)} />
+                  newest pick at top
+                </label>
+              )}
             </div>
             {lastPlaced.length > 0 && (
               <p className="mt-2 font-mono text-[11px] text-live">
