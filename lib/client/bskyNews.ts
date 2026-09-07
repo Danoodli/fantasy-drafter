@@ -7,7 +7,7 @@
 // this is the free version of "follow all the best reporters".
 
 import type { BoardPlayer } from "../types";
-import { matchNewsToPlayers, type NewsItem, type PlayerNews } from "./espnNews";
+import { matchNewsToPlayers, type NewsItem, type PlayerNews } from "../etl/newsMatch";
 
 /**
  * Default wire — every handle verified ACTIVE (≥3 posts in the last 7 days)
@@ -83,44 +83,64 @@ export const DEFAULT_WIRE_HANDLES = [
   // No active beat account found for IND, LAC, NO, TB, WAS (2026-09-07) — the aggregators and lists cover them.
 ];
 
-interface BskyFeedItem {
+export interface BskyFeedItem {
   post?: {
     uri?: string;
     author?: { handle?: string };
-    record?: { text?: string; createdAt?: string };
+    record?: { text?: string; createdAt?: string; reply?: unknown };
   };
+  /** Present on reposts (app.bsky.feed.defs#reasonRepost). */
+  reason?: unknown;
 }
+
+const API = "https://public.api.bsky.app/xrpc/";
 
 function postUrl(uri: string | undefined, handle: string | undefined): string | null {
   const rkey = uri?.split("/").pop();
   return rkey && handle ? `https://bsky.app/profile/${handle}/post/${rkey}` : null;
 }
 
+/** Pure: a Bluesky feed page → news items (posts carry no tags; the name matcher does the rest). */
+export function feedToNews(
+  feed: BskyFeedItem[],
+  opts: { fallbackHandle?: string; blocked?: ReadonlySet<string>; skipReposts?: boolean; skipReplies?: boolean }
+): NewsItem[] {
+  const out: NewsItem[] = [];
+  for (const f of feed) {
+    if (opts.skipReposts && f.reason) continue;
+    if (opts.skipReplies && f.post?.record?.reply) continue;
+    const handle = f.post?.author?.handle ?? opts.fallbackHandle;
+    if (handle && opts.blocked?.has(handle)) continue;
+    const text = f.post?.record?.text ?? "";
+    if (!text) continue;
+    out.push({
+      headline: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+      description: text,
+      published: f.post?.record?.createdAt ?? "",
+      href: postUrl(f.post?.uri, handle),
+      athleteIds: [],
+    });
+  }
+  return out;
+}
+
 /** Pull each handle's recent posts and match player names against the board. */
 export async function fetchWireNews(
   players: BoardPlayer[],
-  handles: string[]
+  handles: string[],
+  blocked: ReadonlySet<string> = new Set()
 ): Promise<Map<string, PlayerNews>> {
   const items: NewsItem[] = [];
   await Promise.all(
     handles.map(async (handle) => {
+      if (blocked.has(handle)) return;
       try {
         const res = await fetch(
-          `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=25&filter=posts_no_replies`
+          `${API}app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=25&filter=posts_no_replies`
         );
         if (!res.ok) return;
         const json = (await res.json()) as { feed?: BskyFeedItem[] };
-        for (const f of json.feed ?? []) {
-          const text = f.post?.record?.text ?? "";
-          if (!text) continue;
-          items.push({
-            headline: text.length > 140 ? `${text.slice(0, 140)}…` : text,
-            description: text,
-            published: f.post?.record?.createdAt ?? "",
-            href: postUrl(f.post?.uri, f.post?.author?.handle ?? handle),
-            athleteIds: [], // bsky posts carry no tags — the name matcher handles it
-          });
-        }
+        items.push(...feedToNews(json.feed ?? [], { fallbackHandle: handle, blocked }));
       } catch {
         // one dead handle shouldn't kill the wire
       }
@@ -146,12 +166,90 @@ export function mergeNews(
   return out;
 }
 
-// Curated-list sources — implemented in Task 10 of the freshness plan; stubs keep the hook compiling.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function fetchListNews(_players: BoardPlayer[], _lists: string[], _blocked: Set<string>): Promise<Map<string, PlayerNews>> {
-  return new Map();
+// ---------------------------------------------------------------------------
+// Curated lists: one getListFeed request backfills a whole roster of reporters;
+// the members' DIDs join the Jetstream filter (cap 10,000). Both verified on
+// 2026-09-07 to answer without auth.
+
+export const DEFAULT_WIRE_LISTS = [
+  "at://did:plc:pgxejfwpltr73b6amkirahwd/app.bsky.graph.list/3lasn45b4da2l", // "NFL beat writers and reporters" (111 members)
+  "at://did:plc:zlyvxtoj3bwk4gyhvfqd3jdn/app.bsky.graph.list/3laulwjvwky2r", // "NFL News and Analysts" (139 members)
+];
+
+/** Accepts an AT-URI or a bsky.app list URL. */
+export function parseListRef(ref: string): { uri: string } | { handle: string; rkey: string } | null {
+  const s = ref.trim();
+  if (/^at:\/\/did:[a-z0-9:]+\/app\.bsky\.graph\.list\/[a-z0-9]+$/i.test(s)) return { uri: s };
+  const m = s.match(/^https?:\/\/bsky\.app\/profile\/([^/]+)\/lists\/([a-z0-9]+)\/?$/i);
+  return m ? { handle: m[1], rkey: m[2] } : null;
 }
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function resolveListMembers(_lists: string[], _blocked: Set<string>): Promise<Map<string, string>> {
-  return new Map();
+
+async function listUri(ref: string): Promise<string | null> {
+  const parsed = parseListRef(ref);
+  if (!parsed) return null;
+  if ("uri" in parsed) return parsed.uri;
+  if (parsed.handle.startsWith("did:")) return `at://${parsed.handle}/app.bsky.graph.list/${parsed.rkey}`;
+  const res = await fetch(`${API}com.atproto.identity.resolveHandle?handle=${encodeURIComponent(parsed.handle)}`);
+  if (!res.ok) return null;
+  const { did } = (await res.json()) as { did?: string };
+  return did ? `at://${did}/app.bsky.graph.list/${parsed.rkey}` : null;
+}
+
+/** One request per list backfills every member's recent posts (48 h window). */
+export async function fetchListNews(
+  players: BoardPlayer[],
+  lists: string[],
+  blocked: ReadonlySet<string>
+): Promise<Map<string, PlayerNews>> {
+  const items: NewsItem[] = [];
+  await Promise.all(
+    lists.map(async (ref) => {
+      try {
+        const uri = await listUri(ref);
+        if (!uri) return;
+        const res = await fetch(`${API}app.bsky.feed.getListFeed?list=${encodeURIComponent(uri)}&limit=100`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { feed?: BskyFeedItem[] };
+        items.push(...feedToNews(json.feed ?? [], { blocked, skipReposts: true, skipReplies: true }));
+      } catch {
+        // a dead list shouldn't kill the wire
+      }
+    })
+  );
+  return matchNewsToPlayers(items, players, 48);
+}
+
+/** DID → handle for every list member, for the Jetstream filter. */
+export async function resolveListMembers(
+  lists: string[],
+  blocked: ReadonlySet<string>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  await Promise.all(
+    lists.map(async (ref) => {
+      try {
+        const uri = await listUri(ref);
+        if (!uri) return;
+        let cursor: string | undefined;
+        do {
+          const res = await fetch(
+            `${API}app.bsky.graph.getList?list=${encodeURIComponent(uri)}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+          );
+          if (!res.ok) return;
+          const json = (await res.json()) as {
+            cursor?: string;
+            items?: { subject?: { did?: string; handle?: string } }[];
+          };
+          for (const it of json.items ?? []) {
+            const { did, handle } = it.subject ?? {};
+            if (did && handle && !blocked.has(handle)) out.set(did, handle);
+          }
+          cursor = json.cursor;
+        } while (cursor && out.size < 9_000);
+      } catch {
+        // skip
+      }
+    })
+  );
+  return out;
 }

@@ -69,7 +69,7 @@ export function useLiveSignals(board: Board, onWire?: (playerId: string, item: P
       const feeds: Promise<Map<string, PlayerNews>>[] = [
         safe(fetchBoardNews(board.players)),
         safe(fetchRssNews(board.players)),
-        prefs.wire ? safe(fetchWireNews(board.players, handles)) : Promise.resolve(emptyNews()),
+        prefs.wire ? safe(fetchWireNews(board.players, handles, blocked)) : Promise.resolve(emptyNews()),
         prefs.wire && prefs.wireLists.length
           ? safe(fetchListNews(board.players, prefs.wireLists, blocked))
           : Promise.resolve(emptyNews()),

@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_WIRE_LISTS } from "./bskyNews";
+
 // Data-source preferences: which projection and ADP opinions the board runs
 // on, globally, persisted on-device. Every source is free and anonymous;
 // switching is instant because the board carries all raw inputs.
@@ -35,7 +37,7 @@ export const DEFAULT_SOURCES: SourcePrefs = {
   trending: true,
   wire: true,
   wireHandles: [], // empty = use DEFAULT_WIRE_HANDLES
-  wireLists: [], // filled with the curated defaults in Task 10
+  wireLists: DEFAULT_WIRE_LISTS, // two curated NFL reporter lists; clear to follow handles only
   wireBlock: [],
 };
 

@@ -570,6 +570,7 @@ export default function Setup({
             Insider wire — poll NFL reporters on Bluesky for breaking posts (free)
           </label>
           {sources.wire && (
+            <>
             <label className="mt-1 block text-xs text-ink-dim">
               Wire handles — one per line. Add reporters or delete lines to drop them.
               (Clearing everything restores the defaults.)
@@ -588,6 +589,36 @@ export default function Setup({
                 className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
               />
             </label>
+            <label className="mt-2 block text-xs text-ink-dim">
+              Curated lists — one per line (bsky.app list URL or at:// URI). Every member joins the
+              wire. Two NFL reporter lists are on by default; clear to follow handles only.
+              <textarea
+                rows={3}
+                value={sources.wireLists.join("\n")}
+                onChange={(e) =>
+                  updateSources({
+                    ...sources,
+                    wireLists: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                  })
+                }
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
+              />
+            </label>
+            <label className="mt-2 block text-xs text-ink-dim">
+              Blocklist — handles to ignore, one per line.
+              <textarea
+                rows={2}
+                value={sources.wireBlock.join("\n")}
+                onChange={(e) =>
+                  updateSources({
+                    ...sources,
+                    wireBlock: e.target.value.split("\n").map((h) => h.trim().replace(/^@/, "")).filter(Boolean),
+                  })
+                }
+                className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
+              />
+            </label>
+            </>
           )}
           <p className="mt-1 text-xs text-ink-faint">
             FFC stays the uncertainty model either way — it&apos;s the only source that publishes
