@@ -65,6 +65,9 @@ export default function Page() {
   // Home keeps the config (and the board, and the saved picks) — the setup
   // screen shows a resume card. Only "start a new draft" clears state.
   const [screen, setScreen] = useState<"setup" | "cockpit">("cockpit");
+  // Bumped whenever Setup opens or a draft starts/resumes: refetch the board so
+  // the newest CI build (not the service worker's copy) is what the draft sees.
+  const [boardEpoch, setBoardEpoch] = useState(0);
 
   useEffect(() => {
     // A shared link carries the whole config in the URL — decode it, show
@@ -87,7 +90,7 @@ export default function Page() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/data/board-${config.scoring}.json`);
+        const res = await fetch(`/data/board-${config.scoring}.json`, { cache: "no-cache" });
         if (!res.ok) throw new Error(`board fetch: HTTP ${res.status}`);
         let b: Board = await res.json();
         // Resolve the scoring settings this league actually uses…
@@ -133,7 +136,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [config]);
+  }, [config, boardEpoch]);
 
   const walkthrough = <Walkthrough autoStart />;
 
@@ -157,7 +160,10 @@ export default function Page() {
           config
             ? {
                 config,
-                onResume: () => setScreen("cockpit"),
+                onResume: () => {
+                  setBoardEpoch((e) => e + 1);
+                  setScreen("cockpit");
+                },
                 onDiscard: () => {
                   clearPersistedPicks();
                   clearConfig();
@@ -169,10 +175,12 @@ export default function Page() {
         }
         onViewDraft={setViewingDraft}
         onViewPortfolio={() => setViewingPortfolio(true)}
+        boardBuiltAt={board?.meta.builtAt ?? null}
         onDone={(c) => {
           saveConfig(c);
           setConfig(c);
           setShared(null);
+          setBoardEpoch((e) => e + 1);
           setScreen("cockpit");
         }}
       />
@@ -204,7 +212,10 @@ export default function Page() {
       board={board}
       config={config}
       strategies={strategies}
-      onHome={() => setScreen("setup")}
+      onHome={() => {
+        setBoardEpoch((e) => e + 1);
+        setScreen("setup");
+      }}
     />
     </>
   );

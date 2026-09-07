@@ -12,6 +12,8 @@ import { loadPresets, savePreset, deletePreset, shareUrl, type SavedPreset } fro
 import { loadHistory, deleteDraft, type SavedDraft } from "../lib/client/history";
 import { loadSources, saveSources, DEFAULT_SOURCES, type SourcePrefs } from "../lib/client/sources";
 import { DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
+import { formatAge } from "../lib/client/boardAge";
+import { useNow } from "../lib/client/useNow";
 import { persistedPickCount } from "../lib/client/useDraft";
 import ConfirmDialog, { type ConfirmRequest } from "./ConfirmDialog";
 
@@ -36,8 +38,11 @@ export default function Setup({
   resume,
   onViewDraft,
   onViewPortfolio,
+  boardBuiltAt,
 }: {
   onDone: (config: LeagueConfig) => void;
+  /** builtAt of the board currently loaded, for the freshness line on the resume card. */
+  boardBuiltAt?: string | null;
   /** A config decoded from a shared link — prefills everything. */
   initialConfig?: LeagueConfig | null;
   /** Set when the user came here from the cockpit via Home. */
@@ -46,6 +51,7 @@ export default function Setup({
   onViewPortfolio: () => void;
 }) {
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const now = useNow();
   const [resumePicks, setResumePicks] = useState<number | null>(null);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage read
@@ -194,6 +200,20 @@ export default function Setup({
               </span>
             ) : null}
           </p>
+          {boardBuiltAt &&
+            now != null &&
+            (() => {
+              const age = formatAge(boardBuiltAt, now);
+              return (
+                <p
+                  className={`mt-1 font-mono text-xs ${age.stale ? "text-warn" : "text-ink-faint"}`}
+                  title={new Date(boardBuiltAt).toLocaleString()}
+                >
+                  Board {age.label}
+                  {age.stale ? " — refreshes every 30 min; check your connection" : ""}
+                </p>
+              );
+            })()}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               onClick={resume.onResume}

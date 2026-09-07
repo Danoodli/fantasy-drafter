@@ -34,6 +34,8 @@ import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
 import { useLiveSignals } from "../lib/client/useLiveSignals";
+import { formatAge } from "../lib/client/boardAge";
+import { useNow } from "../lib/client/useNow";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner, picksForSlot } from "../lib/draft/snake";
 import { startWalkthrough } from "./Walkthrough";
@@ -116,6 +118,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     if (player) showToast(`📰 ${player.name}: ${item.headline.slice(0, 70)}`);
   });
   const { boardNews, trendingIds } = live;
+  const now = useNow();
 
   // Live news, graded. The ESPN table sets Questionable/Doubtful/Out (and can
   // clear); hard-signal headlines can only escalate. recommend() still sees a
@@ -1235,7 +1238,13 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
         <a className="underline" href="https://sleeper.com" rel="noreferrer" target="_blank">
           Sleeper
         </a>{" "}
-        · Projections: ESPN · Board built {new Date(board.meta.builtAt).toLocaleDateString()}
+        · Projections: ESPN ·{" "}
+        <span
+          title={new Date(board.meta.builtAt).toLocaleString()}
+          className={now != null && formatAge(board.meta.builtAt, now).stale ? "text-warn" : undefined}
+        >
+          Board {now != null ? formatAge(board.meta.builtAt, now).label : "build time…"}
+        </span>
       </footer>
     </main>
   );
