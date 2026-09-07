@@ -2,16 +2,28 @@ name: Board refresh
 
 on:
   schedule:
-    # Three refreshes a day, all free. ADP moves daily; injuries and depth
-    # charts move intraday — the evening run is the one that matters before
-    # draft night. Sources refuse nothing: all anonymous, no keys.
-    - cron: "20 9 * * *" # 09:20 UTC — after FFC's daily ADP refresh
-    - cron: "20 16 * * *" # 16:20 UTC — midday injury/depth updates
-    - cron: "20 23 * * *" # 23:20 UTC — pre-draft-night (evening US)
-  workflow_dispatch: {}
+    # FAST lane, every 30 minutes: FFC ADP (hourly upstream cache), ESPN and
+    # Sleeper projections, ESPN's injuries table, RSS headlines. Commits only
+    # public/data, only when it changed. Offset from :20 so it never shares a
+    # minute with the full lane.
+    - cron: "5,35 * * * *"
+    # FULL lane, daily after FFC's ADP refresh: adds the Sleeper player dump
+    # (Sleeper asks for at most daily), FantasyPros (fresh free-tier quota),
+    # DynastyProcess, nflverse. Commits fixtures too.
+    - cron: "20 9 * * *"
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "fast | full"
+        default: "full"
 
 permissions:
   contents: write
+
+# Never let two refreshes race on the push.
+concurrency:
+  group: board-refresh
+  cancel-in-progress: false
 
 jobs:
   build-board:
@@ -24,16 +36,24 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build:board
+      - name: Pick the lane
+        id: lane
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "lane=${{ inputs.lane }}" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "20 9 * * *" ]; then echo "lane=full" >> "$GITHUB_OUTPUT";
+          else echo "lane=fast" >> "$GITHUB_OUTPUT"; fi
+      - run: pnpm build:board --lane=${{ steps.lane.outputs.lane }}
         env:
-          # Optional: live FantasyPros consensus ranks. Set via
-          # `gh secret set FANTASYPROS_API_KEY` — absent, the build falls
-          # back to the DynastyProcess weekly mirror.
+          # Optional: live FantasyPros consensus ranks (full lane only). Set via
+          # `gh secret set FANTASYPROS_API_KEY` — absent, the build falls back
+          # to the DynastyProcess weekly mirror.
           FANTASYPROS_API_KEY: ${{ secrets.FANTASYPROS_API_KEY }}
-      - name: Commit refreshed board + fixtures
+      - name: Commit refreshed board (+ fixtures on the full lane)
         run: |
           git config user.name "board-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add public/data data/raw
-          git diff --cached --quiet || git commit -m "chore: nightly board refresh"
+          if [ "${{ steps.lane.outputs.lane }}" = "full" ]; then git add public/data data/raw; else git add public/data; fi
+          git diff --cached --quiet && { echo "no board changes"; exit 0; }
+          git commit -m "chore: board refresh (${{ steps.lane.outputs.lane }} lane)"
+          git pull --rebase --autostash origin main
           git push
