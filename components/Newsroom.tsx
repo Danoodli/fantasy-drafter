@@ -18,7 +18,7 @@ import { gradeBoard } from "../lib/engine/injuryFeed";
 import { buildFeed, groupStories, type FeedItem } from "../lib/engine/newsImportance";
 import {
   applyFilters, sortStories, pickTopStories, countBy, loadFilters, saveFilters, DEFAULT_FILTERS, SORT_LABEL,
-  type NewsroomFilters, type FeedSort,
+  CHANNEL_LABEL, type Channel, type NewsroomFilters, type FeedSort,
 } from "../lib/client/newsroomFilters";
 import InjuryBadge from "./InjuryBadge";
 import PlayerModal from "./PlayerModal";
@@ -222,6 +222,19 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
             The wire <span className="font-mono text-xs font-normal normal-case tracking-normal text-ink-faint">{stories.length} players · {filtered.length} of {feed.length} updates</span>
           </h2>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded border border-line font-mono text-xs" role="radiogroup" aria-label="Channel" title="Social = Bluesky accounts · News outlets = everything else">
+              {(Object.keys(CHANNEL_LABEL) as Channel[]).map((c) => (
+                <button
+                  key={c}
+                  role="radio"
+                  aria-checked={filters.channel === c}
+                  onClick={() => updateFilters({ ...filters, channel: c })}
+                  className={`px-2.5 py-1.5 ${filters.channel === c ? "bg-panel-2 text-ink" : "text-ink-dim hover:text-ink"}`}
+                >
+                  {c === "social" ? "🦋 Social" : c === "outlets" ? "📰 Outlets" : "Both"}
+                </button>
+              ))}
+            </div>
             <div className="flex rounded border border-line font-mono text-xs" role="radiogroup" aria-label="Sort">
               {(Object.keys(SORT_LABEL) as FeedSort[]).map((s) => (
                 <button

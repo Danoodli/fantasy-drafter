@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyFilters, sortFeed, sortStories, pickTopStories, countBy, DEFAULT_FILTERS, parseFilters, type NewsroomFilters } from "../lib/client/newsroomFilters";
+import { applyFilters, sortFeed, sortStories, pickTopStories, countBy, DEFAULT_FILTERS, parseFilters, sourcesForChannel, isSocial, type NewsroomFilters } from "../lib/client/newsroomFilters";
 import { groupStories } from "../lib/engine/newsImportance";
 import type { FeedItem } from "../lib/engine/newsImportance";
 
@@ -79,5 +79,25 @@ describe("sortStories", () => {
   it("newest uses the player's most recent update; oldest the earliest", () => {
     expect(sortStories(stories, "newest")[0].playerId).toBe("a");
     expect(sortStories(stories, "oldest")[0].playerId).toBe("d");
+  });
+});
+
+describe("channels", () => {
+  it("tells Bluesky handles from outlets", () => {
+    expect(isSocial("@rapsheet.bsky.social")).toBe(true);
+    expect(isSocial("ESPN injury note")).toBe(false);
+    expect(isSocial("CBS Sports")).toBe(false);
+  });
+  it("social shows only @handles; outlets hides them; both shows everything", () => {
+    expect(applyFilters(items, { ...DEFAULT_FILTERS, channel: "social" }, "").map((i) => i.id)).toEqual(["a", "d"]);
+    expect(applyFilters(items, { ...DEFAULT_FILTERS, channel: "outlets" }, "").map((i) => i.id)).toEqual(["b", "c", "a2"]);
+    expect(applyFilters(items, DEFAULT_FILTERS, "")).toHaveLength(5);
+  });
+  it("narrows the source menu to the channel and parses a saved channel", () => {
+    const all = ["ESPN", "@rapsheet.bsky.social", "RotoWire"];
+    expect(sourcesForChannel(all, "outlets")).toEqual(["ESPN", "RotoWire"]);
+    expect(sourcesForChannel(all, "social")).toEqual(["@rapsheet.bsky.social"]);
+    expect(parseFilters(JSON.stringify({ channel: "social" })).channel).toBe("social");
+    expect(parseFilters(JSON.stringify({ channel: "nope" })).channel).toBe("all");
   });
 });

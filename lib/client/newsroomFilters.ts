@@ -15,7 +15,15 @@ export const SORT_LABEL: Record<FeedSort, string> = {
   adp: "ADP",
 };
 
+export type Channel = "all" | "outlets" | "social";
+export const CHANNEL_LABEL: Record<Channel, string> = { all: "Both", outlets: "News outlets", social: "Social" };
+
+/** Bluesky accounts show up as @handles; everything else is an outlet, a table, or the board itself. */
+export const isSocial = (source: string) => source.startsWith("@") || source === "Bluesky";
+
 export interface NewsroomFilters {
+  /** Social (Bluesky) vs news outlets vs both. */
+  channel: Channel;
   pos: Position | "ALL";
   /** Empty = every team. */
   teams: string[];
@@ -28,6 +36,7 @@ export interface NewsroomFilters {
 }
 
 export const DEFAULT_FILTERS: NewsroomFilters = {
+  channel: "all",
   pos: "ALL",
   teams: [],
   kinds: [],
@@ -42,6 +51,8 @@ export function applyFilters(items: FeedItem[], f: NewsroomFilters, query: strin
   const kinds = new Set(f.kinds);
   const sources = new Set(f.sources);
   return items.filter((i) => {
+    if (f.channel === "social" && !isSocial(i.source)) return false;
+    if (f.channel === "outlets" && isSocial(i.source)) return false;
     if (f.pos !== "ALL" && i.pos !== f.pos) return false;
     if (teams.size && !teams.has(i.team)) return false;
     if (kinds.size && !kinds.has(i.kind)) return false;
@@ -118,6 +129,7 @@ export function parseFilters(raw: string | null): NewsroomFilters {
     const j = JSON.parse(raw) as Partial<NewsroomFilters>;
     const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
     return {
+      channel: j.channel === "social" || j.channel === "outlets" ? j.channel : "all",
       pos: typeof j.pos === "string" ? (j.pos as NewsroomFilters["pos"]) : "ALL",
       teams: strs(j.teams),
       kinds: strs(j.kinds) as NewsKind[],
@@ -148,4 +160,10 @@ export function saveFilters(f: NewsroomFilters) {
 
 export function activeFilterCount(f: NewsroomFilters): number {
   return (f.pos !== "ALL" ? 1 : 0) + (f.teams.length ? 1 : 0) + (f.kinds.length ? 1 : 0) + (f.sources.length ? 1 : 0);
+}
+
+/** Sources that belong to the chosen channel — keeps the menu short when only outlets are wanted. */
+export function sourcesForChannel(sources: string[], channel: Channel): string[] {
+  if (channel === "all") return sources;
+  return sources.filter((s) => (channel === "social" ? isSocial(s) : !isSocial(s)));
 }

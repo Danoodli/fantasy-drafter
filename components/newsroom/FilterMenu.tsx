@@ -5,7 +5,7 @@
 
 import type { NewsKind } from "../../lib/engine/newsImportance";
 import { KIND_LABEL } from "../../lib/engine/newsImportance";
-import { DEFAULT_FILTERS, activeFilterCount, type NewsroomFilters } from "../../lib/client/newsroomFilters";
+import { DEFAULT_FILTERS, CHANNEL_LABEL, activeFilterCount, sourcesForChannel, type Channel, type NewsroomFilters } from "../../lib/client/newsroomFilters";
 import { KIND_TONE } from "./feedUi";
 
 const KINDS: NewsKind[] = ["season-ending", "suspension", "out", "doubtful", "questionable", "cleared", "transaction", "depth", "mention"];
@@ -42,6 +42,21 @@ export default function FilterMenu({
           <button onClick={() => onChange({ ...DEFAULT_FILTERS, sort: filters.sort })} className="font-mono text-xs text-ink-dim hover:text-ink">
             Reset all
           </button>
+        </div>
+
+        <p className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint">Channel</p>
+        <div className="mt-1 flex rounded border border-line font-mono text-[11px]" role="radiogroup" aria-label="Channel">
+          {(Object.keys(CHANNEL_LABEL) as Channel[]).map((c) => (
+            <button
+              key={c}
+              role="radio"
+              aria-checked={filters.channel === c}
+              onClick={() => onChange({ ...filters, channel: c })}
+              className={`px-2.5 py-1 ${filters.channel === c ? "bg-panel text-ink" : "text-ink-faint hover:text-ink"}`}
+            >
+              {c === "social" ? "Social (Bluesky)" : CHANNEL_LABEL[c]}
+            </button>
+          ))}
         </div>
 
         <p className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint">Kind of update</p>
@@ -93,7 +108,7 @@ export default function FilterMenu({
           </div>
         </div>
         <ul className="mt-1 grid gap-x-4 sm:grid-cols-2">
-          {sources.map((s) => (
+          {sourcesForChannel(sources, filters.channel).map((s) => (
             <li key={s}>
               <label className="flex cursor-pointer items-center gap-2 py-0.5 text-sm">
                 <input type="checkbox" checked={filters.sources.includes(s)} onChange={() => onChange({ ...filters, sources: toggle(filters.sources, s) })} />
@@ -104,7 +119,7 @@ export default function FilterMenu({
           ))}
         </ul>
         <p className="mt-3 text-xs text-ink-faint">
-          Bluesky accounts appear as @handles. To drop one everywhere, add it to the blocklist in Setup → Data sources.
+          Bluesky accounts appear as @handles; pick a channel above to see only outlets or only social. To drop an account everywhere, add it to the blocklist in Setup → Data sources.
         </p>
       </div>
     </details>
