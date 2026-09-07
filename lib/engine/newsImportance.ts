@@ -52,6 +52,8 @@ const CLEARED = [
   /\bgood to go\b/, /\bno longer\b/, /\bpractic(ed|ing) (fully|in full)\b/, /\bavoids?\b/, /\bwon'?t miss\b/,
   /\bnot expected to miss\b/, /\bsuited up\b/, /\bon (the )?practice field\b/,
 ];
+/** Recovery updates mention the original injury ("rehab from a torn ACL") — availability news, not a new season-ender. */
+const PROGRESS = [/\brehab/, /\brecover(y|ing)\b/, /\bprogressing\b/, /\bon track\b/, /\bahead of schedule\b/, /\bramping up\b/];
 const QUESTIONABLE = [
   /\bquestionable\b/, /\blimited\b/, /\bdnp\b/, /\bdid not practice\b/, /\bnot practicing\b/, /\bmissed practice\b/,
   /\bsat out\b/, /\bday[- ]to[- ]day\b/, /\bgame[- ]time decision\b/, /\bheld out\b/, /\bsidelined\b/, /\bnursing\b/,
@@ -70,6 +72,7 @@ const DEPTH = [
 /** Bucket a headline (plus any note) into a severity kind. */
 export function classifyKind(text: string): NewsKind {
   const t = text.toLowerCase();
+  if (PROGRESS.some((re) => re.test(t))) return "questionable";
   const hard = classifyNews(t);
   if (hard === "IR") return "season-ending";
   if (hard === "Sus") return "suspension";

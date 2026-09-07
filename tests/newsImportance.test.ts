@@ -33,6 +33,8 @@ describe("classifyKind", () => {
     ["Listed with the first-team offense on the depth chart", "depth"],
     ["Posts 120 yards in preseason win", "mention"],
     ["Among six Dolphins captains for 2026", "depth"],
+    ["Coach said Charbonnet (knee) looks awesome in his rehab from a torn ACL", "questionable"],
+    ["Recovering from ankle surgery, on track for Week 1", "questionable"],
   ])("%s → %s", (text, kind) => expect(classifyKind(text)).toBe(kind));
 });
 
