@@ -55,7 +55,8 @@ function normalizePos(ffcPos: string): Position | null {
 
 function projFor(sp: SeasonPlayer, scoring: ScoringSettings): number {
   if (sp.pos === "K" || sp.pos === "DST") return sp.projApplied;
-  return sp.proj ? scoreStatLine(sp.proj, scoring, sp.pos === "TE") : 0;
+  // No raw line (an FFA points-only row): fall back to the applied total rather than imputing.
+  return sp.proj ? scoreStatLine(sp.proj, scoring, sp.pos === "TE") : sp.projApplied;
 }
 
 function realizedFor(sp: SeasonPlayer, scoring: ScoringSettings): RealizedLine {

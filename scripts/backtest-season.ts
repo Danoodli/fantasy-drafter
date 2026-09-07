@@ -4,6 +4,12 @@
 //   pnpm backtest:season <year> [--format=ppr] [--strategy=balanced|all]
 //                        [--rooms=12] [--teams=12] [--rounds=15] [--bestball]
 //                        [--seed=42] [--refresh] [--json=out.json] [--snapshot-only]
+//                        [--source=espn|ffa]
+//
+// --source=ffa drafts from FantasyFootballAnalytics' preseason projections and
+// scores with nflverse realized stats (data/raw/seasons/ffa/<year>.json, built
+// by `pnpm build:ffa-snapshot <year>`) — the only way to reach 2018–2023, which
+// ESPN has purged.
 //
 // Two questions, answered separately:
 //   A. Projection quality — how well did draft-day projections predict realized
@@ -21,7 +27,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCsv } from "../lib/etl/csv";
-import { loadSeasonSnapshot } from "../lib/etl/seasonSnapshot";
+import { loadSeasonSnapshot, type SnapshotSource } from "../lib/etl/seasonSnapshot";
 import { buildHistoricalBoard, type CrossRow } from "../lib/etl/historicalBoard";
 import { biggestMisses, projectionReport, realizedValue, type ProjRow } from "../lib/engine/evaluate";
 import { replayRoom } from "../lib/engine/replay";
@@ -60,6 +66,11 @@ const teams = Number(flags.get("teams") ?? 12);
 const rounds = Number(flags.get("rounds") ?? (bestball ? 20 : 15));
 const rooms = Number(flags.get("rooms") ?? (strategyArg === "all" ? 4 : 12));
 const seed = Number(flags.get("seed") ?? 42);
+const source = (flags.get("source") ?? "espn") as SnapshotSource;
+if (source !== "espn" && source !== "ffa") {
+  console.error(`unknown --source=${source}; use espn or ffa`);
+  process.exit(1);
+}
 /** Force every strategy onto one value model (A/B against the shipped default). */
 const modelOverride = flags.get("model") as "unified" | "lineup" | "blend" | undefined;
 /** Alternative outcome-model parameters, e.g. a hold-out fit on one season. */
@@ -101,6 +112,7 @@ function configFor(): LeagueConfig {
 async function main() {
   const { snapshot, fromFixture } = await loadSeasonSnapshot(year, {
     refresh: flags.has("refresh"),
+    source,
     log: (l) => console.log(l),
   });
   if (flags.has("snapshot-only")) return;
@@ -116,16 +128,18 @@ async function main() {
   const withWaivers = config.leagueType !== "bestball"; // best ball has no waiver wire
   const { board, realized, projRows, join: j } = buildHistoricalBoard(snapshot, cross, format, config);
 
+  const projLabel = source === "ffa" ? "FFA" : "ESPN";
+  const adpLabel = source === "ffa" ? "FFA ADP" : "FFC ADP";
   console.log(
-    `\nboard ${year} ${format}: ${board.length} players (${j.ffc} from FFC ADP, ${j.deepPool} deep pool), ` +
-      `${j.matched} matched to ESPN, ${j.imputed} imputed projections, ${j.unmatched.length} unmatched`
+    `\nboard ${year} ${format} [${source}]: ${board.length} players (${j.ffc} from ${adpLabel}, ${j.deepPool} deep pool), ` +
+      `${j.matched} matched to ${projLabel}, ${j.imputed} imputed projections, ${j.unmatched.length} unmatched`
   );
   if (j.unmatched.length) {
-    console.log(`  unmatched (no ESPN row — realized as 0): ${j.unmatched.slice(0, 8).join("; ")}${j.unmatched.length > 8 ? " …" : ""}`);
+    console.log(`  unmatched (no ${projLabel} row — realized as 0): ${j.unmatched.slice(0, 8).join("; ")}${j.unmatched.length > 8 ? " …" : ""}`);
   }
 
   // ---- A. projection quality ------------------------------------------
-  hr(`A. Projection quality — ${year} draft-day projections vs realized (${format})`);
+  hr(`A. Projection quality — ${year} ${projLabel} draft-day projections vs realized (${format})`);
   const rep = projectionReport(projRows);
   console.log(`n=${rep.n} players with a real projection and a realized line\n`);
   console.log(`${padR("", 8)}${pad("n", 5)}${pad("rho", 8)}${pad("pairwise", 10)}${pad("MAE", 8)}${pad("bias", 8)}`);
@@ -443,7 +457,15 @@ async function main() {
 
   if (flags.has("json")) {
     const out = flags.get("json")!;
-    writeFileSync(out, JSON.stringify({ year, format, config, projection: rep, decisions: summary, seats }, null, 1));
+    const shapes = Object.fromEntries(
+      [...shape.entries()].map(([id, sh]) => [
+        id,
+        Object.fromEntries(POSITIONS.map((q) => [q, { engine: sh.engine[q].n / sh.seats, bot: sh.bot[q].n / sh.seats, enginePts: sh.engine[q].pts / sh.seats, botPts: sh.bot[q].pts / sh.seats }])),
+      ])
+    );
+    const ranges = [["1-3", 0, 36], ["4-7", 36, 84], ["8-12", 84, 144], ["13+", 144, 9999]] as const;
+    const byRange = Object.fromEntries(ranges.map(([label, lo, hi]) => [label, projectionReport(projRows.filter((r) => r.adp > lo && r.adp <= hi))]));
+    writeFileSync(out, JSON.stringify({ year, source, format, config, projection: rep, byRange, decisions: summary, shapes, seats }, null, 1));
     console.log(`\nwrote ${out}`);
   }
 }

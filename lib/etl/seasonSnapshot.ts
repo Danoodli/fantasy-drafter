@@ -25,15 +25,25 @@ export interface FfcSnapshot {
   players: FfcPlayer[];
 }
 
+/** Where a snapshot's projections and ADP came from. Realized stats are ESPN's (espn) or nflverse's (ffa). */
+export type SnapshotSource = "espn" | "ffa";
+
 export interface SeasonSnapshot {
   year: number;
   fetchedAt: string;
+  /** Undefined on older files = "espn". */
+  source?: SnapshotSource;
+  /**
+   * One row per player: draft-day projection + realized weekly lines. Named for
+   * the original source; FFA snapshots fill it from FFA + nflverse.
+   */
   espn: SeasonPlayer[];
+  /** ADP spine by format. FFA snapshots carry FFA's single ADP under every format. */
   ffc: Partial<Record<ScoringFormat, FfcSnapshot>>;
 }
 
-export function snapshotPath(year: number): string {
-  return join(SEASONS_DIR, `${year}.json`);
+export function snapshotPath(year: number, source: SnapshotSource = "espn"): string {
+  return source === "ffa" ? join(SEASONS_DIR, "ffa", `${year}.json`) : join(SEASONS_DIR, `${year}.json`);
 }
 
 async function fetchEspnSeason(year: number): Promise<SeasonPlayer[]> {
@@ -70,8 +80,10 @@ async function fetchFfcSeason(format: ScoringFormat, year: number): Promise<FfcS
 }
 
 export interface LoadOptions {
-  /** Re-fetch even when a fixture exists. */
+  /** Re-fetch even when a fixture exists (ESPN source only). */
   refresh?: boolean;
+  /** "ffa" loads the committed FFA + nflverse snapshot (built by `pnpm build:ffa-snapshot`); never fetches. */
+  source?: SnapshotSource;
   log?: (line: string) => void;
 }
 
@@ -81,7 +93,15 @@ export async function loadSeasonSnapshot(
   opts: LoadOptions = {}
 ): Promise<{ snapshot: SeasonSnapshot; fromFixture: boolean }> {
   const log = opts.log ?? (() => {});
-  const path = snapshotPath(year);
+  const source = opts.source ?? "espn";
+  const path = snapshotPath(year, source);
+  if (source === "ffa") {
+    if (!existsSync(path))
+      throw new Error(`no FFA snapshot for ${year} at ${path} — run \`pnpm build:ffa-snapshot ${year}\` first`);
+    const snapshot = JSON.parse(readFileSync(path, "utf8")) as SeasonSnapshot;
+    log(`season ${year}: loaded FFA snapshot (${snapshot.espn.length} players, built ${snapshot.fetchedAt.slice(0, 10)})`);
+    return { snapshot, fromFixture: true };
+  }
   if (!opts.refresh && existsSync(path)) {
     const snapshot = JSON.parse(readFileSync(path, "utf8")) as SeasonSnapshot;
     log(`season ${year}: loaded fixture (${snapshot.espn.length} ESPN players, fetched ${snapshot.fetchedAt.slice(0, 10)})`);

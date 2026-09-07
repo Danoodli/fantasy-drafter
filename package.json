@@ -11,6 +11,8 @@
     "test": "vitest run",
     "backtest": "tsx scripts/backtest.ts",
     "backtest:season": "tsx scripts/backtest-season.ts",
+    "backtest:history": "tsx scripts/backtest-history.ts",
+    "build:ffa-snapshot": "tsx scripts/build-ffa-snapshot.ts",
     "calibrate": "tsx scripts/calibrate-outcomes.ts",
     "calibrate:survival": "tsx scripts/calibrate-survival.ts",
     "backtest:gate": "tsx scripts/backtest-gate.ts",

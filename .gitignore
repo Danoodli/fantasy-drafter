@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# fetched nflverse weekly stats (rebuildable; the FFA snapshots are what gets committed)
+/data/cache/
