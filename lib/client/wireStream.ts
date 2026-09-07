@@ -5,8 +5,7 @@
 // the socket delivers it. No polling gap right before your pick. The 10-min
 // poll stays as the fallback/backfill; this stream is the tip of the spear.
 
-import type { BoardPlayer } from "../types";
-import { matchNewsToPlayers, type PlayerNews } from "./espnNews";
+import type { NewsItem } from "../etl/newsMatch";
 
 const JETSTREAM = "wss://jetstream2.us-east.bsky.network/subscribe";
 const RECONNECT_MS = 15_000;
@@ -46,9 +45,8 @@ async function resolveDids(handles: string[]): Promise<Map<string, string>> {
  * arrive. Returns a cleanup function. Reconnects itself until cleaned up.
  */
 export function connectWireStream(
-  players: BoardPlayer[],
   handles: string[],
-  onNews: (matched: Map<string, PlayerNews>) => void,
+  onPost: (item: NewsItem) => void,
   opts: { extraDids?: Map<string, string>; onStatus?: (connected: boolean) => void } = {}
 ): () => void {
   let ws: WebSocket | null = null;
@@ -78,23 +76,14 @@ export function connectWireStream(
           const text = ev.commit.record?.text ?? "";
           if (!text) return;
           const handle = ev.did ? didToHandle.get(ev.did) : undefined;
-          const matched = matchNewsToPlayers(
-            [
-              {
-                headline: text.length > 140 ? `${text.slice(0, 140)}…` : text,
-                description: text,
-                published: ev.commit.record?.createdAt ?? new Date().toISOString(),
-                href:
-                  handle && ev.commit.rkey
-                    ? `https://bsky.app/profile/${handle}/post/${ev.commit.rkey}`
-                    : null,
-                athleteIds: [],
-              },
-            ],
-            players,
-            48
-          );
-          if (matched.size > 0) onNews(matched);
+          onPost({
+            headline: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+            description: text,
+            published: ev.commit.record?.createdAt ?? new Date().toISOString(),
+            href: handle && ev.commit.rkey ? `https://bsky.app/profile/${handle}/post/${ev.commit.rkey}` : null,
+            athleteIds: [],
+            source: handle ? `@${handle}` : "Bluesky",
+          });
         } catch {
           // malformed frame — ignore
         }

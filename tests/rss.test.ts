@@ -9,6 +9,8 @@ const XML = `<?xml version="1.0"?><rss version="2.0"><channel><title>NFL</title>
 <item><title>Rome Odunze: Not practicing Monday</title><link>https://example.com/b</link>
 <pubDate>Mon, 07 Sep 2026 12:50:00 PM PDT</pubDate></item>
 <item><title></title><link>https://example.com/empty</link></item>
+<item><title>Puka Nacua expected to play Thursday - FOX Sports</title><link>https://news.google.com/rss/articles/x</link>
+<pubDate>Mon, 07 Sep 2026 04:00:10 GMT</pubDate><source url="https://www.foxsports.com">FOX Sports</source></item>
 </channel></rss>`;
 
 describe("parseRss", () => {
@@ -25,8 +27,13 @@ describe("parseRss", () => {
   it("parses RotoWire's 12-hour Pacific format", () => {
     expect(items[1].published).toBe("2026-09-07T19:50:00.000Z");
   });
+  it("reads the aggregator <source> and strips its suffix from the title", () => {
+    expect(items[2].source).toBe("FOX Sports");
+    expect(items[2].headline).toBe("Puka Nacua expected to play Thursday");
+    expect(items[0].source).toBeUndefined();
+  });
   it("drops items with no title and tolerates a missing description", () => {
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items[1].description).toBe("");
   });
   it("returns [] for garbage", () => expect(parseRss("not xml")).toEqual([]));

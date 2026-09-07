@@ -15,15 +15,15 @@ import { useNow } from "../lib/client/useNow";
 import { formatAge } from "../lib/client/boardAge";
 import { POS_COLOR, POS_ORDER } from "../lib/client/pos";
 import { gradeBoard } from "../lib/engine/injuryFeed";
-import { buildFeed, type FeedItem } from "../lib/engine/newsImportance";
+import { buildFeed, groupStories, type FeedItem } from "../lib/engine/newsImportance";
 import {
-  applyFilters, sortFeed, pickTopStories, countBy, loadFilters, saveFilters, DEFAULT_FILTERS, SORT_LABEL,
+  applyFilters, sortStories, pickTopStories, countBy, loadFilters, saveFilters, DEFAULT_FILTERS, SORT_LABEL,
   type NewsroomFilters, type FeedSort,
 } from "../lib/client/newsroomFilters";
 import InjuryBadge from "./InjuryBadge";
 import PlayerModal from "./PlayerModal";
 import TopStories from "./newsroom/TopStories";
-import FeedCard from "./newsroom/FeedCard";
+import StoryCard from "./newsroom/StoryCard";
 import FilterMenu from "./newsroom/FilterMenu";
 import Headshot from "./newsroom/Headshot";
 import { ago } from "./newsroom/feedUi";
@@ -76,8 +76,8 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
   const now = useNow(60_000);
   const graded = useMemo(() => gradeBoard(board, live.liveStatus, live.boardNews), [board, live.liveStatus, live.boardNews]);
   const feed = useMemo(
-    () => (now == null ? [] : buildFeed(board, live.boardNews, live.liveStatus, now)),
-    [board, live.boardNews, live.liveStatus, now]
+    () => (now == null ? [] : buildFeed(board, live.allNews, live.liveStatus, now)),
+    [board, live.allNews, live.liveStatus, now]
   );
   const byId = useMemo(() => new Map(graded.players.map((p) => [p.id, p])), [graded]);
 
@@ -115,7 +115,7 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
   }, [frozen, feed]);
 
   const filtered = useMemo(() => applyFilters(frozen ?? feed, filters, query), [frozen, feed, filters, query]);
-  const rows = useMemo(() => sortFeed(filtered, filters.sort), [filtered, filters.sort]);
+  const stories = useMemo(() => sortStories(groupStories(filtered), filters.sort), [filtered, filters.sort]);
   const topStories = useMemo(
     () => (now == null ? [] : pickTopStories(applyFilters(feed, { ...filters, pos: "ALL", kinds: [] }, ""), TOP_STORIES, now)),
     [feed, filters, now]
@@ -190,6 +190,10 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
         <span>
           <b className={`font-display text-xl ${statusChanges ? "text-warn" : "text-ink"}`}>{statusChanges}</b> status changes vs board
         </span>
+        <span title="Bluesky accounts polled directly, plus curated-list members on the live filter">
+          <b className="font-display text-xl text-ink">{live.wire.handles}</b> accounts
+          {live.wire.listMembers > 0 && <> + <b className="font-display text-xl text-ink">{live.wire.listMembers}</b> via lists</>}
+        </span>
         <span className="flex gap-2" title="Injury designations among the top 200 by ADP">
           {["Questionable", "Doubtful", "Out", "IR", "Sus", "PUP"].map((s) => (
             <span key={s} className={injuryCounts[s] ? "text-warn" : "text-ink-faint"}>
@@ -215,7 +219,7 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
       <section aria-label="The wire">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-2xl font-bold uppercase tracking-tight">
-            The wire <span className="font-mono text-xs font-normal normal-case tracking-normal text-ink-faint">{rows.length} of {feed.length} updates</span>
+            The wire <span className="font-mono text-xs font-normal normal-case tracking-normal text-ink-faint">{stories.length} players · {filtered.length} of {feed.length} updates</span>
           </h2>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded border border-line font-mono text-xs" role="radiogroup" aria-label="Sort">
@@ -267,7 +271,7 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
             {pending} new update{pending === 1 ? "" : "s"} ↑
           </button>
         )}
-        {rows.length === 0 ? (
+        {stories.length === 0 ? (
           <p className="rounded-xl bg-panel p-8 text-center text-sm text-ink-dim">
             {now == null || live.lastRefresh == null
               ? "Pulling the wire…"
@@ -277,8 +281,8 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
           </p>
         ) : (
           <ol className="stagger flex flex-col gap-2">
-            {rows.slice(0, 150).map((f) => (
-              <FeedCard key={f.id} item={f} player={byId.get(f.playerId)} now={now} onOpen={setModal} />
+            {stories.slice(0, 120).map((s) => (
+              <StoryCard key={s.playerId} story={s} player={byId.get(s.playerId)} now={now} onOpen={setModal} />
             ))}
           </ol>
         )}
@@ -373,7 +377,7 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
       )}
 
       <footer className="mt-4 font-mono text-[10px] text-ink-faint">
-        Sources: ESPN injuries table + headlines · CBS Sports, RotoWire, Yahoo, PFT · Bluesky wire · photos ESPN ({board.meta.lane ?? "full"} lane board)
+        Sources: ESPN injuries table + headlines · CBS Sports, RotoWire, The Athletic, Yahoo, PFT, Google News · Bluesky wire · photos ESPN ({board.meta.lane ?? "full"} lane board)
       </footer>
     </main>
   );

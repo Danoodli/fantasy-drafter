@@ -19,8 +19,8 @@ interface EspnNewsItem {
   categories?: { type?: string; athleteId?: number }[];
 }
 
-/** Fetch ESPN's league news feed and match it to the board. */
-export async function fetchBoardNews(players: BoardPlayer[]): Promise<Map<string, PlayerNews>> {
+/** Fetch ESPN's league news feed as raw items (matching happens once, in the hook). */
+export async function fetchEspnNewsItems(): Promise<NewsItem[]> {
   // site.web.api serves the same feed WITH CORS headers; plain site.api doesn't.
   const res = await fetch(
     "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=50"
@@ -35,6 +35,12 @@ export async function fetchBoardNews(players: BoardPlayer[]): Promise<Map<string
     athleteIds: (a.categories ?? [])
       .filter((c) => c.type === "athlete" && c.athleteId != null)
       .map((c) => String(c.athleteId)),
+    source: "ESPN",
   }));
-  return match(items, players);
+  return items;
+}
+
+/** Newest ESPN headline per player (kept for callers that only want the badge view). */
+export async function fetchBoardNews(players: BoardPlayer[]): Promise<Map<string, PlayerNews>> {
+  return match(await fetchEspnNewsItems(), players);
 }

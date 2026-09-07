@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_WIRE_LISTS } from "./bskyNews";
+import { DEFAULT_WIRE_HANDLES, DEFAULT_WIRE_LISTS } from "./bskyNews";
 
 // Data-source preferences: which projection and ADP opinions the board runs
 // on, globally, persisted on-device. Every source is free and anonymous;
@@ -43,10 +43,40 @@ export const DEFAULT_SOURCES: SourcePrefs = {
 
 const KEY = "draft-cockpit-sources-v1";
 
+/** The wire defaults before 2026-09-07. The handles box used to save what it displayed, so a stored copy of these is a snapshot, not a choice. */
+export const LEGACY_WIRE_DEFAULTS = [
+  "rapsheet.bsky.social",
+  "tompelissero.bsky.social",
+  "profootballtalk.bsky.social",
+  "matthewberry.bsky.social",
+  "rotoworld-fb.bsky.social",
+  "nflnewsreposterbot.bsky.social",
+];
+
+/**
+ * Merge saved prefs over the defaults and repair stale handle lists: a list
+ * made only of (old or new) defaults becomes "use defaults"; a list from
+ * before the expansion that added custom handles keeps the customs on top of
+ * the current defaults.
+ */
+export function migrateSources(saved: Partial<SourcePrefs>): SourcePrefs {
+  const prefs: SourcePrefs = { ...DEFAULT_SOURCES, ...saved };
+  const handles = Array.isArray(prefs.wireHandles) ? prefs.wireHandles : [];
+  if (handles.length) {
+    const defaults = new Set([...LEGACY_WIRE_DEFAULTS, ...DEFAULT_WIRE_HANDLES]);
+    const custom = handles.filter((h) => !defaults.has(h));
+    const newOnly = DEFAULT_WIRE_HANDLES.filter((h) => !LEGACY_WIRE_DEFAULTS.includes(h));
+    const predatesExpansion = !handles.some((h) => newOnly.includes(h));
+    if (custom.length === 0) prefs.wireHandles = [];
+    else if (predatesExpansion) prefs.wireHandles = [...DEFAULT_WIRE_HANDLES, ...custom];
+  }
+  return prefs;
+}
+
 export function loadSources(): SourcePrefs {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULT_SOURCES, ...JSON.parse(raw) } : DEFAULT_SOURCES;
+    return raw ? migrateSources(JSON.parse(raw)) : DEFAULT_SOURCES;
   } catch {
     return DEFAULT_SOURCES;
   }

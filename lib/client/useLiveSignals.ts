@@ -1,23 +1,28 @@
 "use client";
 
 // Every live signal the app polls, in one place: Sleeper trending, ESPN
-// headlines, CORS-open RSS, the Bluesky wire (handles + curated lists), the
-// ESPN injuries table, and the Jetstream push. Cockpit and Newsroom share it.
+// headlines, RSS outlets, the Bluesky wire (handles + curated lists), the
+// ESPN injuries table, and the Jetstream push. Items are matched to players
+// ONCE here; `allNews` keeps every item per player (the Newsroom), `boardNews`
+// is the newest per player (badges and cards). Cockpit and Newsroom share it.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Board } from "../types";
 import { loadSources, fetchTrendingIds } from "./sources";
-import { fetchBoardNews } from "./espnNews";
-import type { PlayerNews } from "../etl/newsMatch";
-import { fetchWireNews, fetchListNews, resolveListMembers, mergeNews, DEFAULT_WIRE_HANDLES } from "./bskyNews";
+import { fetchEspnNewsItems } from "./espnNews";
+import { matchAllNews, mergeAllNews, newestPerPlayer, type NewsItem, type PlayerNews } from "../etl/newsMatch";
+import { fetchWireItems, fetchListItems, resolveListMembers, DEFAULT_WIRE_HANDLES, WIRE_WINDOW_HOURS } from "./bskyNews";
 import { connectWireStream } from "./wireStream";
 import { fetchEspnInjuries, type LiveStatus } from "./espnInjuries";
-import { fetchRssNews } from "./rssNews";
+import { fetchRssItems } from "./rssNews";
 
 export const LIVE_REFRESH_MS = 10 * 60 * 1000;
-const BAKED_WINDOW_MS = 72 * 3_600_000;
+const ARTICLE_WINDOW_HOURS = 72;
 
 export interface LiveSignals {
+  /** Every matched item per player, newest first. */
+  allNews: Map<string, PlayerNews[]>;
+  /** Newest item per player — the 📰 badge's view. */
   boardNews: Map<string, PlayerNews>;
   trendingIds: Set<string>;
   liveStatus: Map<string, LiveStatus>;
@@ -25,19 +30,22 @@ export interface LiveSignals {
   lastRefresh: number | null;
   /** Jetstream currently connected. */
   connected: boolean;
+  /** How wide the wire is: polled handles and list members on the live filter. */
+  wire: { handles: number; listMembers: number };
   /** Force a poll now (draft start, manual refresh). */
   refresh: () => void;
 }
 
 type Injuries = { status: Map<string, LiveStatus>; news: Map<string, PlayerNews> };
-const emptyNews = () => new Map<string, PlayerNews>();
+const noItems = () => [] as NewsItem[];
 
 export function useLiveSignals(board: Board, onWire?: (playerId: string, item: PlayerNews) => void): LiveSignals {
-  const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
+  const [allNews, setAllNews] = useState<Map<string, PlayerNews[]>>(new Map());
   const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
   const [liveStatus, setLiveStatus] = useState<Map<string, LiveStatus>>(new Map());
   const [lastRefresh, setLastRefresh] = useState<number | null>(null);
   const [connected, setConnected] = useState(false);
+  const [wire, setWire] = useState({ handles: 0, listMembers: 0 });
   const [epoch, setEpoch] = useState(0);
   const onWireRef = useRef(onWire);
   useEffect(() => {
@@ -48,9 +56,10 @@ export function useLiveSignals(board: Board, onWire?: (playerId: string, item: P
 
   useEffect(() => {
     const prefs = loadSources();
-    const handles = prefs.wireHandles.length ? prefs.wireHandles : DEFAULT_WIRE_HANDLES;
     const blocked = new Set(prefs.wireBlock);
+    const handles = (prefs.wireHandles.length ? prefs.wireHandles : DEFAULT_WIRE_HANDLES).filter((h) => !blocked.has(h));
     let cancelled = false;
+    let listMembers = 0; // filled once the curated lists resolve; reported with the next poll
 
     const load = () => {
       if (prefs.trending)
@@ -59,26 +68,30 @@ export function useLiveSignals(board: Board, onWire?: (playerId: string, item: P
           .catch(() => {
             // offline — badges just don't show
           });
-      // Build-time news rides along (72h window).
-      const baked = emptyNews();
-      const cutoff = Date.now() - BAKED_WINDOW_MS;
+      // Build-time notes ride along (72h window).
+      const baked = new Map<string, PlayerNews[]>();
+      const cutoff = Date.now() - ARTICLE_WINDOW_HOURS * 3_600_000;
       for (const p of board.players) {
-        if (p.news && Date.parse(p.news.published) >= cutoff) baked.set(p.id, { ...p.news, href: null });
+        if (p.news && Date.parse(p.news.published) >= cutoff)
+          baked.set(p.id, [{ headline: p.news.headline, published: p.news.published, href: p.news.href ?? null, source: p.news.source ?? "Board" }]);
       }
-      const safe = (p: Promise<Map<string, PlayerNews>>) => p.catch(emptyNews);
-      const feeds: Promise<Map<string, PlayerNews>>[] = [
-        safe(fetchBoardNews(board.players)),
-        safe(fetchRssNews(board.players)),
-        prefs.wire ? safe(fetchWireNews(board.players, handles, blocked)) : Promise.resolve(emptyNews()),
-        prefs.wire && prefs.wireLists.length
-          ? safe(fetchListNews(board.players, prefs.wireLists, blocked))
-          : Promise.resolve(emptyNews()),
-      ];
-      const injuries: Promise<Injuries> = fetchEspnInjuries(board.players).catch(() => ({ status: new Map(), news: emptyNews() }));
-      Promise.all([Promise.all(feeds), injuries]).then(([[espn, rss, wire, lists], inj]) => {
+      const safe = (p: Promise<NewsItem[]>) => p.catch(noItems);
+      const injuries: Promise<Injuries> = fetchEspnInjuries(board.players).catch(() => ({ status: new Map(), news: new Map() }));
+      Promise.all([
+        safe(fetchEspnNewsItems()),
+        safe(fetchRssItems()),
+        prefs.wire ? safe(fetchWireItems(handles, blocked)) : Promise.resolve(noItems()),
+        prefs.wire && prefs.wireLists.length ? safe(fetchListItems(prefs.wireLists, blocked)) : Promise.resolve(noItems()),
+        injuries,
+      ]).then(([espn, rss, posts, listPosts, inj]) => {
         if (cancelled) return;
-        setBoardNews(mergeNews(baked, inj.news, espn, rss, wire, lists));
+        const articles = matchAllNews([...espn, ...rss], board.players, ARTICLE_WINDOW_HOURS);
+        const wirePosts = matchAllNews([...posts, ...listPosts], board.players, WIRE_WINDOW_HOURS);
+        const notes = new Map<string, PlayerNews[]>();
+        for (const [id, n] of inj.news) notes.set(id, [{ ...n, source: "ESPN injury note" }]);
+        setAllNews(mergeAllNews(baked, notes, articles, wirePosts));
         if (inj.status.size) setLiveStatus(inj.status);
+        setWire({ handles: prefs.wire ? handles.length : 0, listMembers });
         setLastRefresh(Date.now());
       });
     };
@@ -91,14 +104,18 @@ export function useLiveSignals(board: Board, onWire?: (playerId: string, item: P
     if (prefs.wire) {
       const start = (extra: Map<string, string>) => {
         if (cancelled) return;
+        listMembers = extra.size;
+        // Async by construction (resolves after the effect ran), so the ticker updates without waiting for the next poll.
+        Promise.resolve().then(() => !cancelled && setWire({ handles: handles.length, listMembers }));
         disconnect = connectWireStream(
-          board.players,
           handles,
-          (matched) => {
+          (item) => {
             if (cancelled) return;
-            setBoardNews((prev) => mergeNews(prev, matched));
-            const [id, item] = [...matched.entries()][0];
-            onWireRef.current?.(id, item);
+            const matched = matchAllNews([item], board.players, WIRE_WINDOW_HOURS);
+            if (matched.size === 0) return;
+            setAllNews((prev) => mergeAllNews(prev, matched));
+            const [id, list] = [...matched.entries()][0];
+            onWireRef.current?.(id, list[0]);
           },
           { extraDids: extra, onStatus: (c) => !cancelled && setConnected(c) }
         );
@@ -117,5 +134,6 @@ export function useLiveSignals(board: Board, onWire?: (playerId: string, item: P
     };
   }, [board, epoch]);
 
-  return { boardNews, trendingIds, liveStatus, lastRefresh, connected, refresh };
+  const boardNews = useMemo(() => newestPerPlayer(allNews), [allNews]);
+  return { allNews, boardNews, trendingIds, liveStatus, lastRefresh, connected, wire, refresh };
 }

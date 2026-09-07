@@ -471,11 +471,17 @@ function buildBoard(
       if (merged !== p.injury) tabled++;
       p.injury = merged;
     }
-    const candidates = [p.news, table.news.get(p.id), rssNews.get(p.id)].filter(
-      (n): n is { headline: string; published: string } => !!n && Number.isFinite(Date.parse(n.published))
-    );
-    candidates.sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
-    p.news = candidates[0] ? { headline: candidates[0].headline, published: candidates[0].published } : null;
+    type Note = { headline: string; published: string; href?: string | null; source?: string };
+    const candidates: Note[] = [];
+    if (p.news) candidates.push({ ...p.news, source: p.news.source ?? "FantasyPros" });
+    const tableNote = table.news.get(p.id);
+    if (tableNote) candidates.push({ ...tableNote, source: "ESPN injury note" });
+    const rssNote = rssNews.get(p.id);
+    if (rssNote) candidates.push(rssNote);
+    const best = candidates
+      .filter((n) => Number.isFinite(Date.parse(n.published)))
+      .sort((a, b) => Date.parse(b.published) - Date.parse(a.published))[0];
+    p.news = best ? { headline: best.headline, published: best.published, href: best.href ?? null, source: best.source } : null;
   }
   const withNews = players.filter((p) => p.news).length;
   console.log(`  injuries: ${tabled} statuses updated from ESPN's table · news: ${withNews} players with a fresh note`);

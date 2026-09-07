@@ -119,17 +119,17 @@ export function feedToNews(
       published: f.post?.record?.createdAt ?? "",
       href: postUrl(f.post?.uri, handle),
       athleteIds: [],
+      source: handle ? `@${handle}` : "Bluesky",
     });
   }
   return out;
 }
 
-/** Pull each handle's recent posts and match player names against the board. */
-export async function fetchWireNews(
-  players: BoardPlayer[],
-  handles: string[],
-  blocked: ReadonlySet<string> = new Set()
-): Promise<Map<string, PlayerNews>> {
+/** Wire posts are only interesting FRESH — 48 h window. */
+export const WIRE_WINDOW_HOURS = 48;
+
+/** Pull each handle's recent posts as raw items. */
+export async function fetchWireItems(handles: string[], blocked: ReadonlySet<string> = new Set()): Promise<NewsItem[]> {
   const items: NewsItem[] = [];
   await Promise.all(
     handles.map(async (handle) => {
@@ -146,8 +146,16 @@ export async function fetchWireNews(
       }
     })
   );
-  // Wire news is only interesting FRESH — 48h window.
-  return matchNewsToPlayers(items, players, 48);
+  return items;
+}
+
+/** Newest wire post per player (badge view). */
+export async function fetchWireNews(
+  players: BoardPlayer[],
+  handles: string[],
+  blocked: ReadonlySet<string> = new Set()
+): Promise<Map<string, PlayerNews>> {
+  return matchNewsToPlayers(await fetchWireItems(handles, blocked), players, WIRE_WINDOW_HOURS);
 }
 
 /** Newest-wins merge of news maps (wire beats articles on recency, not rank). */
@@ -195,12 +203,8 @@ async function listUri(ref: string): Promise<string | null> {
   return did ? `at://${did}/app.bsky.graph.list/${parsed.rkey}` : null;
 }
 
-/** One request per list backfills every member's recent posts (48 h window). */
-export async function fetchListNews(
-  players: BoardPlayer[],
-  lists: string[],
-  blocked: ReadonlySet<string>
-): Promise<Map<string, PlayerNews>> {
+/** One request per list backfills every member's recent posts, as raw items. */
+export async function fetchListItems(lists: string[], blocked: ReadonlySet<string>): Promise<NewsItem[]> {
   const items: NewsItem[] = [];
   await Promise.all(
     lists.map(async (ref) => {
@@ -216,7 +220,16 @@ export async function fetchListNews(
       }
     })
   );
-  return matchNewsToPlayers(items, players, 48);
+  return items;
+}
+
+/** Newest list post per player (badge view). */
+export async function fetchListNews(
+  players: BoardPlayer[],
+  lists: string[],
+  blocked: ReadonlySet<string>
+): Promise<Map<string, PlayerNews>> {
+  return matchNewsToPlayers(await fetchListItems(lists, blocked), players, WIRE_WINDOW_HOURS);
 }
 
 /** DID → handle for every list member, for the Jetstream filter. */

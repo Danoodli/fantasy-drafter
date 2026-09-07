@@ -42,14 +42,20 @@ export function toIso(raw: string): string {
 export function parseRss(xml: string): NewsItem[] {
   const out: NewsItem[] = [];
   for (const block of xml.match(/<item\b[\s\S]*?<\/item>/gi) ?? []) {
-    const headline = stripTags(decodeEntities(tag(block, "title")));
+    let headline = stripTags(decodeEntities(tag(block, "title")));
     if (!headline) continue;
+    const source = stripTags(decodeEntities(tag(block, "source"))) || undefined;
+    // Aggregators (Google News) append " - Outlet" to every title; the <source> tag already says so.
+    if (source && headline.toLowerCase().endsWith(` - ${source.toLowerCase()}`)) {
+      headline = headline.slice(0, headline.length - source.length - 3).trim();
+    }
     out.push({
       headline,
       description: stripTags(decodeEntities(tag(block, "description"))),
       published: toIso(tag(block, "pubDate") || tag(block, "dc:date")),
       href: tag(block, "link") || null,
       athleteIds: [],
+      source,
     });
   }
   return out;

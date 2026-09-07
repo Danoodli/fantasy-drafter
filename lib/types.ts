@@ -68,8 +68,8 @@ export interface BoardPlayer {
   statsSleeper?: StatLine;
   /** Third projection source: FantasyPros consensus stat line (keyed builds only). */
   statsFp?: StatLine;
-  /** Build-time news blurb (FantasyPros, keyed builds) — merged with live feeds client-side. */
-  news?: { headline: string; published: string } | null;
+  /** Build-time news blurb (newest of FantasyPros, ESPN's injury note, RSS/Google News) — merged with live feeds client-side. */
+  news?: { headline: string; published: string; href?: string | null; source?: string } | null;
   /** ADP movement vs ~3 days ago, in picks. POSITIVE = rising (drafted earlier). */
   adpTrend?: number | null;
   /** Every ADP opinion we have; `adp` above holds the ACTIVE one. */

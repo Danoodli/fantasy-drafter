@@ -6,24 +6,54 @@
     "fetchedAt": "2026-09-07T20:00:46.273Z"
   },
   "espn-kona.json": {
-    "fetchedAt": "2026-09-07T20:00:47.376Z"
+    "fetchedAt": "2026-09-07T21:40:24.445Z"
   },
   "ffc-standard.json": {
-    "fetchedAt": "2026-09-07T20:01:11.625Z"
+    "fetchedAt": "2026-09-07T21:40:24.640Z"
   },
   "ffc-half-ppr.json": {
-    "fetchedAt": "2026-09-07T20:01:11.703Z"
+    "fetchedAt": "2026-09-07T21:40:24.767Z"
   },
   "ffc-ppr.json": {
-    "fetchedAt": "2026-09-07T20:01:11.840Z"
+    "fetchedAt": "2026-09-07T21:40:24.874Z"
   },
   "ffc-2qb.json": {
-    "fetchedAt": "2026-09-07T20:01:11.906Z"
+    "fetchedAt": "2026-09-07T21:40:24.981Z"
   },
   "sleeper-players-slim.json": {
     "fetchedAt": "2026-09-07T20:00:47.158Z"
   },
   "sleeper-projections.json": {
-    "fetchedAt": "2026-09-07T20:00:46.242Z"
+    "fetchedAt": "2026-09-07T21:40:23.773Z"
+  },
+  "rss-cbs.xml": {
+    "fetchedAt": "2026-09-07T21:40:23.780Z"
+  },
+  "rss-espn.xml": {
+    "fetchedAt": "2026-09-07T21:40:23.808Z"
+  },
+  "espn-injuries.json": {
+    "fetchedAt": "2026-09-07T21:40:23.830Z"
+  },
+  "rss-athletic.xml": {
+    "fetchedAt": "2026-09-07T21:40:23.920Z"
+  },
+  "rss-pft.xml": {
+    "fetchedAt": "2026-09-07T21:40:23.989Z"
+  },
+  "rss-yahoo.xml": {
+    "fetchedAt": "2026-09-07T21:40:24.022Z"
+  },
+  "rss-rotowire.xml": {
+    "fetchedAt": "2026-09-07T21:40:24.180Z"
+  },
+  "rss-gnews-injuries.xml": {
+    "fetchedAt": "2026-09-07T21:40:24.265Z"
+  },
+  "rss-gnews-moves.xml": {
+    "fetchedAt": "2026-09-07T21:40:24.271Z"
+  },
+  "rss-gnews-fantasy.xml": {
+    "fetchedAt": "2026-09-07T21:40:24.279Z"
   }
 }

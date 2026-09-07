@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  classifyKind, relevanceOf, recencyOf, importanceOf, sourceLabel, buildFeed, KIND_SEVERITY,
+  classifyKind, relevanceOf, recencyOf, importanceOf, sourceLabel, buildFeed, groupStories, KIND_SEVERITY,
 } from "../lib/engine/newsImportance";
 import type { Board, BoardPlayer } from "../lib/types";
 
@@ -34,6 +34,8 @@ describe("classifyKind", () => {
     ["Posts 120 yards in preseason win", "mention"],
     ["Among six Dolphins captains for 2026", "depth"],
     ["Coach said Charbonnet (knee) looks awesome in his rehab from a torn ACL", "questionable"],
+    ["Bears RBs D'Andre Swift and Kyle Monangai were at practice today. No sign of WR Rome Odunze.", "cleared"],
+    ["Cardinals sign WR to a one-year deal", "transaction"],
     ["Recovering from ankle surgery, on track for Week 1", "questionable"],
   ])("%s → %s", (text, kind) => expect(classifyKind(text)).toBe(kind));
 });
@@ -83,14 +85,18 @@ describe("buildFeed", () => {
   const b = player("b", "Mid Back", 50, "Questionable");
   const c = player("c", "Quiet Guy", 120);
   const news = new Map([
-    ["a", { headline: "Star Back posts 120 yards in preseason win", published: "2026-09-07T19:00:00Z", href: "https://www.espn.com/x" }],
-    ["b", { headline: "Mid Back suffers torn ACL, out for the season", published: "2026-09-07T19:00:00Z", href: "https://bsky.app/profile/rapsheet.bsky.social/post/1" }],
+    ["a", [{ headline: "Star Back posts 120 yards in preseason win", published: "2026-09-07T19:00:00Z", href: "https://www.espn.com/x" }]],
+    ["b", [
+      { headline: "Mid Back suffers torn ACL, out for the season", published: "2026-09-07T19:00:00Z", href: "https://bsky.app/profile/rapsheet.bsky.social/post/1" },
+      { headline: "Mid Back was limited in practice", published: "2026-09-07T12:00:00Z", href: null, source: "CBS Sports" },
+    ]],
   ]);
   const status = new Map([["b", { status: "IR" as const, date: "2026-09-07T19:30Z", note: "Placed on IR." }]]);
   const feed = buildFeed(board(a, b, c), news, status, NOW);
 
-  it("emits a headline item per player with news and a status-change item vs the baked board", () => {
-    expect(feed.map((f) => f.playerId)).toEqual(["b", "b", "a"]);
+  it("emits every headline per player and a status-change item vs the baked board", () => {
+    expect(feed.map((f) => f.playerId)).toEqual(["b", "b", "b", "a"]);
+    expect(feed.find((f) => f.source === "CBS Sports")?.kind).toBe("questionable");
     const change = feed.find((f) => f.statusChange)!;
     expect(change.statusChange).toEqual({ from: "Questionable", to: "IR" });
     expect(change.headline).toMatch(/Status: Questionable → IR/);
@@ -108,5 +114,13 @@ describe("buildFeed", () => {
   it("does not emit a status item when the table agrees with the board", () => {
     const same = buildFeed(board(b), new Map(), new Map([["b", { status: "Questionable" as const, date: "2026-09-07T19:30Z", note: null }]]), NOW);
     expect(same).toEqual([]);
+  });
+  it("groups into one story per player, led by the most important item, sorted by importance", () => {
+    const stories = groupStories(feed);
+    expect(stories.map((s) => s.playerId)).toEqual(["b", "a"]);
+    expect(stories[0].items).toHaveLength(3);
+    expect(stories[0].lead.kind).toBe("season-ending");
+    expect(stories[0].items[0].published >= stories[0].items[1].published).toBe(true);
+    expect(stories[0].sources).toEqual(expect.arrayContaining(["@rapsheet.bsky.social", "CBS Sports", "ESPN injuries"]));
   });
 });

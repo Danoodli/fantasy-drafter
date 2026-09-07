@@ -326,24 +326,31 @@ export function fetchEspnInjuriesTable() {
   );
 }
 
-export const ETL_RSS_FEEDS: { key: string; url: string }[] = [
-  { key: "rss-yahoo.xml", url: "https://sports.yahoo.com/nfl/rss.xml" },
-  { key: "rss-pft.xml", url: "https://profootballtalk.nbcsports.com/feed/" },
-  { key: "rss-cbs.xml", url: "https://www.cbssports.com/rss/headlines/nfl/" },
-  { key: "rss-espn.xml", url: "https://www.espn.com/espn/rss/nfl/news" },
-  { key: "rss-rotowire.xml", url: "https://www.rotowire.com/rss/news.php?sport=NFL" },
+const GN = (q: string) => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+
+export const ETL_RSS_FEEDS: { key: string; url: string; source?: string }[] = [
+  { key: "rss-yahoo.xml", url: "https://sports.yahoo.com/nfl/rss.xml", source: "Yahoo Sports" },
+  { key: "rss-pft.xml", url: "https://profootballtalk.nbcsports.com/feed/", source: "PFT" },
+  { key: "rss-cbs.xml", url: "https://www.cbssports.com/rss/headlines/nfl/", source: "CBS Sports" },
+  { key: "rss-espn.xml", url: "https://www.espn.com/espn/rss/nfl/news", source: "ESPN" },
+  { key: "rss-rotowire.xml", url: "https://www.rotowire.com/rss/news.php?sport=NFL", source: "RotoWire" },
+  { key: "rss-athletic.xml", url: "https://www.nytimes.com/athletic/rss/nfl/", source: "The Athletic" },
+  // Google News aggregates hundreds of outlets, keyless; each item names its outlet in <source>.
+  { key: "rss-gnews-injuries.xml", url: GN('NFL injury OR "ruled out" OR questionable OR "injured reserve" when:2d') },
+  { key: "rss-gnews-fantasy.xml", url: GN("fantasy football NFL when:2d") },
+  { key: "rss-gnews-moves.xml", url: GN('NFL (signed OR released OR traded OR waived OR "depth chart" OR starter) when:2d') },
 ];
 
 /** Headline feeds for baked news. Never fatal: a feed with no fixture yields []. */
 export async function fetchRssFeeds(): Promise<SourceResult<NewsItem[]>[]> {
   return Promise.all(
-    ETL_RSS_FEEDS.map(async ({ key, url }) => {
+    ETL_RSS_FEEDS.map(async ({ key, url, source }) => {
       try {
         return await fetchWithFixture<NewsItem[]>(
           key,
           url,
           (body) => {
-            const items = parseRss(body);
+            const items = parseRss(body).map((i) => ({ ...i, source: i.source ?? source }));
             if (items.length === 0) throw new Error("no <item> elements");
             return items;
           },

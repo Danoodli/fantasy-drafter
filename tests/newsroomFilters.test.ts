@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { applyFilters, sortFeed, pickTopStories, countBy, DEFAULT_FILTERS, parseFilters, type NewsroomFilters } from "../lib/client/newsroomFilters";
+import { applyFilters, sortFeed, sortStories, pickTopStories, countBy, DEFAULT_FILTERS, parseFilters, type NewsroomFilters } from "../lib/client/newsroomFilters";
+import { groupStories } from "../lib/engine/newsImportance";
 import type { FeedItem } from "../lib/engine/newsImportance";
 
 const NOW = Date.parse("2026-09-07T20:00:00Z");
@@ -66,5 +67,17 @@ describe("countBy + parseFilters", () => {
     expect(parseFilters("{bad json")).toEqual(DEFAULT_FILTERS);
     expect(parseFilters(JSON.stringify({ sourceMode: "hide", sources: ["X"], sort: "newest", junk: 1 }))).toEqual({ ...DEFAULT_FILTERS, sourceMode: "hide", sources: ["X"], sort: "newest" });
     expect(parseFilters(JSON.stringify({ sort: "sideways" })).sort).toBe("relevance");
+  });
+});
+
+describe("sortStories", () => {
+  const stories = groupStories(items);
+  it("relevance leads with the highest-importance player and folds a's two items together", () => {
+    expect(sortStories(stories, "relevance").map((s) => s.playerId)).toEqual(["a", "d", "b", "c"]);
+    expect(stories.find((s) => s.playerId === "a")?.items).toHaveLength(2);
+  });
+  it("newest uses the player's most recent update; oldest the earliest", () => {
+    expect(sortStories(stories, "newest")[0].playerId).toBe("a");
+    expect(sortStories(stories, "oldest")[0].playerId).toBe("d");
   });
 });

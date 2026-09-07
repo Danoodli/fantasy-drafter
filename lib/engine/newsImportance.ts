@@ -50,7 +50,8 @@ const CLEARED = [
   /\bactivated\b/, /\breturn(s|ed|ing)?\b/, /\bcleared\b/, /\bwill play\b/, /\bexpected to play\b/,
   /\bback at practice\b/, /\bfull practice\b/, /\bfull participant\b/, /\bremoved from\b/, /\bupgraded\b/,
   /\bgood to go\b/, /\bno longer\b/, /\bpractic(ed|ing) (fully|in full)\b/, /\bavoids?\b/, /\bwon'?t miss\b/,
-  /\bnot expected to miss\b/, /\bsuited up\b/, /\bon (the )?practice field\b/,
+  /\bnot expected to miss\b/, /\bsuited up\b/, /\bon (the )?practice field\b/, /\b(was|were|is|are) at practice\b/,
+  /\bpracticed\b/, /\bfull go\b/,
 ];
 /** Recovery updates mention the original injury ("rehab from a torn ACL") — availability news, not a new season-ender. */
 const PROGRESS = [/\brehab/, /\brecover(y|ing)\b/, /\bprogressing\b/, /\bon track\b/, /\bahead of schedule\b/, /\bramping up\b/];
@@ -60,7 +61,7 @@ const QUESTIONABLE = [
   /\bunlikely to play\b/, /\bin doubt\b/,
 ];
 const TRANSACTION = [
-  /\bsign(s|ed|ing)?\b/, /\btrade[sd]?\b/, /\breleas(e|ed|ing)\b/, /\bwaiv(e|ed|ing)\b/, /\bclaim(s|ed)?\b/,
+  /\bsign(s|ed|ing)?\b(?!\s+of)/, /\btrade[sd]?\b/, /\breleas(e|ed|ing)\b/, /\bwaiv(e|ed|ing)\b/, /\bclaim(s|ed)?\b/,
   /\bextension\b/, /\bacquir(e|ed|ing)\b/, /\bcut\b/, /\bpractice squad\b/, /\belevated\b/, /\brestructur/,
   /\bfranchise tag\b/, /\bholdout\b/,
 ];
@@ -155,23 +156,30 @@ export interface FeedItem {
  * versus the baked board. Pass the RAW board (not the graded one) so the
  * status diff is visible. Sorted by importance, then recency.
  */
+export interface NewsLike {
+  headline: string;
+  published: string;
+  href: string | null;
+  source?: string;
+}
+
 export function buildFeed(
   board: Board,
-  news: ReadonlyMap<string, { headline: string; published: string; href: string | null }>,
+  news: ReadonlyMap<string, readonly NewsLike[]>,
   liveStatus: ReadonlyMap<string, { status: FeedStatus; date: string; note: string | null }>,
   now: number
 ): FeedItem[] {
   const out: FeedItem[] = [];
   const ageHours = (published: string) => (now - Date.parse(published)) / 3_600_000;
   for (const p of board.players) {
-    const item = news.get(p.id);
-    if (item && Number.isFinite(Date.parse(item.published))) {
+    for (const item of news.get(p.id) ?? []) {
+      if (!Number.isFinite(Date.parse(item.published))) continue;
       const kind = classifyKind(item.headline);
       out.push({
-        id: `${p.id}:news:${item.published}`,
+        id: `${p.id}:news:${item.href ?? `${item.published}:${item.headline.slice(0, 40)}`}`,
         playerId: p.id, name: p.name, pos: p.pos, team: p.team, adp: p.adp,
         headline: item.headline, href: item.href, published: item.published,
-        source: sourceLabel(item.href), kind, severity: KIND_SEVERITY[kind],
+        source: item.source ?? sourceLabel(item.href), kind, severity: KIND_SEVERITY[kind],
         importance: importanceOf(kind, p.adp, ageHours(item.published)),
       });
     }
@@ -193,4 +201,42 @@ export function buildFeed(
   }
   out.sort((x, y) => y.importance - x.importance || Date.parse(y.published) - Date.parse(x.published));
   return out;
+}
+
+/** One story per player: the most important item leads, the rest fold underneath. */
+export interface PlayerStory {
+  playerId: string;
+  name: string;
+  pos: Position;
+  team: string;
+  adp: number;
+  lead: FeedItem;
+  /** Every item for the player, newest first (includes the lead). */
+  items: FeedItem[];
+  importance: number;
+  newest: number;
+  oldest: number;
+  sources: string[];
+}
+
+export function groupStories(feed: FeedItem[]): PlayerStory[] {
+  const byPlayer = new Map<string, FeedItem[]>();
+  for (const f of feed) {
+    const list = byPlayer.get(f.playerId) ?? [];
+    list.push(f);
+    byPlayer.set(f.playerId, list);
+  }
+  const out: PlayerStory[] = [];
+  for (const items of byPlayer.values()) {
+    items.sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
+    const lead = items.reduce((best, f) => (f.importance > best.importance ? f : best), items[0]);
+    const times = items.map((f) => Date.parse(f.published));
+    out.push({
+      playerId: lead.playerId, name: lead.name, pos: lead.pos, team: lead.team, adp: lead.adp,
+      lead, items, importance: lead.importance,
+      newest: Math.max(...times), oldest: Math.min(...times),
+      sources: [...new Set(items.map((f) => f.source))],
+    });
+  }
+  return out.sort((a, b) => b.importance - a.importance || b.newest - a.newest);
 }

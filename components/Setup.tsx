@@ -596,6 +596,18 @@ export default function Setup({
                 }
                 className="mt-1 w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs"
               />
+              <span className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-faint">
+                {sources.wireHandles.length ? (
+                  <>
+                    {sources.wireHandles.length} custom handles in use ·{" "}
+                    <button type="button" onClick={() => updateSources({ ...sources, wireHandles: [] })} className="underline hover:text-ink">
+                      Restore the {DEFAULT_WIRE_HANDLES.length} defaults
+                    </button>
+                  </>
+                ) : (
+                  <>{DEFAULT_WIRE_HANDLES.length} default handles — insiders, aggregators, fantasy bots, beat reporters for 27 teams</>
+                )}
+              </span>
             </label>
             <label className="mt-2 block text-xs text-ink-dim">
               Curated lists — one per line (bsky.app list URL or at:// URI). Every member joins the

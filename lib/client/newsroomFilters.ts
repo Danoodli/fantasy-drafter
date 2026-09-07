@@ -5,7 +5,7 @@
 // a hidden source stays hidden across visits.
 
 import type { Position } from "../types";
-import type { FeedItem, NewsKind } from "../engine/newsImportance";
+import type { FeedItem, NewsKind, PlayerStory } from "../engine/newsImportance";
 
 export type FeedSort = "relevance" | "newest" | "oldest" | "adp";
 export const SORT_LABEL: Record<FeedSort, string> = {
@@ -66,6 +66,21 @@ export function sortFeed(items: FeedItem[], sort: FeedSort): FeedItem[] {
       return out.sort((a, b) => a.adp - b.adp || b.importance - a.importance);
     default:
       return out.sort((a, b) => b.importance - a.importance || t(b) - t(a));
+  }
+}
+
+/** Order the grouped stories; "newest"/"oldest" look at the player's most recent update. */
+export function sortStories(stories: PlayerStory[], sort: FeedSort): PlayerStory[] {
+  const out = [...stories];
+  switch (sort) {
+    case "newest":
+      return out.sort((a, b) => b.newest - a.newest);
+    case "oldest":
+      return out.sort((a, b) => a.oldest - b.oldest);
+    case "adp":
+      return out.sort((a, b) => a.adp - b.adp || b.importance - a.importance);
+    default:
+      return out.sort((a, b) => b.importance - a.importance || b.newest - a.newest);
   }
 }
 
