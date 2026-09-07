@@ -18,14 +18,18 @@ export const REG_SEASON_WEEKS = 17;
 
 /**
  * Expected games a starter misses per season for reasons other than the bye
- * (injury, rest, suspension). Public per-position availability figures,
- * rounded; tunable, and the season backtest is how to tune them.
+ * (injury, rest, suspension). Measured over 2018–2025 on drafted starters
+ * (ADP ≤ 84): scheduled games minus games with a positive line, nflverse
+ * box scores (`pnpm backtest:history`, docs/projection-vs-reality-2018-2025.md
+ * §4). Bench-tier players (ADP 85–180) miss 3.2–5.2; these are starter rates.
+ * Re-measure after each season. Changing them moved the eight-season backtest
+ * by +0.3 points — they set the fragility readout, not the picks.
  */
 export const EXPECTED_MISSED_GAMES: Record<Position, number> = {
-  QB: 1.5,
-  RB: 3.0,
-  WR: 2.4,
-  TE: 2.2,
+  QB: 2.3,
+  RB: 3.2,
+  WR: 2.9,
+  TE: 3.2,
   K: 0.5,
   DST: 0,
 };
