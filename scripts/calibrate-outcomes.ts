@@ -1,15 +1,17 @@
 // Fit config/outcome-model.json from the committed season snapshots.
 //
-//   pnpm calibrate [--years=2024,2025] [--out=config/outcome-model.json]
+//   pnpm calibrate [--source=ffa|espn] [--years=2018,...,2025] [--out=config/outcome-model.json]
 //
-// Population: drafted skill players (FFC ADP <= 180) with a real ESPN
+// Population: drafted skill players (ADP <= 180) with a real draft-day
 // projection and a realized line. Every number here is a statistic of that
 // population, not a judgment call; re-run each season after snapshotting.
+// Default source is the FFA + nflverse snapshots (eight seasons, 2018–2025);
+// --source=espn fits the two ESPN seasons the earlier model used.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCsv } from "../lib/etl/csv";
-import { loadSeasonSnapshot } from "../lib/etl/seasonSnapshot";
+import { loadSeasonSnapshot, type SnapshotSource } from "../lib/etl/seasonSnapshot";
 import { buildHistoricalBoard, type CrossRow } from "../lib/etl/historicalBoard";
 import { DEFAULT_KDST, type OutcomeParams, type PosOutcome } from "../lib/engine/outcomeModel";
 import { localMeanProjection } from "../lib/engine/outcome";
@@ -21,7 +23,8 @@ const flags = new Map(
     return [k, v ?? "true"] as const;
   })
 );
-const years = (flags.get("years") ?? "2024,2025").split(",").map(Number);
+const source = (flags.get("source") ?? "ffa") as SnapshotSource;
+const years = (flags.get("years") ?? (source === "ffa" ? "2018,2019,2020,2021,2022,2023,2024,2025" : "2024,2025")).split(",").map(Number);
 const out = flags.get("out") ?? join("config", "outcome-model.json");
 
 const WEEKS = 17;
@@ -56,7 +59,7 @@ async function main() {
   const rows: Row[] = [];
   const stackPairs: number[] = [];
   for (const year of years) {
-    const { snapshot } = await loadSeasonSnapshot(year, { log: (l) => console.log(l) });
+    const { snapshot } = await loadSeasonSnapshot(year, { source, log: (l) => console.log(l) });
     const { board, realized } = buildHistoricalBoard(snapshot, cross, "ppr", config);
     const pop = board.filter((p) => ALL_POS.includes(p.pos) && !p.projImputed && p.projPoints > 0 && p.adp <= 180 && realized.has(p.id));
     for (const p of pop) {
@@ -143,6 +146,7 @@ async function main() {
 
   const params: OutcomeParams = {
     fittedOn: years,
+    source,
     weeks: WEEKS,
     gamesPerSeason: GAMES,
     byPos,
@@ -150,7 +154,7 @@ async function main() {
     marketWeight: bestW,
   };
   writeFileSync(out, JSON.stringify(params, null, 2) + "\n");
-  console.log(`\nwrote ${out} from ${rows.length} player-seasons (${years.join(", ")})`);
+  console.log(`\nwrote ${out} from ${rows.length} player-seasons (${source}: ${years.join(", ")})`);
   for (const pos of ALL_POS) {
     const p = byPos[pos];
     console.log(`  ${pos.padEnd(3)}: SE ${(p.seasonEndingProb * 100).toFixed(0).padStart(2)}%  miss/game ${p.healthyMissProb.toFixed(3)}  reliability ${p.projReliability.toFixed(2)}  skill log-sd ${p.projLogSigma.toFixed(2)}  bias ${p.projMedianRatio.toFixed(2)}  weekly sigma ${p.weeklyLogSigma.toFixed(2)}`);

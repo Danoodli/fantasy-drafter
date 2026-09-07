@@ -25,6 +25,8 @@ export interface PosOutcome {
 
 export interface OutcomeParams {
   fittedOn: number[];
+  /** Snapshot source the fit used ("ffa" = FFA projections + nflverse actuals, "espn"); absent on older files. */
+  source?: string;
   weeks: number; // 17
   gamesPerSeason: number; // 16
   byPos: Record<Position, PosOutcome>;
