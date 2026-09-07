@@ -252,3 +252,43 @@ button:not(:disabled):active {
 /* Thin scrollbars for the tier board */
 .tier-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .tier-scroll::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 3px; }
+
+/* ---- Newsroom ---------------------------------------------------------- */
+
+/* The live dot breathes; the wire is open. */
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(60 201 167 / 0.55); }
+  60% { box-shadow: 0 0 0 7px rgb(60 201 167 / 0); }
+}
+.live-dot { animation: live-pulse 1.8s ease-out infinite; }
+
+/* Top-story cards: a position-colored field with the player's cutout rising
+   out of the bottom-right corner, team mark ghosted behind the type. */
+.story-card { position: relative; overflow: hidden; isolation: isolate; }
+.story-card .story-shot {
+  position: absolute;
+  right: -4%;
+  bottom: -2px;
+  width: 46%;
+  max-width: 210px;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 18px rgb(0 0 0 / 0.55)) saturate(1.05);
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+.story-card .story-logo {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 72px;
+  height: 72px;
+  opacity: 0.14;
+  pointer-events: none;
+  filter: grayscale(1) brightness(1.8);
+}
+.story-card.is-lead .story-shot { width: 38%; max-width: 300px; }
+.story-card.is-lead .story-logo { width: 110px; height: 110px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .stagger > *, .rise-in, .flame, .btn-shimmer::after { animation: none !important; }
+}
