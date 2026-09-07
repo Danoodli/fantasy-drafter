@@ -12,10 +12,10 @@ We now have eight completed seasons, not two. For each one we rebuilt the board 
 
 **What the trends say we should change** (evidence that repeats across seasons, not single-year stories):
 
-1. **Best ball: the engine drafts exactly 2 QB and 2 TE every seat, every year, while the room drafts ~3 of each — and loses ~180 points at QB and ~130 at TE per seat in 8 of 8 seasons.** It makes that back and more with 10.5 WRs (+351, 8 of 8), so the net is positive, but the QB/TE deficit is the most consistent loss in the whole study. The cause is a static `positionCaps: { QB: 2, TE: 2 }` on every strategy. Tested: raising the cap to 3 for the best ball preset improves the same-seat result in **8 of 8 seasons** (paired rooms, mean +6 points; the engine settles at 2.3–2.9 QB and 2.1–2.9 TE and gives up ~0.7 WR). The gain is small — the WR windfall shrinks as the QB/TE hole closes — but it is the only change tested that helped every single season, and it removes a static rule. Recommended: `positionCaps` QB 3 / TE 3 on the best ball preset. A cap of 4 adds nothing (7 of 8, +5).
-2. **The engine's missed-games constants are too low at QB/WR/TE and flat across the draft.** Measured over eight seasons, starters (ADP ≤ 84) miss QB 2.3 / RB 3.2 / WR 2.9 / TE 3.2 games; the engine assumes 1.5 / 3.0 / 2.4 / 2.2. Bench-tier players (ADP 85–180) miss 3.2–5.2. Correcting the constants was tested across all eight seasons and **changed nothing** (paired delta +0.3 points) — the bench-insurance term is too small a lever to move picks. Update them for honesty of the fragility readout, not for points.
-3. **Projections are spread too wide, running backs most.** The regression slope of realized on projected points is below 1 in 7 of 8 seasons at RB (mean 0.76; QB 0.86, TE 0.83, WR 0.91). The best prediction of a player's season is a shrunk projection, and RB needs the most shrinkage. The calibrated outcome model (`config/outcome-model.json`) was fitted on two seasons; it should be refitted on eight.
-4. **Quarterbacks were predictable for five of the eight years.** The 2024/2025 study concluded "nobody can predict QBs". Over 2018–2022 the projection ordering of drafted QBs correlated 0.53–0.79 with reality and beat ADP in every one of those years; only 2023–2025 were bad (0.32–0.57). Treat QB as a normal position in the engine, not a special case.
+1. **Best ball: the engine drafts exactly 2 QB and 2 TE every seat, every year, while the room drafts ~3 of each — and loses ~180 points at QB and ~130 at TE per seat in 8 of 8 seasons.** It makes that back and more with 10.5 WRs (+351, 8 of 8), so the net is positive, but the QB/TE deficit is the most consistent loss in the whole study. The cause is a static `positionCaps: { QB: 2, TE: 2 }` on every strategy. Tested: raising the cap to 3 for the best ball preset improves the same-seat result in **8 of 8 seasons** (paired rooms, mean +6 points; the engine settles at 2.3–2.9 QB and 2.1–2.9 TE and gives up ~0.7 WR). The gain is small — the WR windfall shrinks as the QB/TE hole closes — but it is the only change tested that helped every single season, and it removes a static rule. **Applied** as `positionCapsBestBall` QB 3 / TE 3 on the best ball preset (see §11). A cap of 4 adds nothing (7 of 8, +5).
+2. **The engine's missed-games constants are too low at QB/WR/TE and flat across the draft.** Measured over eight seasons, starters (ADP ≤ 84) miss QB 2.3 / RB 3.2 / WR 2.9 / TE 3.2 games; the engine assumes 1.5 / 3.0 / 2.4 / 2.2. Bench-tier players (ADP 85–180) miss 3.2–5.2. Correcting the constants was tested across all eight seasons and **changed nothing** (paired delta +0.3 points) — the bench-insurance term is too small a lever to move picks. **Applied** for honesty of the fragility readout, not for points (§11).
+3. **Projections are spread too wide, running backs most.** The regression slope of realized on projected points is below 1 in 7 of 8 seasons at RB (mean 0.76; QB 0.86, TE 0.83, WR 0.91). The best prediction of a player's season is a shrunk projection, and RB needs the most shrinkage. The calibrated outcome model (`config/outcome-model.json`) was fitted on two seasons; **refitted on eight** (§11).
+4. **Quarterbacks were predictable for five of the eight years.** The 2024/2025 study concluded "nobody can predict QBs". Over 2018–2022 the projection ordering of drafted QBs correlated 0.53–0.79 with reality and beat ADP in every one of those years; only 2023–2025 were bad (0.32–0.57). Treat QB as a normal position in the engine, not a special case. **Applied** through the refit: QB projection reliability rose from 0.38 to 0.54 (§11).
 5. **Strategy presets are close to cosmetic in redraft.** Across eight seasons the eight visible presets land within +122 to +137 points of each other and draft nearly the same roster (4.2–4.9 RB / 4.0–4.3 WR). The lineup value model decides the picks; the multipliers barely bend them. `robust-rb` is the weakest redraft preset (+118, lost in 2018 and 2022) and `zero-rb` has the best worst season (+48). The hidden `late-qb` posts the top mean (+143) but leaves 18% of seats below a construction floor — an illegal roster is not a strategy. Nothing here argues for offering a strategy choice; it argues for one adaptive mode, which is what the app does.
 6. **Redraft roster shape has one persistent lean:** 4.3 WR vs the room's 4.9, costing WR points in 6 of 8 seasons (−77 per seat), offset by RB (+141, positive 7 of 8) and a second TE (+113, positive 8 of 8). The second QB is a wash (+26, negative 4 of 8). Net positive; the trade-off is worth watching, not fixing.
 
@@ -276,7 +276,7 @@ Roster shape — engine / bot and realized points delta by position:
 | 2025 | +232 | +241 | +242 | 2.0 / 2.0 / 10.5 / 5.5 | 2.4 / 2.8 / 9.5 / 5.3 | −187 → −106 | −122 → −34 | +444 → +334 |
 | **paired change** | | **+6.2, 8 of 8 up** | **+5.4, 7 of 8 up** | | | | | |
 
-**What it means.** Freed from the cap, the value model takes a third QB in most seats and a third TE in some — never more, even with a cap of 4 — and pays for them with about 0.7 fewer WRs. The QB deficit roughly halves and the TE deficit shrinks, the WR windfall shrinks with them, and the net is a small, consistent gain: +6 points per seat, up in every one of eight seasons under paired rooms, with zero floor violations. The effect is inside a single season's error bar (±20–49), so it will never show up in one year; it shows up as a sign that never flips. That is exactly the kind of evidence this study is for: the cap is a static rule that costs a little every year, and the model underneath it makes a reasonable call when it is removed. **Recommendation: set `positionCaps` QB 3 / TE 3 on the best ball preset** (config, not code). The redraft caps are a separate question — the redraft roster is 15 rounds with a waiver wire, and §8 shows the second QB there is already a wash.
+**What it means.** Freed from the cap, the value model takes a third QB in most seats and a third TE in some — never more, even with a cap of 4 — and pays for them with about 0.7 fewer WRs. The QB deficit roughly halves and the TE deficit shrinks, the WR windfall shrinks with them, and the net is a small, consistent gain: +6 points per seat, up in every one of eight seasons under paired rooms, with zero floor violations. The effect is inside a single season's error bar (±20–49), so it will never show up in one year; it shows up as a sign that never flips. That is exactly the kind of evidence this study is for: the cap is a static rule that costs a little every year, and the model underneath it makes a reasonable call when it is removed. **Applied: `positionCapsBestBall` QB 3 / TE 3 on the best ball preset** (config, not code; see §11). The redraft caps are a separate question — the redraft roster is 15 rounds with a waiver wire, and §8 shows the second QB there is already a wash.
 
 ## 10. Every strategy, every season (redraft)
 
@@ -300,6 +300,30 @@ Every strategy in `config/strategies.json`, 4 rooms × 12 seats per season (fewe
 - **`robust-rb` is the wrong tool for redraft** — the only preset to lose seasons — and §9 shows its best ball roster is no longer "robust RB" either. Its labels and blurb should be revisited.
 - **`zero-rb` is the most robust** (worst season +48, best of any preset) but has the lowest mean; **`late-qb`** buys its top mean by leaving 18% of rosters illegal, which is why it stays hidden.
 - With one adaptive mode being the user's stated goal, the evidence supports it: there is no preset that reliably beats `balanced`, and the differences between them are inside a season's noise.
+
+## 11. What was applied, and the retest (2026-09-07)
+
+All five changes were made and every sweep in this document was re-run on the final code and config, paired against the saved baselines (same room seeds).
+
+| change | where | eight-season retest |
+|---|---|---|
+| Best ball QB/TE cap 2 → 3 | `positionCapsBestBall` on the best ball preset (`config/strategies.json`, read by `recommend.ts` only when the league is best ball) | +6.2 per seat, **up in 8 of 8 seasons**, mean +148 → **+154**, 2023 flips from −5 to +8 → positive in **7 of 8**; 0 floor violations |
+| Missed-game rates → measured | `EXPECTED_MISSED_GAMES` in `lib/engine/coverage.ts`: QB 2.3 / RB 3.2 / WR 2.9 / TE 3.2 | redraft +0.3 per seat (3 of 8 up, 5 down — noise), 8 of 8 still positive |
+| Outcome model refit on eight seasons | `pnpm calibrate --source=ffa` → `config/outcome-model.json` (1,976 player-seasons) | QB reliability 0.38 → 0.54, WR season-ending 0.18 → 0.13, per-game miss 0.11–0.15 (was 0.13–0.19), K reliability 0.07 → 0.33; shipped picks unchanged (redraft identical), objective ρ up (2024 0.35 → 0.37, 2025 0.65 → 0.69) |
+| QB treated as a normal position | via the refit (reliability), plus the correction notes in `projection-vs-reality-2024-2025.md` | — |
+| Strategy labels | `robust-rb` relabelled "Best Ball" with a blurb that describes the roster it builds; `balanced` blurb cites the eight-season record; stale two-year numbers in code comments replaced | — |
+
+Retest on the final tree (FFA snapshots, 12 rooms; ESPN 2024/2025 for continuity with the earlier study):
+
+| | before | after |
+|---|---|---|
+| redraft `balanced`, FFA 2018–2025 mean | +145 (8 of 8 positive) | **+145** (8 of 8) |
+| best ball, FFA 2018–2025 mean | +148 (6 of 8 positive) | **+154** (7 of 8) |
+| ESPN 2024 redraft / best ball | +110 ± 16 / +283 ± 40 | **+117 ± 16 / +299 ± 43** |
+| ESPN 2025 redraft / best ball | +213 ± 25 / +399 ± 31 | **+213 ± 25 / +435 ± 33** |
+| floor violations, all sweeps | 0 | 0 |
+
+Best ball roster shape after the change: 2.0–2.9 QB, 2.1–2.8 TE, 9.1–10.2 WR, 5.0–5.5 RB per seat (was exactly 2.0 / 2.0 / ~10.5 / ~5.4). The unified-model round-12 latency test remains marginally over its 50 ms budget (50.9 ms), as it was before this work; the shipped lineup model is well inside it.
 
 ## Caveats
 

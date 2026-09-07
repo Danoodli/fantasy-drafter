@@ -20,7 +20,7 @@ We took the exact projections and ADP the engine would have had on draft day in 
 **Where it falls short**
 - It can't see injuries, and injuries are the biggest source of misses. Treat every projection as an "if healthy" number.
 - It can't reliably separate the top ~80 players from each other. Don't reach several picks early for a specific elite name — the certainty isn't there.
-- Quarterbacks are unpredictable for everyone. Kickers and defenses are pure noise.
+- Quarterbacks are unpredictable for everyone. *(Corrected by the eight-season study: QBs were the most predictable position in 2018–2022 and projections beat ADP at QB in 6 of 8 seasons; 2023–2025 were three bad years, not a law. See `projection-vs-reality-2018-2025.md` §5.)* Kickers and defenses are pure noise.
 - Two seasons of evidence. 2025's big win was partly luck — an RB-leaning engine in the one year the top of the WR and QB board collapsed. 2024's modest win is the more honest expectation.
 
 ---
@@ -124,6 +124,8 @@ Same players (ADP ≤ 180), two competing orderings: ESPN's projection, and the 
 
 - **Projections beat the crowd at RB, WR and TE in both years**, by a consistent 0.04–0.09 in rank correlation. That is the justification for an engine that drafts off projections and is willing to deviate from ADP, rather than one that just follows the room. The edge is real but modest — the crowd is not dumb.
 - **Nobody can predict quarterbacks.** ρ of 0.08–0.28 for both projections and ADP means the *order* of the top ~30 QBs going into the season had almost no relationship to how they finished. (Jayden Daniels was QB1 by ADP and projection in 2025 and finished QB-nowhere; Lamar Jackson was a 4th-round pick in 2024 and finished QB1.) This is strong evidence against paying up for a QB in a 1-QB league: you are paying a premium for an ordering that does not hold. Waiting on QB is not a "strategy," it is the default the data supports.
+
+*Update (2026-09-07):* with eight seasons this conclusion does not hold. Within drafted QBs (ADP ≤ 180) the projection ordering correlated 0.53–0.79 with reality in 2018–2022 and beat ADP every one of those years; only 2023–2025 were poor (0.32–0.57). QB is a normal position, not a special case — see `projection-vs-reality-2018-2025.md` §5–§6.
 
 ## 4. Tier hit rates
 
