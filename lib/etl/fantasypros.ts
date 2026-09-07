@@ -5,11 +5,13 @@
 // sources). When the key is absent, everything here returns null and the
 // build falls back to the DynastyProcess weekly mirror.
 //
-// The free tier caps every response at 10 players, so full coverage means
-// batching explicit player-id lists (players=id:id:…) in chunks of 10, with
-// ~1.2s spacing for their rate limiter. What the key buys:
-//   - Daily consensus ECR per scoring format (103+ experts), full board depth
-//   - A THIRD projection source: FP consensus stat lines per player
+// The free tier caps every response at 10 players AND the key at roughly ten
+// requests a day (measured 2026-08-23/25: nine or ten successes per fresh
+// day, then "LimitExceededException" for everything, including a single
+// request hours later). So the daily lane spends those calls deliberately —
+// see planFpBudget: the news endpoint first (exact fpid matches), then PPR
+// consensus for the top of the board; projections only when a bigger budget
+// is configured (FANTASYPROS_DAILY_BUDGET, for a paid tier).
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,27 +29,45 @@ export function loadEnvLocal() {
 
 const BASE = "https://api.fantasypros.com/public/v2/json/nfl";
 const CHUNK = 10; // free-tier response cap
-const SPACING_MS = 2500; // free-tier rate limiter is aggressive
-/** Board depth to pull per-format ECR for — rounds 1-8ish, where ECR moves matter. */
-const ECR_DEPTH = 100;
-/** Depth for the projections pass (format-independent, one pass total). */
-const PROJ_DEPTH = 150;
+const SPACING_MS = 6000; // their throttle rejected 2.5 s spacing in bursts; one call per 6 s is clean
+/** Requests the key may make per build. Free tier ≈ 10/day; a paid key can raise it via env. */
+export const FP_DAILY_BUDGET = Math.max(0, Number(process.env.FANTASYPROS_DAILY_BUDGET ?? 9));
 /** Stop after this many consecutive failures — the daily quota is spent. */
-const ABORT_AFTER = 3;
+const ABORT_AFTER = 2;
+
+export interface FpPlan {
+  /** Fetch the news endpoint (1 request). */
+  news: boolean;
+  /** PPR consensus chunks of 10 players, top of the board first. */
+  ecrChunks: number;
+  /** Projection chunks of 10 players — only with a budget beyond the free tier. */
+  projChunks: number;
+}
+
+/**
+ * Spend a request budget by value: news (1) → PPR ECR up to 60 players (6)
+ * → projections with whatever is left, but only when at least 5 chunks fit
+ * (50 players; fewer would blend projections for a random sliver of the board).
+ */
+export function planFpBudget(budget: number): FpPlan {
+  let left = Math.max(0, Math.floor(budget));
+  const news = left >= 1;
+  if (news) left--;
+  const ecrChunks = Math.min(6, left);
+  left -= ecrChunks;
+  const projChunks = left >= 5 ? Math.min(15, left) : 0;
+  return { news, ecrChunks, projChunks };
+}
 
 let lastCall = 0;
+let spent = 0;
 async function throttled(url: string, key: string): Promise<Response> {
+  if (spent >= FP_DAILY_BUDGET) throw new Error(`FantasyPros budget of ${FP_DAILY_BUDGET} requests spent`);
   const wait = lastCall + SPACING_MS - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastCall = Date.now();
-  let res = await fetch(url, { headers: { "x-api-key": key } });
-  if (res.status === 403 || res.status === 429) {
-    // one backoff retry — their limiter is bursty
-    await new Promise((r) => setTimeout(r, 4000));
-    lastCall = Date.now();
-    res = await fetch(url, { headers: { "x-api-key": key } });
-  }
-  return res;
+  spent++;
+  return fetch(url, { headers: { "x-api-key": key } });
 }
 
 function chunks<T>(xs: T[], n: number): T[][] {
@@ -74,12 +94,6 @@ export interface FpData {
   stats: Map<string, StatLine>;
 }
 
-const FP_SCORING: Record<ScoringFormat, string> = {
-  standard: "STD",
-  "half-ppr": "HALF",
-  ppr: "PPR",
-  "2qb": "PPR", // no 2QB scoring param; PPR is the closest base
-};
 
 /** Map FP projection stat keys onto our StatLine. Exported for tests. */
 export function mapFpStats(s: Record<string, number | string | null>): StatLine {
@@ -121,10 +135,42 @@ export async function fetchFantasyProsData(
   let failures = 0;
   let consecutive = 0;
   const quotaSpent = () => consecutive >= ABORT_AFTER;
+  const plan = planFpBudget(FP_DAILY_BUDGET - spent);
+  console.log(
+    `fantasypros: budget ${FP_DAILY_BUDGET}/build → PPR consensus for the top ${plan.ecrChunks * CHUNK}` +
+      (plan.projChunks ? `, projections for ${plan.projChunks * CHUNK}` : ", no projections (free tier)")
+  );
 
   try {
-    // Projections: one pass, format-independent raw stats.
-    for (const batch of chunks(fpIds.slice(0, PROJ_DEPTH), CHUNK)) {
+    // Consensus ECR: PPR only on the free tier (2qb shares it); other formats fall back to DynastyProcess per player.
+    const pprMap = new Map<string, FpEcr>();
+    for (const batch of chunks(fpIds.slice(0, plan.ecrChunks * CHUNK), CHUNK)) {
+      if (quotaSpent()) break;
+      const res = await throttled(
+        `${BASE}/${season}/consensus-rankings?type=DRAFT&scoring=PPR&position=ALL&players=${batch.join(":")}`,
+        key
+      );
+      if (!res.ok) {
+        failures++;
+        consecutive++;
+        continue;
+      }
+      consecutive = 0;
+      const json = (await res.json()) as {
+        total_experts?: number;
+        players?: { player_id: number; rank_ave?: string | number; rank_std?: string | number }[];
+      };
+      data.experts = Math.max(data.experts, json.total_experts ?? 0);
+      for (const p of json.players ?? []) {
+        const ecr = num(p.rank_ave);
+        if (p.player_id && ecr != null) pprMap.set(String(p.player_id), { ecr, ecrStdev: num(p.rank_std) });
+      }
+    }
+    data.ecr.ppr = pprMap;
+    data.ecr["2qb"] = pprMap;
+
+    // Projections: one pass, format-independent raw stats — paid budgets only.
+    for (const batch of chunks(fpIds.slice(0, plan.projChunks * CHUNK), CHUNK)) {
       if (quotaSpent()) break;
       const res = await throttled(
         `${BASE}/${season}/projections?week=0&players=${batch.join(":")}`,
@@ -144,59 +190,19 @@ export async function fetchFantasyProsData(
       }
     }
 
-    // Consensus ECR per scoring format (2qb shares PPR — fetched once, reused).
-    const fetched = new Map<string, Map<string, FpEcr>>();
-    for (const format of ["standard", "half-ppr", "ppr", "2qb"] as ScoringFormat[]) {
-      const scoring = FP_SCORING[format];
-      if (fetched.has(scoring)) {
-        data.ecr[format] = fetched.get(scoring)!;
-        continue;
-      }
-      const map = new Map<string, FpEcr>();
-      for (const batch of chunks(fpIds.slice(0, ECR_DEPTH), CHUNK)) {
-        if (quotaSpent()) break;
-        const res = await throttled(
-          `${BASE}/${season}/consensus-rankings?type=DRAFT&scoring=${scoring}&position=ALL&players=${batch.join(":")}`,
-          key
-        );
-        if (!res.ok) {
-          failures++;
-          consecutive++;
-          continue;
-        }
-        consecutive = 0;
-        const json = (await res.json()) as {
-          total_experts?: number;
-          players?: {
-            player_id: number;
-            rank_ave?: string | number;
-            rank_std?: string | number;
-          }[];
-        };
-        data.experts = Math.max(data.experts, json.total_experts ?? 0);
-        for (const p of json.players ?? []) {
-          const ecr = num(p.rank_ave);
-          if (p.player_id && ecr != null) {
-            map.set(String(p.player_id), { ecr, ecrStdev: num(p.rank_std) });
-          }
-        }
-      }
-      fetched.set(scoring, map);
-      data.ecr[format] = map;
-    }
   } catch (err) {
     console.warn(`⚠️  fantasypros: batch run aborted (${err}) — using what was fetched so far`);
   }
 
   const total = data.ecr.ppr.size;
   if (total === 0 && data.stats.size === 0) {
-    console.warn("⚠️  fantasypros: no usable data returned — falling back to DynastyProcess ECR");
+    console.warn("⚠️  fantasypros: no usable data returned (daily quota already spent?) — falling back to DynastyProcess ECR");
     return null;
   }
   if (quotaSpent())
-    console.warn("⚠️  fantasypros: aborted early — free-tier quota appears spent; using partials + fallback");
-  else if (failures > 0)
-    console.warn(`⚠️  fantasypros: ${failures} batch requests failed (rate limits?)`);
+    console.warn("⚠️  fantasypros: aborted early — daily quota spent mid-run; using partials + fallback");
+  else if (failures > 0) console.warn(`⚠️  fantasypros: ${failures} batch requests failed`);
+  console.log(`fantasypros: ${spent} requests used this build`);
   return data;
 }
 

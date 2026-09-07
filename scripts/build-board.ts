@@ -532,7 +532,7 @@ function buildBoard(
         ...(fp
           ? [
               {
-                name: `FantasyPros consensus (${fp.experts} experts, live)`,
+                name: `FantasyPros consensus (${fp.experts} experts, live)`, // PPR/2QB top of board; other formats use DynastyProcess per player
                 fetchedAt: new Date().toISOString(),
                 fromFixture: false,
               },
@@ -583,8 +583,8 @@ async function main() {
   const fpIds = ecrRows
     .filter((r) => r.page_type === "redraft-overall" && r.id && r.id !== "NA")
     .map((r) => r.id);
-  // The fast lane never touches FantasyPros: the free tier 429s under 3 builds a day already.
-  const fpData: FpData | null = LANE === "fast" ? null : await fetchFantasyProsData(SEASON, fpIds);
+  // The fast lane never touches FantasyPros: the free key allows ~10 requests a day.
+  // News goes first (one call, exact fpid matches), then PPR consensus for the top of the board.
   const fpNews = new Map<string, { headline: string; published: string }>();
   for (const n of LANE === "fast" ? [] : await fetchFantasyProsNews()) {
     if (!n.fpid) continue;
@@ -594,6 +594,7 @@ async function main() {
     }
   }
   if (fpNews.size > 0) console.log(`fantasypros: ${fpNews.size} player news items`);
+  const fpData: FpData | null = LANE === "fast" ? null : await fetchFantasyProsData(SEASON, fpIds);
   if (fpData)
     console.log(
       `fantasypros: live consensus — ${fpData.ecr.ppr.size} ECR entries/format, ${fpData.stats.size} projections, ${fpData.experts} experts`
