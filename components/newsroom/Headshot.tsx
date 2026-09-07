@@ -4,9 +4,17 @@ import { useState } from "react";
 import type { BoardPlayer } from "../../lib/types";
 import { POS_COLOR } from "../../lib/client/pos";
 
-/** ESPN's public headshot CDN, keyed by ESPN id — the same image the player card shows. */
-export const headshotUrl = (espnId: string | undefined) =>
-  espnId ? `https://a.espncdn.com/i/headshots/nfl/players/full/${espnId}.png` : null;
+/**
+ * ESPN's public headshot CDN, keyed by ESPN id, through its resizer. The
+ * original is a 241 KB PNG cached for 7 seconds; at 112 px it is ~10 KB and
+ * cached for a day, so every avatar on the page shares one small, warm image.
+ * (Measured 2026-09-07.) Source aspect is 350×254.
+ */
+export const AVATAR_WIDTH = 112;
+export const headshotUrl = (espnId: string | undefined, width = AVATAR_WIDTH) =>
+  espnId
+    ? `https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/${espnId}.png&w=${width}&h=${Math.round((width * 254) / 350)}`
+    : null;
 
 const LOGO_CODE: Record<string, string> = { WAS: "wsh" };
 export const teamLogoUrl = (team: string) =>
@@ -42,6 +50,8 @@ export default function Headshot({
           src={url}
           alt=""
           loading="lazy"
+          decoding="async"
+          fetchPriority="low"
           width={size}
           height={size}
           className="h-full w-full object-cover object-top"

@@ -32,7 +32,7 @@ export default function TopStories({
           const p = byId.get(s.playerId);
           const color = POS_COLOR[s.pos];
           const lead = i === 0;
-          const shot = headshotUrl(p?.ids.espn);
+          const shot = headshotUrl(p?.ids.espn, lead ? 380 : 260);
           const ageMs = now != null ? now - Date.parse(s.published) : null;
           const justIn = ageMs != null && ageMs < 20 * 60_000;
           return (
@@ -52,7 +52,9 @@ export default function TopStories({
                   className="story-shot"
                   src={shot}
                   alt=""
-                  loading={lead ? "eager" : "lazy"}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority={lead ? "high" : "auto"}
                   onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
                 />
               )}

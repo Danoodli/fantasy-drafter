@@ -125,7 +125,7 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
           {p.ids.espn && (
             /* eslint-disable-next-line @next/next/no-img-element -- remote CDN, no next/image config needed */
             <img
-              src={`https://a.espncdn.com/i/headshots/nfl/players/full/${p.ids.espn}.png`}
+              src={`https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/${p.ids.espn}.png&w=168&h=122`}
               alt=""
               width={84}
               height={62}
