@@ -664,6 +664,15 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
                   Resume draft
                 </button>
               )}
+              <a
+                href="/newsroom"
+                target="_blank"
+                rel="noreferrer"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-panel"
+              >
+                Newsroom
+                <span className="block text-xs text-ink-faint">Every player, every update — opens in a new tab</span>
+              </a>
               <button
                 onClick={(e) => {
                   (e.currentTarget.closest("details") as HTMLDetailsElement).open = false;
