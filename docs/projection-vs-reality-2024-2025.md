@@ -307,7 +307,7 @@ The 2025 result (+300, ~50% first-place finishes) should be read with §2 and §
 - **Skill positions only.** K and DST projections are close to noise in both years (rank correlation −0.5 to +0.5) and are excluded from the skill tables. Draft them last; do not think about it.
 - **Injuries are inside the numbers.** A player who tore an ACL in Week 2 "missed" by his whole projection. That is deliberate — it is what your roster experienced — but it means bias measures the injury tax as much as projection skill.
 - **PPR, 12-team, 15 rounds.** Different scoring changes the WR/RB balance; run `--format=half-ppr` or `--bestball` to see your format.
-- **ESPN purges history.** 2023 retains 22 of 264 projections and cannot be added. Snapshot each season before the following summer or lose it.
+- **ESPN purges history.** 2023 retains 22 of 264 projections and cannot be added from ESPN. Snapshot each season before the following summer or lose it. The 2018–2025 view built from FantasyFootballAnalytics projections and nflverse actuals is in `projection-vs-reality-2018-2025.md`.
 
 ## Regenerating
 
