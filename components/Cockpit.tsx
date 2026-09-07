@@ -400,9 +400,10 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   function commitImport(items: ImportItem[], source: string) {
     if (items.length === 0) return;
     const out = draft.applyImport(items);
-    const changed = out.added + out.filled + out.padded;
+    const changed = out.added + out.filled + out.padded + out.inserted;
     const parts = [
-      out.added + out.filled > 0 ? `${out.added + out.filled} marked` : null,
+      out.added + out.filled + out.inserted > 0 ? `${out.added + out.filled + out.inserted} marked` : null,
+      out.inserted > 0 ? `${out.inserted} backfilled, ${out.shifted} moved down` : null,
       out.padded > 0 ? `${out.padded} unknown` : null,
       out.skipped > 0 ? `${out.skipped} already gone` : null,
     ].filter(Boolean);

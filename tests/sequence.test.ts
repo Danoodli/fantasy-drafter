@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileSequence } from "../lib/draft/sequence";
+import { reconcileSequence, placeNumberedPicks } from "../lib/draft/sequence";
 
 const notMine = () => false;
 const mineAt = (...idx: number[]) => (i: number) => idx.includes(i);
@@ -109,5 +109,40 @@ describe("reconcileSequence", () => {
     const r = reconcileSequence(["a"], ["a", "b", "c", "d", "e", "f"], { isMine: mineAt(3) });
     expect(r.next).toEqual(["a", "b", "c", null, "e", "f"]);
     expect(r.held).toEqual([{ id: "d", pickIndex: 3 }]);
+  });
+});
+
+describe("placeNumberedPicks (paste with pick numbers)", () => {
+  it("fills a placeholder at that number", () => {
+    const r = placeNumberedPicks(["a", null, "c"], [{ id: "b", pickNo: 2 }]);
+    expect(r.next).toEqual(["a", "b", "c"]);
+    expect(r.filled).toBe(1);
+  });
+
+  it("pads a gap to reach the number, then appends", () => {
+    const r = placeNumberedPicks(["a"], [{ id: "d", pickNo: 4 }]);
+    expect(r.next).toEqual(["a", null, null, "d"]);
+    expect(r.padded).toBe(2);
+    expect(r.added).toBe(1);
+  });
+
+  it("a missed pick: inserts in front of the player we had at that number and shifts the rest down", () => {
+    // Screen sync missed pick 2, so pick 3's player sits at pick 2. The paste says B was pick 2.
+    const r = placeNumberedPicks(["a", "c", "d"], [{ id: "b", pickNo: 2 }, { id: "c", pickNo: 3 }, { id: "d", pickNo: 4 }]);
+    expect(r.next).toEqual(["a", "b", "c", "d"]);
+    expect(r.inserted).toBe(1);
+    expect(r.shifted).toBe(2);
+    expect(r.skipped).toBe(2); // c and d were already on the board
+  });
+
+  it("never moves a player already on the board, never touches API picks", () => {
+    const r = placeNumberedPicks(["a", "b"], [{ id: "a", pickNo: 2 }, { id: "z", pickNo: 1 }], 2);
+    expect(r.next).toEqual(["a", "b"]);
+    expect(r.skipped).toBe(2);
+  });
+
+  it("places out-of-order input by ascending pick number", () => {
+    const r = placeNumberedPicks([], [{ id: "c", pickNo: 3 }, { id: "a", pickNo: 1 }, { id: "b", pickNo: 2 }]);
+    expect(r.next).toEqual(["a", "b", "c"]);
   });
 });

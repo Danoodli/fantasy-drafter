@@ -19,7 +19,7 @@ import type {
 import { fetchDraftInfo, fetchPicks, type SleeperDraftInfo } from "../draft/sleeper";
 import { picksForSlot, pickOwner, slotOnClock } from "../draft/snake";
 import { computeDrift, type DriftPrior } from "../engine/drift";
-import { reconcileSequence } from "../draft/sequence";
+import { placeNumberedPicks, reconcileSequence } from "../draft/sequence";
 import { mergeName } from "../etl/names";
 
 const STORAGE_KEY = "draft-cockpit-picks-v1";
@@ -90,10 +90,18 @@ export interface ImportItem {
 }
 
 export interface ImportOutcome {
+  /** Appended at the end (numbered picks past the board, or unnumbered names after the last known one). */
   added: number;
+  /** Placeholders filled. */
   filled: number;
+  /** Placeholders created to reach a pick number. */
   padded: number;
+  /** Already on the board. */
   skipped: number;
+  /** Placed in front of a pick we had wrong — a pick that had been missed. */
+  inserted: number;
+  /** Picks that moved down because of an insertion. */
+  shifted: number;
   snapshot: DraftPick[];
 }
 
@@ -528,40 +536,47 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   const applyImport = useCallback(
     (items: ImportItem[]): ImportOutcome => {
       const snapshot = manualRef.current;
-      const merged = picksRef.current;
-      const apiCount = merged.filter((p) => p.manualIndex == null).length;
-      const next = [...snapshot];
-      const have = new Set<string>();
-      for (const p of merged) if (p.playerId) have.add(p.playerId);
-      for (const p of snapshot) if (p.playerId) have.add(p.playerId);
-      let added = 0, filled = 0, padded = 0, skipped = 0;
-      const mergedLength = () => apiCount + next.length;
-      for (const item of items) {
-        if (have.has(item.player.id)) {
-          skipped++;
-          continue;
-        }
-        const n = item.pickNo;
-        if (n != null && n <= mergedLength()) {
-          const manualIdx = n - 1 - apiCount;
-          if (manualIdx >= 0 && next[manualIdx]?.playerId === "") {
-            next[manualIdx] = manualPickOf(item.player);
-            have.add(item.player.id);
-            filled++;
-            continue;
-          }
-          // That pick belongs to someone we already know — append instead of clobbering.
-        } else if (n != null && n > mergedLength() + 1) {
-          const gap = n - mergedLength() - 1;
-          for (let i = 0; i < gap; i++) next.push({ ...UNKNOWN_PICK });
-          padded += gap;
-        }
-        next.push(manualPickOf(item.player));
-        have.add(item.player.id);
-        added++;
-      }
-      if (added + filled + padded > 0) commit(next);
-      return { added, filled, padded, skipped, snapshot };
+      const apiIds = picksRef.current.filter((p) => p.manualIndex == null).map((p) => (p.playerId ? p.playerId : null));
+      const apiCount = apiIds.length;
+      const byId = boardRef.current;
+      let known: (string | null)[] = [...apiIds, ...snapshot.map((m) => (m.playerId ? m.playerId : null))];
+      // Numbered picks first: the number is trusted (fill / pad / insert in
+      // front of a pick we had at that number). Then the unnumbered names as
+      // an ordered list, aligned with what is now known — exactly how a screen
+      // read is placed — so a paste can backfill a pick the screen missed.
+      const numbered = placeNumberedPicks(
+        known,
+        items.filter((it) => it.pickNo != null).map((it) => ({ id: it.player.id, pickNo: it.pickNo! })),
+        apiCount
+      );
+      known = numbered.next;
+      const seq = reconcileSequence(
+        known,
+        items.filter((it) => it.pickNo == null).map((it) => it.player.id),
+        { isMine: () => false, frozen: apiCount }
+      );
+      known = seq.next;
+      const existing = new Map<string, DraftPick>();
+      for (const m of snapshot) if (m.playerId) existing.set(m.playerId, m);
+      const nextManual: DraftPick[] = known.slice(apiCount).map((id) => {
+        if (!id) return { ...UNKNOWN_PICK };
+        const kept = existing.get(id);
+        if (kept) return kept;
+        const player = byId.get(id) ?? items.find((it) => it.player.id === id)?.player;
+        return player ? manualPickOf(player) : { ...UNKNOWN_PICK };
+      });
+      const unnumberedSkipped = items.filter((it) => it.pickNo == null).length - seq.inserted.length - seq.filled.length;
+      const out: ImportOutcome = {
+        added: numbered.added + seq.inserted.filter((p) => p.pickIndex >= numbered.next.length).length,
+        filled: numbered.filled + seq.filled.length,
+        padded: numbered.padded,
+        skipped: numbered.skipped + Math.max(0, unnumberedSkipped),
+        inserted: numbered.inserted + seq.inserted.filter((p) => p.pickIndex < numbered.next.length).length,
+        shifted: numbered.shifted + seq.shifted,
+        snapshot,
+      };
+      if (out.added + out.filled + out.padded + out.inserted > 0) commit(nextManual);
+      return out;
     },
     [commit]
   );

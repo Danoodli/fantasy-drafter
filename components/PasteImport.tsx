@@ -69,7 +69,13 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
   }, [onClose]);
 
   function commit() {
-    onCommit(ready.map((r) => ({ player: r.chosen!, pickNo: r.match.line.pickNo })));
+    // Names already on the board go along too — not to be marked again, but as
+    // the anchors that let a missed pick slot in between them by order.
+    onCommit(
+      rows
+        .filter((r) => r.chosen && (r.match.alreadyDrafted || r.enabled))
+        .map((r) => ({ player: r.chosen!, pickNo: r.match.line.pickNo }))
+    );
   }
 
   return (
@@ -108,7 +114,7 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
                 {already > 0 && <span className="text-ink-dim">{already} already off the board</span>}
                 {unmatched.length > 0 && <span className="text-warn">{unmatched.length} unrecognized</span>}
                 {lowConf > 0 && <span className="text-ink-dim">{lowConf} best-guess</span>}
-                {behind > 0 && <span className="text-ink-dim">{behind} fill earlier unknown picks</span>}
+                {behind > 0 && <span className="text-ink-dim">{behind} backfill earlier picks</span>}
                 {result.hasPickNumbers ? (
                   <span className="ml-auto font-mono text-[11px] text-ink-faint">ordered by pick number</span>
                 ) : (
@@ -191,8 +197,8 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
         <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3">
           <p className="text-xs text-ink-faint">
             {result.hasPickNumbers
-              ? "Pick numbers found: gaps become unknown picks so the counter stays right."
-              : "No pick numbers: picks are marked in list order and appended to the current pick."}
+              ? "Pick numbers found: each lands at its number — a pick we missed is inserted and later picks move down; gaps become unknown picks."
+              : "No pick numbers: the list is aligned with the picks already on the board by order — a missed pick slots in where it belongs."}
           </p>
           <div className="flex gap-2">
             <button onClick={onClose} className="rounded border border-line bg-panel px-3 py-2 text-sm font-semibold text-ink-dim hover:text-ink">

@@ -147,3 +147,64 @@ export function reconcileSequence(
   }
   return { next, inserted, filled, held, shifted };
 }
+
+export interface NumberedPick {
+  id: string;
+  pickNo: number;
+}
+
+export interface NumberedResult {
+  next: (string | null)[];
+  /** Appended at the end (after any padding). */
+  added: number;
+  /** Placeholders filled. */
+  filled: number;
+  /** Placeholders created to reach a pick number. */
+  padded: number;
+  /** Inserted in front of a pick we had at that number — the rest shift down. */
+  inserted: number;
+  shifted: number;
+  /** Already on the board (anywhere). */
+  skipped: number;
+}
+
+/**
+ * Place picks that carry their pick NUMBER (a paste with "1.05" / "R1, P2").
+ * The number is trusted: a placeholder there is filled, a gap is padded, and
+ * a DIFFERENT player sitting at that number means we missed this pick — it is
+ * inserted in front and the later picks shift down (which is what really
+ * happened in the room). A player already on the board is never moved.
+ */
+export function placeNumberedPicks(known: (string | null)[], picks: NumberedPick[], frozen = 0): NumberedResult {
+  const next = [...known];
+  const have = new Set(next.filter((x): x is string => x != null));
+  let added = 0, filled = 0, padded = 0, inserted = 0, shifted = 0, skipped = 0;
+  for (const { id, pickNo } of [...picks].sort((a, b) => a.pickNo - b.pickNo)) {
+    if (!id || pickNo < 1 || have.has(id)) {
+      skipped++;
+      continue;
+    }
+    const idx = pickNo - 1;
+    if (idx < frozen) {
+      skipped++; // an API pick is the truth for that number
+      continue;
+    }
+    if (idx >= next.length) {
+      while (next.length < idx) {
+        next.push(null);
+        padded++;
+      }
+      next.push(id);
+      added++;
+    } else if (next[idx] == null) {
+      next[idx] = id;
+      filled++;
+    } else {
+      shifted += next.length - idx;
+      next.splice(idx, 0, id);
+      inserted++;
+    }
+    have.add(id);
+  }
+  return { next, added, filled, padded, inserted, shifted, skipped };
+}
