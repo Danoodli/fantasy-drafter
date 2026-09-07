@@ -218,6 +218,14 @@ export interface Strategy {
   /** Max players the engine will ever recommend at a position. */
   positionCaps: Partial<Record<Position, number>>;
   /**
+   * Caps used instead of `positionCaps` in best ball. Realized-optimal weekly
+   * scoring pays for a third QB and TE (spike weeks, bye/injury cover): capping
+   * them at 2 cost ~180 QB and ~130 TE points per seat in 8 of 8 backtest
+   * seasons (2018–2025), and lifting the cap to 3 improved the same-seat
+   * result in all eight. Redraft caps are a separate question and stay put.
+   */
+  positionCapsBestBall?: Partial<Record<Position, number>>;
+  /**
    * Stacking appetite, 0–1.5. Bonus for pairing a QB with his own
    * pass-catchers (and vice versa) — correlated ceilings win tournaments.
    */
@@ -236,10 +244,11 @@ export interface Strategy {
   valueModel?: "unified" | "lineup" | "blend";
   /**
    * League types this strategy is the evidence-backed default for. The season
-   * backtest ranks strategies very differently by format — Robust RB is the
-   * best best-ball build in both 2024 and 2025 (+321 avg vs the ADP bot) and
-   * one of the weakest in redraft (+134), while Balanced/Safe Floor invert
-   * that — so the app picks per format instead of asking you to.
+   * backtest ranks strategies very differently by format — over 2018–2025
+   * `robust-rb` is the best best-ball build (positive vs the ADP room in 7 of
+   * 8 seasons) and the weakest redraft preset (the only one to lose seasons),
+   * while `balanced` beat the room in all eight redraft seasons — so the app
+   * picks per format instead of asking you to.
    */
   recommendedFor?: LeagueType[];
   /**

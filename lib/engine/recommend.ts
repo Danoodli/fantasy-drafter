@@ -479,7 +479,8 @@ function hardFilter(
       !lastTwoRounds
     )
       return false;
-    const cap = strategy.positionCaps[p.pos];
+    const caps = bestball && strategy.positionCapsBestBall ? strategy.positionCapsBestBall : strategy.positionCaps;
+    const cap = caps[p.pos];
     if (cap != null && (myCounts[p.pos] ?? 0) >= cap) return false;
 
     // ---- Football-sense pacing rules ------------------------------------

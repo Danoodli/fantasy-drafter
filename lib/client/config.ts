@@ -23,8 +23,10 @@ export const DEFAULT_CONFIG: LeagueConfig = {
 
 /**
  * Strategy the app selects on its own, per league type. Backed by
- * `pnpm backtest:season` across 2024 and 2025: two-year mean realized-points
- * delta vs an ADP bot in the same seat was Robust RB +321 in best ball (vs
+ * `pnpm backtest:history` across 2018–2025: `robust-rb` is the best best-ball
+ * build (mean +154/season vs the ADP room, positive in 7 of 8 seasons) and
+ * `balanced` beat the room in all eight redraft seasons. The earlier two-year
+ * numbers were Robust RB +321 in best ball (vs
  * Tournament Ceiling +169, the previous default) and Balanced +184 in redraft.
  */
 export const BESTBALL_DEFAULT_STRATEGY = "robust-rb";

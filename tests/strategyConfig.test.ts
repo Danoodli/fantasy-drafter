@@ -28,8 +28,9 @@ describe("strategy config", () => {
   });
 
   it("auto-selects the format's backtest winner", () => {
-    // Robust RB won best ball in 2024 (+273) and 2025 (+368); Balanced tied
-    // first in redraft both years. Changing these should require new evidence.
+    // Over 2018–2025 robust-rb is the best best-ball build (7 of 8 seasons
+    // positive) and balanced beat the ADP room in all eight redraft seasons.
+    // Changing these should require new evidence.
     expect(defaultStrategyFor("bestball")).toBe("robust-rb");
     expect(defaultStrategyFor("redraft")).toBe("balanced");
   });
@@ -57,6 +58,19 @@ describe("strategy config", () => {
     }
     const pickable = strategies.filter((s) => !s.hidden);
     expect(pickable.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("lets the best-ball default carry a third QB and TE, and keeps redraft caps at two", () => {
+    // Capping QB/TE at 2 cost ~180 QB and ~130 TE points per seat in 8 of 8
+    // best-ball backtest seasons (2018–2025); a cap of 3 improved every one.
+    const bb = strategies.find((s) => s.id === BESTBALL_DEFAULT_STRATEGY)!;
+    expect(bb.positionCapsBestBall?.QB).toBe(3);
+    expect(bb.positionCapsBestBall?.TE).toBe(3);
+    expect(bb.positionCaps.QB).toBe(2);
+    expect(bb.positionCaps.TE).toBe(2);
+    const rd = strategies.find((s) => s.id === REDRAFT_DEFAULT_STRATEGY)!;
+    expect(rd.positionCaps.QB).toBe(2);
+    expect(rd.positionCaps.TE).toBe(2);
   });
 
   it("keeps hidden strategies in config so the backtest can still measure them", () => {

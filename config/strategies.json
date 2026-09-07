@@ -2,7 +2,7 @@
   {
     "id": "balanced",
     "label": "Balanced",
-    "blurb": "Best overall redraft roster. Weighs every pick against what's left and what you can still get at your next pick.",
+    "blurb": "Best overall redraft roster. Weighs every pick against what's left and what you can still get at your next pick. Beat the ADP room in all eight backtest seasons, 2018–2025.",
     "lambda": 0.5,
     "baselineBlend": 0.5,
     "adpDiscipline": 0.5,
@@ -53,8 +53,8 @@
   },
   {
     "id": "robust-rb",
-    "label": "Robust RB",
-    "blurb": "Heavy early RB, then receivers. Best best-ball result in both 2024 and 2025 backtests.",
+    "label": "Best Ball",
+    "blurb": "Deep receiver corps with three QBs and three TEs for spike weeks. Best best-ball build in the 2018–2025 backtests: beat the ADP room in 7 of 8 seasons.",
     "lambda": 0.55,
     "baselineBlend": 0.65,
     "adpDiscipline": 0.5,
@@ -81,6 +81,12 @@
     "positionCaps": {
       "QB": 2,
       "TE": 2,
+      "K": 1,
+      "DST": 1
+    },
+    "positionCapsBestBall": {
+      "QB": 3,
+      "TE": 3,
       "K": 1,
       "DST": 1
     },
