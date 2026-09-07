@@ -348,7 +348,7 @@ export function buildFfaSnapshot(inputs: FfaInputs): { snapshot: SeasonSnapshot;
     }
 
     // realized
-    let weekly: (StatLine | null)[] = Array(SEASON_WEEKS).fill(null);
+    const weekly: (StatLine | null)[] = Array(SEASON_WEEKS).fill(null);
     let weeklyApplied: (number | null)[] = Array(SEASON_WEEKS).fill(null);
     let actual: StatLine | null = {};
     let actualApplied = 0;
