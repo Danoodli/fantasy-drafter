@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardPlayer, LeagueConfig, Position, Strategy } from "../lib/types";
 import { recommend, BESTBALL_TARGETS } from "../lib/engine/recommend";
-import { classifyNews, liveInjuryStatus } from "../lib/engine/newsSignal";
+import { gradeBoard } from "../lib/engine/injuryFeed";
 import { survivalProb } from "../lib/engine/survival";
 import { useDraft } from "../lib/client/useDraft";
 import { POS_COLOR } from "../lib/client/pos";
@@ -33,10 +33,7 @@ import type { ImportItem } from "../lib/client/useDraft";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
-import { loadSources, fetchTrendingIds } from "../lib/client/sources";
-import { fetchBoardNews, type PlayerNews } from "../lib/client/espnNews";
-import { fetchWireNews, mergeNews, DEFAULT_WIRE_HANDLES } from "../lib/client/bskyNews";
-import { connectWireStream } from "../lib/client/wireStream";
+import { useLiveSignals } from "../lib/client/useLiveSignals";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner, picksForSlot } from "../lib/draft/snake";
 import { startWalkthrough } from "./Walkthrough";
@@ -85,8 +82,6 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
   const [endedEarly, setEndedEarly] = useState(false);
   const [boardQuery, setBoardQuery] = useState("");
-  const [trendingIds, setTrendingIds] = useState<Set<string>>(new Set());
-  const [boardNews, setBoardNews] = useState<Map<string, PlayerNews>>(new Map());
   const [winProb, setWinProb] = useState<{ pct: number; delta: number | null } | null>(null);
   const prevWinRef = useRef<number | null>(null);
 
@@ -114,80 +109,21 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sim only when MY roster grows
   }, [draft.myRoster.length]);
 
-  // Live signals, refreshed every 10 minutes: Sleeper's most-added players,
-  // ESPN's breaking headlines, and the Bluesky insider wire (Rapoport, Yates,
-  // Rotoworld…) — merged newest-wins into one news map.
-  useEffect(() => {
-    const prefs = loadSources();
-    const handles = prefs.wireHandles.length ? prefs.wireHandles : DEFAULT_WIRE_HANDLES;
-    let cancelled = false;
-    const load = () => {
-      if (prefs.trending)
-        fetchTrendingIds()
-          .then((ids) => !cancelled && setTrendingIds(ids))
-          .catch(() => {
-            // offline — badges just don't show
-          });
-      const feeds = [
-        fetchBoardNews(board.players).catch(() => new Map<string, PlayerNews>()),
-        prefs.wire
-          ? fetchWireNews(board.players, handles).catch(() => new Map<string, PlayerNews>())
-          : Promise.resolve(new Map<string, PlayerNews>()),
-      ];
-      // Build-time FP news rides along (72h window), refreshed 3x/day by CI.
-      const baked = new Map<string, PlayerNews>();
-      const cutoff = Date.now() - 72 * 3600_000;
-      for (const p of board.players) {
-        if (p.news && Date.parse(p.news.published) >= cutoff) {
-          baked.set(p.id, { ...p.news, href: null });
-        }
-      }
-      Promise.all(feeds).then(([espn, wire]) => {
-        if (!cancelled) setBoardNews(mergeNews(baked, espn, wire));
-      });
-    };
-    load();
-    const timer = setInterval(load, 10 * 60 * 1000);
+  // Every live signal — trending, ESPN headlines, RSS, the Bluesky wire and
+  // lists, the ESPN injuries table, Jetstream push — through one shared hook.
+  const live = useLiveSignals(board, (id, item) => {
+    const player = board.players.find((p) => p.id === id);
+    if (player) showToast(`📰 ${player.name}: ${item.headline.slice(0, 70)}`);
+  });
+  const { boardNews, trendingIds } = live;
 
-    // LIVE push on top of the poll: Jetstream delivers reporter posts the
-    // second they publish — no gap right before your pick.
-    const disconnect = prefs.wire
-      ? connectWireStream(board.players, handles, (matched) => {
-          if (cancelled) return;
-          setBoardNews((prev) => mergeNews(prev, matched));
-          const [id, item] = [...matched.entries()][0];
-          const player = board.players.find((p) => p.id === id);
-          if (player) showToast(`📰 ${player.name}: ${item.headline.slice(0, 70)}`);
-        })
-      : () => {};
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      disconnect();
-    };
-  }, [board]);
-
-  // Live news, graded. classifyNews reads only unambiguous hard signals — ruled
-  // out, placed on IR, suspended, arrested, carted off — and maps them onto the
-  // same injury statuses the ETL bakes in. That means the engine's existing
-  // exclude-and-penalize path grades breaking news with no engine change and no
-  // loss of purity: recommend() still sees a plain board, just a truer one.
-  const gradedBoard = useMemo<Board>(() => {
-    if (boardNews.size === 0) return board;
-    let changed = 0;
-    const players = board.players.map((p) => {
-      const item = boardNews.get(p.id);
-      if (!item) return p;
-      const live = classifyNews(item.headline);
-      if (!live) return p;
-      const merged = liveInjuryStatus(p.injury, live);
-      if (merged === p.injury) return p;
-      changed++;
-      return { ...p, injury: merged, injuryLive: true };
-    });
-    return changed ? { ...board, players } : board;
-  }, [board, boardNews]);
+  // Live news, graded. The ESPN table sets Questionable/Doubtful/Out (and can
+  // clear); hard-signal headlines can only escalate. recommend() still sees a
+  // plain board, just a truer one — engine purity intact.
+  const gradedBoard = useMemo<Board>(
+    () => gradeBoard(board, live.liveStatus, boardNews),
+    [board, live.liveStatus, boardNews]
+  );
   const searchRef = useRef<SearchBoxHandle>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 

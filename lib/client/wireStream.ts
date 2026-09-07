@@ -48,13 +48,15 @@ async function resolveDids(handles: string[]): Promise<Map<string, string>> {
 export function connectWireStream(
   players: BoardPlayer[],
   handles: string[],
-  onNews: (matched: Map<string, PlayerNews>) => void
+  onNews: (matched: Map<string, PlayerNews>) => void,
+  opts: { extraDids?: Map<string, string>; onStatus?: (connected: boolean) => void } = {}
 ): () => void {
   let ws: WebSocket | null = null;
   let closed = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
   resolveDids(handles).then((didToHandle) => {
+    for (const [did, handle] of opts.extraDids ?? []) didToHandle.set(did, handle);
     if (closed || didToHandle.size === 0) return;
     const params = [...didToHandle.keys()].map((d) => `wantedDids=${d}`).join("&");
     const url = `${JETSTREAM}?wantedCollections=app.bsky.feed.post&${params}`;
@@ -67,6 +69,7 @@ export function connectWireStream(
         reconnectTimer = setTimeout(open, RECONNECT_MS);
         return;
       }
+      ws.onopen = () => opts.onStatus?.(true);
       ws.onmessage = (e) => {
         try {
           const ev = JSON.parse(String(e.data)) as JetstreamEvent;
@@ -97,6 +100,7 @@ export function connectWireStream(
         }
       };
       ws.onclose = () => {
+        opts.onStatus?.(false);
         if (!closed) reconnectTimer = setTimeout(open, RECONNECT_MS);
       };
       ws.onerror = () => ws?.close();

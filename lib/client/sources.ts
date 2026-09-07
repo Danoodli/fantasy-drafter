@@ -23,6 +23,10 @@ export interface SourcePrefs {
   wire: boolean;
   /** Bluesky handles to follow — editable; defaults to top NFL insiders. */
   wireHandles: string[];
+  /** Curated Bluesky lists (AT-URIs or bsky.app list URLs) whose members join the wire. Empty = none. */
+  wireLists: string[];
+  /** Handles to ignore everywhere on the wire (e.g. a noisy list member). */
+  wireBlock: string[];
 }
 
 export const DEFAULT_SOURCES: SourcePrefs = {
@@ -31,6 +35,8 @@ export const DEFAULT_SOURCES: SourcePrefs = {
   trending: true,
   wire: true,
   wireHandles: [], // empty = use DEFAULT_WIRE_HANDLES
+  wireLists: [], // filled with the curated defaults in Task 10
+  wireBlock: [],
 };
 
 const KEY = "draft-cockpit-sources-v1";

@@ -87,3 +87,13 @@ export function mergeNews(
   }
   return out;
 }
+
+// Curated-list sources — implemented in Task 10 of the freshness plan; stubs keep the hook compiling.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function fetchListNews(_players: BoardPlayer[], _lists: string[], _blocked: Set<string>): Promise<Map<string, PlayerNews>> {
+  return new Map();
+}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function resolveListMembers(_lists: string[], _blocked: Set<string>): Promise<Map<string, string>> {
+  return new Map();
+}

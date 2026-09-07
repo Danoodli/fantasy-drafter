@@ -735,8 +735,8 @@ describe("data-source preferences", () => {
   it("switching ADP and projection sources actually changes the board", async () => {
     const { rescoreBoard } = await import("../lib/client/rescore");
     const scoring = SCORING_PRESETS.ppr;
-    const espnBoard = rescoreBoard(board, scoring, config, { projections: "espn" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [] });
-    const slpBoard = rescoreBoard(board, scoring, config, { projections: "sleeper" as const, adp: "sleeper" as const, trending: true, wire: false, wireHandles: [] });
+    const espnBoard = rescoreBoard(board, scoring, config, { projections: "espn" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [], wireLists: [], wireBlock: [] });
+    const slpBoard = rescoreBoard(board, scoring, config, { projections: "sleeper" as const, adp: "sleeper" as const, trending: true, wire: false, wireHandles: [], wireLists: [], wireBlock: [] });
     const pick = (b: Board, name: string) => b.players.find((p) => p.name === name)!;
     const g1 = pick(espnBoard, "Jahmyr Gibbs");
     const g2 = pick(slpBoard, "Jahmyr Gibbs");
@@ -749,7 +749,7 @@ describe("data-source preferences", () => {
     });
     expect(diffs.length).toBeGreaterThan(10);
     // Blend sits between the two for a player where both sources exist
-    const blend = rescoreBoard(board, scoring, config, { projections: "blend" as const, adp: "blend" as const, trending: true, wire: false, wireHandles: [] });
+    const blend = rescoreBoard(board, scoring, config, { projections: "blend" as const, adp: "blend" as const, trending: true, wire: false, wireHandles: [], wireLists: [], wireBlock: [] });
     const gb = pick(blend, "Jahmyr Gibbs");
     const lo = Math.min(g1.projPoints, g2.projPoints) - 0.11;
     const hi = Math.max(g1.projPoints, g2.projPoints) + 0.11;
@@ -761,7 +761,7 @@ describe("data-source preferences", () => {
     const { rescoreBoard } = await import("../lib/client/rescore");
     const base = SCORING_PRESETS.ppr;
     const ppfd = { ...base, rush_fd: 0.5, rec_fd: 0.5 };
-    const prefs = { projections: "blend" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [] };
+    const prefs = { projections: "blend" as const, adp: "ffc" as const, trending: true, wire: false, wireHandles: [], wireLists: [], wireBlock: [] };
     const without = rescoreBoard(board, base, config, prefs);
     const withFd = rescoreBoard(board, ppfd, config, prefs);
     const g0 = without.players.find((p) => p.name === "Jahmyr Gibbs")!;
