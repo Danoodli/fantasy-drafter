@@ -10,19 +10,77 @@ import type { BoardPlayer } from "../types";
 import { matchNewsToPlayers, type NewsItem, type PlayerNews } from "./espnNews";
 
 /**
- * Default wire — every handle verified ACTIVE (posted within days) on
- * 2026-08-22. Editable in Setup → Advanced → Data sources: add handles or
- * delete lines to drop defaults. Notable dormant accounts deliberately
- * excluded: Field Yates (324d silent), Jordan Schultz (498d), the Schefter
- * mirror (dead) — Schefter/Garafolo news arrives via the aggregator bot.
+ * Default wire — every handle verified ACTIVE (≥3 posts in the last 7 days)
+ * on 2026-09-07 by polling getAuthorFeed. Editable in Setup → Advanced → Data
+ * sources. Confirmed dormant, deliberately excluded: Field Yates (last post
+ * 2025-10), Jordan Schultz (2025-04), Matt Harmon (2026-08-11, quiet), the
+ * official adamschefter.bsky.social (2024-11), FantasyPros (2026-02), Sleeper
+ * (2025-03), Fantasy Footballers (2023), Sharp Football (2026-02), and the old
+ * adamschefter-mirror.bluesky.bot (2025-02). Garafolo, Russini, Fowler, Breer,
+ * Meirov and Dov Kleiman have no active Bluesky presence — the aggregators
+ * below relay them. The name matcher only fires on board players, so beat
+ * accounts add coverage without adding noise.
  */
 export const DEFAULT_WIRE_HANDLES = [
-  "rapsheet.bsky.social", // Ian Rapoport — NFL Network national insider
-  "tompelissero.bsky.social", // Tom Pelissero — NFL Network insider
-  "profootballtalk.bsky.social", // ProFootballTalk — high-volume breaking NFL news
-  "matthewberry.bsky.social", // Matthew Berry — fantasy news + analysis
-  "rotoworld-fb.bsky.social", // Rotoworld — per-player fantasy news bot
-  "nflnewsreposterbot.bsky.social", // aggregator reposting national insiders (Schefter et al.)
+  // National insiders
+  "rapsheet.bsky.social", // Ian Rapoport — NFL Network / ESPN
+  "tompelissero.bsky.social", // Tom Pelissero — NFL Network (low volume here)
+  "profootballtalk.bsky.social", // ProFootballTalk — high-volume NFL news
+  "mattlombardo.bsky.social", // Matt Lombardo — national NFL reporter
+  // Aggregators (relay Schefter, Garafolo, Fowler, Breer… in real time)
+  "nflnewsreposterbot.bsky.social",
+  "insidenflnews.bsky.social", // NFL Daily News
+  "nflnewsposter.bsky.social", // reposts beat reporters, tagged [Reporter]
+  "adamscheftermirror.bsky.social", // the live Schefter mirror
+  // Fantasy news bots
+  "rotoworld-fb.bsky.social", // Rotoworld — per-player notes
+  "rotowirenfl.bsky.social", // RotoWire NFL — per-player notes
+  "matthewberry.bsky.social", // Matthew Berry
+  // Beat reporters / team outlets (team in comment)
+  "darrenurban.bsky.social", // ARI — Cardinals team site
+  "thefalcoholic.bsky.social", // ATL — SB Nation Falcons
+  "brianwacker1.bsky.social", // BAL — Baltimore Sun
+  "ravensbot.bsky.social", // BAL — mirror of the team account
+  "agetzenberg.bsky.social", // BUF — ESPN
+  "joebuscaglia.bsky.social", // BUF — The Athletic
+  "mikekayefootball.bsky.social", // CAR — ESPN
+  "daringantt.bsky.social", // CAR — Panthers.com
+  "kfishbain.bsky.social", // CHI — The Athletic
+  "seanhammond.bsky.social", // CHI — Chicago Tribune
+  "jamesrapien.bsky.social", // CIN — SI Bengals
+  "spencito.bsky.social", // CLE — SI Browns
+  "ceasterlingabj.bsky.social", // CLE — Akron Beacon Journal
+  "kddrummondnfl.blacksky.app", // DAL — Cowboys Wire
+  "codyroarknfl.bsky.social", // DEN — Mile High Sports
+  "masedenver.bsky.social", // DEN — DenverSports.com
+  "davebirkett.bsky.social", // DET — Detroit Free Press
+  "detroitfootball.net", // DET — Detroit Football Network
+  "wendellfp.bsky.social", // GB — A to Z Sports
+  "byjbh.bsky.social", // GB — Jason B. Hirschhorn
+  "aaronwilsonnfl.bsky.social", // HOU — KPRC 2
+  "demetrius.bsky.social", // JAX — Florida Times-Union
+  "mikesansone.bsky.social", // KC/CHI — The Athletic editor
+  "levidamien.bsky.social", // LV — Raiders Wire
+  "paulhgutierrez.bsky.social", // LV — Raiders.com
+  "nateatkins.bsky.social", // LAR — The Athletic
+  "stujrams.bsky.social", // LAR — Rams staff writer
+  "alainpoupart.bsky.social", // MIA — SI Dolphins
+  "emleiker.bsky.social", // MIN — Star Tribune
+  "bengoessling.bsky.social", // MIN — Star Tribune
+  "mikereiss.bsky.social", // NE — ESPN
+  "andrewcallahan.bsky.social", // NE — Boston Herald
+  "patriciatraina.bsky.social", // NYG — SI Giants
+  "antwanstaley.bsky.social", // NYJ — NY Daily News
+  "jimmykempski.bsky.social", // PHI — PhillyVoice
+  "zberm.bsky.social", // PHI — The Athletic
+  "mikedefabo.bsky.social", // PIT — The Athletic
+  "cartercritiques.bsky.social", // PIT — Post-Gazette
+  "mattmaiocco.bsky.social", // SF — NBC Sports Bay Area
+  "mattbarrows.bsky.social", // SF — The Athletic
+  "johnpboyle.bsky.social", // SEA — Seahawks.com
+  "fieldgulls.bsky.social", // SEA — SB Nation Seahawks
+  "teresamwalker.bsky.social", // TEN — AP
+  // No active beat account found for IND, LAC, NO, TB, WAS (2026-09-07) — the aggregators and lists cover them.
 ];
 
 interface BskyFeedItem {
