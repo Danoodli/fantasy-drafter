@@ -29,7 +29,7 @@ import Headshot from "./newsroom/Headshot";
 import { ago } from "./newsroom/feedUi";
 
 const TABLE_PAGE = 100;
-const TOP_STORIES = 6;
+const TOP_STORIES = 5;
 
 export default function Newsroom() {
   const [board, setBoard] = useState<Board | null>(null);
