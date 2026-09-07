@@ -1,29 +1,47 @@
 {
   "db_fpecr_latest.csv": {
-    "fetchedAt": "2026-09-07T15:06:24.173Z"
+    "fetchedAt": "2026-09-07T20:48:25.431Z"
   },
   "db_playerids.csv": {
-    "fetchedAt": "2026-09-07T15:06:24.103Z"
+    "fetchedAt": "2026-09-07T20:48:25.759Z"
   },
   "espn-kona.json": {
-    "fetchedAt": "2026-09-07T15:06:24.849Z"
+    "fetchedAt": "2026-09-07T20:48:25.688Z"
   },
   "ffc-standard.json": {
-    "fetchedAt": "2026-09-07T15:06:58.969Z"
+    "fetchedAt": "2026-09-07T20:48:50.583Z"
   },
   "ffc-half-ppr.json": {
-    "fetchedAt": "2026-09-07T15:06:59.049Z"
+    "fetchedAt": "2026-09-07T20:48:50.687Z"
   },
   "ffc-ppr.json": {
-    "fetchedAt": "2026-09-07T15:06:59.148Z"
+    "fetchedAt": "2026-09-07T20:48:50.760Z"
   },
   "ffc-2qb.json": {
-    "fetchedAt": "2026-09-07T15:06:59.207Z"
+    "fetchedAt": "2026-09-07T20:48:50.839Z"
   },
   "sleeper-players-slim.json": {
-    "fetchedAt": "2026-09-07T15:06:23.949Z"
+    "fetchedAt": "2026-09-07T20:48:25.230Z"
   },
   "sleeper-projections.json": {
-    "fetchedAt": "2026-09-07T15:06:23.792Z"
+    "fetchedAt": "2026-09-07T20:48:25.110Z"
+  },
+  "rss-cbs.xml": {
+    "fetchedAt": "2026-09-07T20:48:25.097Z"
+  },
+  "rss-espn.xml": {
+    "fetchedAt": "2026-09-07T20:48:25.079Z"
+  },
+  "espn-injuries.json": {
+    "fetchedAt": "2026-09-07T20:48:25.428Z"
+  },
+  "rss-rotowire.xml": {
+    "fetchedAt": "2026-09-07T20:48:25.602Z"
+  },
+  "rss-pft.xml": {
+    "fetchedAt": "2026-09-07T20:48:25.515Z"
+  },
+  "rss-yahoo.xml": {
+    "fetchedAt": "2026-09-07T20:48:25.604Z"
   }
 }

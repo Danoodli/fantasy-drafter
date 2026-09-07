@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>RotoWire.com Latest NFL News</title>
+    <copyright>Copyright (c) 2026 Roto Sports, Inc, All rights reserved.</copyright>
+    <description>Fantasy Sports from RotoWire.com</description>
+    <category>Fantasy Sports</category>
+    <language>en-us</language>
+    <ttl>10</ttl>
+    <image>
+      <title>RotoWire.com Fantasy Sports</title>
+      <width>120</width>
+      <height>30</height>
+      <link>https://www.rotowire.com</link>
+      <url>https://assets.rotowire.com/images/logo_roto_small.gif</url>
+    </image>
+    <link>https://www.rotowire.com</link>
+    <item>
+        <guid>nfl636350</guid>
+        <title>Jeremiyah Love: Optimism for Week 1</title>
+        <link>https://www.rotowire.com//football/player/jeremiyah-love-19235</link>
+        <description>Coach Mike LaFleur said he's "optimistic" Love (ankle) will be able to play Sunday against the Chargers, Darren Urban of the team's official site reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Mon, 07 Sep 2026 1:34:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl636349</guid>
+        <title>TreVeyon Henderson: Remains out of practice Monday</title>
+        <link>https://www.rotowire.com//football/player/treveyon-henderson-18517</link>
+        <description>Henderson (ankle) remained sidelined at Monday's practice, Mike Kadlick of Sports Illustrated reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Mon, 07 Sep 2026 1:26:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl636348</guid>
+        <title>Keaton Mitchell: Returns to practice Monday</title>
+        <link>https://www.rotowire.com//football/player/keaton-mitchell-16810</link>
+        <description>Mitchell (undisclosed) returned to practice Monday, Kris Rhim of ESPN.com reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Mon, 07 Sep 2026 1:14:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl636346</guid>
+        <title>Alec Pierce: Expected to play Week 1</title>
+        <link>https://www.rotowire.com//football/player/alec-pierce-16022</link>
+        <description>Coach Shan Steichen said Monday that Pierce (ankle) "should be good to go" for Sunday's game against the Ravens, Joel A. Erickson of The Indianapolis Star reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Mon, 07 Sep 2026 12:50:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl636345</guid>
+        <title>Rome Odunze: Not practicing Monday</title>
+        <link>https://www.rotowire.com//football/player/rome-odunze-17020</link>
+        <description>Odunze (leg) is not practicing Monday, Courtney Cronin of ESPN.com reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Mon, 07 Sep 2026 11:49:00 AM PDT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -105,6 +105,8 @@ export interface BoardPlayer {
 export interface BoardMeta {
   format: ScoringFormat;
   builtAt: string; // ISO timestamp
+  /** CI lane that produced this file: fast (every 30 min, boards only) or full (daily). */
+  lane?: "fast" | "full";
   sources: {
     name: string;
     fetchedAt: string; // ISO timestamp of the data actually used

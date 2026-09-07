@@ -3,7 +3,7 @@
 // league is configured). Run nightly by GitHub Actions and manually via
 // `pnpm build:board`. Fails loudly, falls back to committed fixtures.
 
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseCsv } from "../lib/etl/csv";
 import { mergeName, looseName } from "../lib/etl/names";
@@ -14,6 +14,8 @@ import {
   fetchEcr,
   fetchSleeperPlayerInfo,
   fetchSleeperProjections,
+  fetchEspnInjuriesTable,
+  fetchRssFeeds,
   type FfcPlayer,
   type SlimPlayerInfo,
   type SleeperProjection,
@@ -28,6 +30,11 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
+import { parseLane, type Lane } from "../lib/etl/lane";
+import { carryForwardFp } from "../lib/etl/carryForward";
+import { matchNewsToPlayers, type NewsItem } from "../lib/etl/newsMatch";
+import { parseEspnInjuries, type EspnInjuriesJson } from "../lib/client/espnInjuries";
+import { reconcileStatus } from "../lib/engine/injuryFeed";
 import { updateAdpTrends } from "../lib/etl/adpTrend";
 import { ESPN_POS, ESPN_TEAM, type EspnPlayerEntry } from "../lib/etl/espn";
 import {
@@ -314,7 +321,10 @@ function buildBoard(
     stats: Map<string, import("../lib/types").StatLine>;
     news: Map<string, { headline: string; published: string }>;
     experts: number;
-  } | null
+  } | null,
+  injuries: SourceResult<EspnInjuriesJson>,
+  rss: NewsItem[],
+  lane: Lane
 ): Board {
   const warnings: string[] = [];
 
@@ -449,6 +459,27 @@ function buildBoard(
 
   appendDeepPool(players, format, scoring, cross, playerInfo, sleeperProj, sos, warnings);
 
+  // Live-table statuses over the Sleeper snapshot (same rule the browser uses),
+  // plus baked news: FantasyPros → ESPN's dated note → RSS headline, newest wins.
+  const table = parseEspnInjuries(injuries.data, players, 72, Date.now());
+  const rssNews = matchNewsToPlayers(rss, players, 72);
+  let tabled = 0;
+  for (const p of players) {
+    const row = table.status.get(p.id);
+    if (row) {
+      const merged = reconcileStatus(p.injury, row.status);
+      if (merged !== p.injury) tabled++;
+      p.injury = merged;
+    }
+    const candidates = [p.news, table.news.get(p.id), rssNews.get(p.id)].filter(
+      (n): n is { headline: string; published: string } => !!n && Number.isFinite(Date.parse(n.published))
+    );
+    candidates.sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
+    p.news = candidates[0] ? { headline: candidates[0].headline, published: candidates[0].published } : null;
+  }
+  const withNews = players.filter((p) => p.news).length;
+  console.log(`  injuries: ${tabled} statuses updated from ESPN's table · news: ${withNews} players with a fresh note`);
+
   imputeProjections(players, warnings);
 
   // VORP / VOLS
@@ -486,10 +517,12 @@ function buildBoard(
     meta: {
       format,
       builtAt: new Date().toISOString(),
+      lane,
       sources: [
         { name: "Fantasy Football Calculator ADP", fetchedAt: ffc.fetchedAt, fromFixture: ffc.fromFixture },
         { name: "ESPN projections", fetchedAt: espnFetchedAt, fromFixture: espnFromFixture },
         { name: "DynastyProcess ECR + IDs", fetchedAt: ecrMeta.fetchedAt, fromFixture: ecrMeta.fromFixture },
+        { name: "ESPN injuries table", fetchedAt: injuries.fetchedAt, fromFixture: injuries.fromFixture },
         ...(fp
           ? [
               {
@@ -513,14 +546,26 @@ async function main() {
   loadEnvLocal(); // FANTASYPROS_API_KEY, if the user has one
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const [idsRes, ecrRes, espnRes, playersRes, sosRes, sleeperProjRes] = await Promise.all([
-    fetchPlayerIds(),
-    fetchEcr(),
+  const LANE = parseLane(process.argv);
+  const slowOnly = { fixtureOnly: LANE === "fast" };
+  console.log(
+    `lane: ${LANE}${LANE === "fast" ? " (Sleeper players, FantasyPros, DynastyProcess, nflverse from fixtures)" : ""}`
+  );
+
+  const [idsRes, ecrRes, espnRes, playersRes, sosRes, sleeperProjRes, injuriesRes, rssRes] = await Promise.all([
+    fetchPlayerIds(slowOnly),
+    fetchEcr(slowOnly),
     fetchEspnProjections(SEASON),
-    fetchSleeperPlayerInfo(),
-    fetchSos(SEASON, SEASON - 1),
+    fetchSleeperPlayerInfo(slowOnly),
+    fetchSos(SEASON, SEASON - 1, slowOnly),
     fetchSleeperProjections(SEASON),
+    fetchEspnInjuriesTable(),
+    fetchRssFeeds(),
   ]);
+  const rssItems: NewsItem[] = rssRes.flatMap((r) => r.data);
+  console.log(
+    `injuries table: ${injuriesRes.data.injuries?.length} teams${injuriesRes.fromFixture ? " (fixture)" : ""} · rss: ${rssItems.length} items`
+  );
   console.log(`sleeper projections: ${Object.keys(sleeperProjRes.data).length} players`);
   console.log(`sos: ${Object.keys(sosRes.data).length} teams${sosRes.fromFixture ? " (fixture)" : ""}`);
   const cross = parseCsv(idsRes.data as string) as unknown as CrossRow[];
@@ -532,9 +577,10 @@ async function main() {
   const fpIds = ecrRows
     .filter((r) => r.page_type === "redraft-overall" && r.id && r.id !== "NA")
     .map((r) => r.id);
-  const fpData: FpData | null = await fetchFantasyProsData(SEASON, fpIds);
+  // The fast lane never touches FantasyPros: the free tier 429s under 3 builds a day already.
+  const fpData: FpData | null = LANE === "fast" ? null : await fetchFantasyProsData(SEASON, fpIds);
   const fpNews = new Map<string, { headline: string; published: string }>();
-  for (const n of await fetchFantasyProsNews()) {
+  for (const n of LANE === "fast" ? [] : await fetchFantasyProsNews()) {
     if (!n.fpid) continue;
     const existing = fpNews.get(n.fpid);
     if (!existing || Date.parse(n.published) > Date.parse(existing.published)) {
@@ -546,6 +592,7 @@ async function main() {
     console.log(
       `fantasypros: live consensus — ${fpData.ecr.ppr.size} ECR entries/format, ${fpData.stats.size} projections, ${fpData.experts} experts`
     );
+  else if (LANE === "fast") console.log("fantasypros: skipped on the fast lane — carried forward from the last full build");
   else if (!process.env.FANTASYPROS_API_KEY)
     console.log("fantasypros: no FANTASYPROS_API_KEY — using DynastyProcess weekly ECR");
   console.log(`crosswalk: ${cross.length} rows · ecr: ${ecrRows.length} rows · espn: ${espn.length} projections`);
@@ -583,16 +630,23 @@ async function main() {
     const fp = fpData
       ? { ecr: fpData.ecr[format], stats: fpData.stats, news: fpNews, experts: fpData.experts }
       : null;
-    const board = buildBoard(
-      format, SCORING_PRESETS[format], defaultConfigFor(format),
-      ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
-      { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
-      playersRes.data,
-      sosRes.data,
-      sleeperProjRes.data,
-      fp
-    );
     const path = join(OUT_DIR, `board-${format}.json`);
+    const previous: Board | null = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+    const board = carryForwardFp(
+      buildBoard(
+        format, SCORING_PRESETS[format], defaultConfigFor(format),
+        ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
+        { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
+        playersRes.data,
+        sosRes.data,
+        sleeperProjRes.data,
+        fp,
+        injuriesRes,
+        rssItems,
+        LANE
+      ),
+      previous
+    );
     writeFileSync(path, JSON.stringify(board));
     const kb = (JSON.stringify(board).length / 1024).toFixed(0);
     console.log(`✓ board-${format}.json — ${board.players.length} players, ${kb} KB, ${board.meta.warnings.length} warnings`);
@@ -600,23 +654,32 @@ async function main() {
     for (const w of board.meta.warnings) console.log(`   ⚠ ${w}`);
 
     if (customScoring && customConfig && customConfig.scoring === format) {
-      const custom = buildBoard(
-        format, customScoring, customConfig,
-        ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
-        { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
-        playersRes.data,
-        sosRes.data,
-        sleeperProjRes.data,
-        fp
+      const customPath = join(OUT_DIR, "board-custom.json");
+      const prevCustom: Board | null = existsSync(customPath) ? JSON.parse(readFileSync(customPath, "utf8")) : null;
+      const custom = carryForwardFp(
+        buildBoard(
+          format, customScoring, customConfig,
+          ffc, espn, espnRes.fromFixture, espnRes.fetchedAt, cross, ecrRows,
+          { fetchedAt: ecrRes.fetchedAt, fromFixture: ecrRes.fromFixture },
+          playersRes.data,
+          sosRes.data,
+          sleeperProjRes.data,
+          fp,
+          injuriesRes,
+          rssItems,
+          LANE
+        ),
+        prevCustom
       );
-      writeFileSync(join(OUT_DIR, "board-custom.json"), JSON.stringify(custom));
+      writeFileSync(customPath, JSON.stringify(custom));
       console.log(`✓ board-custom.json — real league scoring applied`);
     }
   }
 
-  await fitDriftPrior();
+  if (LANE === "full") await fitDriftPrior(); // a handful of Sleeper/FFC calls — daily is plenty
 
-  const stale = [idsRes, ecrRes, espnRes].some((r) => r.fromFixture);
+  // On the fast lane the slow sources are fixtures on purpose; only live ones count as stale.
+  const stale = (LANE === "fast" ? [espnRes, injuriesRes] : [idsRes, ecrRes, espnRes, injuriesRes]).some((r) => r.fromFixture);
   if (stale) console.warn("\n⚠️  ONE OR MORE SOURCES USED FIXTURES — board may be stale. See warnings above.");
   console.log(`\nDone. ${totalWarnings} total warnings.`);
 }

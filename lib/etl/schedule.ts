@@ -29,7 +29,15 @@ export interface SosResult {
   fromFixture: boolean;
 }
 
-export async function fetchSos(season: number, statsSeason: number): Promise<SosResult> {
+export async function fetchSos(
+  season: number,
+  statsSeason: number,
+  opts: { fixtureOnly?: boolean } = {}
+): Promise<SosResult> {
+  if (opts.fixtureOnly) {
+    if (!existsSync(FIXTURE)) return { data: {}, fetchedAt: "unknown", fromFixture: true };
+    return { data: JSON.parse(readFileSync(FIXTURE, "utf8")), fetchedAt: "fixture", fromFixture: true };
+  }
   try {
     const [gamesRes, statsRes] = await Promise.all([
       fetch("https://github.com/nflverse/nfldata/raw/master/data/games.csv"),

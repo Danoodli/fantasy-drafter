@@ -4,6 +4,9 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { parseRss } from "./rss";
+import type { NewsItem } from "./newsMatch";
+import type { EspnInjuriesJson } from "../client/espnInjuries";
 
 const RAW_DIR = join(process.cwd(), "data", "raw");
 const META_PATH = join(RAW_DIR, "meta.json");
@@ -33,13 +36,23 @@ export interface SourceResult<T> {
  * Fetch `url`, cache the body to data/raw/<key>, and fall back to the cached
  * fixture on failure. Fails hard only if there is no fixture either.
  */
+export interface FetchOpts {
+  /** Fast CI lane: read the committed fixture, no network, no staleness warning. */
+  fixtureOnly?: boolean;
+}
+
 export async function fetchWithFixture<T>(
   key: string,
   url: string,
   parse: (body: string) => T,
-  init?: RequestInit
+  init?: RequestInit,
+  opts: FetchOpts = {}
 ): Promise<SourceResult<T>> {
   const fixturePath = join(RAW_DIR, key);
+  if (opts.fixtureOnly) {
+    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the full lane first`);
+    return { data: parse(readFileSync(fixturePath, "utf8")), fetchedAt: readMeta()[key]?.fetchedAt ?? "unknown", fromFixture: true };
+  }
   try {
     const res = await fetch(url, init);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -119,14 +132,16 @@ export function fetchEspnProjections(season: number) {
   );
 }
 
-export function fetchPlayerIds() {
+export function fetchPlayerIds(opts: FetchOpts = {}) {
   return fetchWithFixture(
     "db_playerids.csv",
     "https://github.com/dynastyprocess/data/raw/master/files/db_playerids.csv",
     (body) => {
       if (!body.startsWith("mfl_id,")) throw new Error("unexpected playerids header");
       return body;
-    }
+    },
+    undefined,
+    opts
   );
 }
 
@@ -141,9 +156,13 @@ export interface SlimPlayerInfo {
  * The raw players dump is 14.6 MB (Sleeper says fetch at most daily), so we
  * reduce it immediately and cache only the ~100 KB slim map as the fixture.
  */
-export async function fetchSleeperPlayerInfo(): Promise<SourceResult<Record<string, SlimPlayerInfo>>> {
+export async function fetchSleeperPlayerInfo(opts: FetchOpts = {}): Promise<SourceResult<Record<string, SlimPlayerInfo>>> {
   const key = "sleeper-players-slim.json";
   const fixturePath = join(RAW_DIR, key);
+  if (opts.fixtureOnly) {
+    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the full lane first`);
+    return { data: JSON.parse(readFileSync(fixturePath, "utf8")), fetchedAt: readMeta()[key]?.fetchedAt ?? "unknown", fromFixture: true };
+  }
   try {
     const res = await fetch("https://api.sleeper.app/v1/players/nfl");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -211,10 +230,15 @@ export interface SleeperProjection {
  * immediately; only the slim map is cached as the fixture.
  */
 export async function fetchSleeperProjections(
-  season: number
+  season: number,
+  opts: FetchOpts = {}
 ): Promise<SourceResult<Record<string, SleeperProjection>>> {
   const key = "sleeper-projections.json";
   const fixturePath = join(RAW_DIR, key);
+  if (opts.fixtureOnly) {
+    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the full lane first`);
+    return { data: JSON.parse(readFileSync(fixturePath, "utf8")), fetchedAt: readMeta()[key]?.fetchedAt ?? "unknown", fromFixture: true };
+  }
   try {
     const url =
       `https://api.sleeper.app/projections/nfl/${season}?season_type=regular` +
@@ -272,13 +296,63 @@ export async function fetchSleeperProjections(
   }
 }
 
-export function fetchEcr() {
+export function fetchEcr(opts: FetchOpts = {}) {
   return fetchWithFixture(
     "db_fpecr_latest.csv",
     "https://github.com/dynastyprocess/data/raw/master/files/db_fpecr_latest.csv",
     (body) => {
       if (!body.startsWith("fp_page,")) throw new Error("unexpected ecr header");
       return body;
+    },
+    undefined,
+    opts
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live-status and headline sources (fast-lane safe: one small request each)
+
+/** ESPN's league-wide injuries table — structured Q/D/O/IR/Sus for every player with a designation. */
+export function fetchEspnInjuriesTable() {
+  return fetchWithFixture<EspnInjuriesJson>(
+    "espn-injuries.json",
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries",
+    (body) => {
+      const json = JSON.parse(body) as EspnInjuriesJson;
+      if (!Array.isArray(json.injuries) || json.injuries.length < 20)
+        throw new Error(`unexpected injuries payload (teams=${json.injuries?.length})`);
+      return json;
     }
+  );
+}
+
+export const ETL_RSS_FEEDS: { key: string; url: string }[] = [
+  { key: "rss-yahoo.xml", url: "https://sports.yahoo.com/nfl/rss.xml" },
+  { key: "rss-pft.xml", url: "https://profootballtalk.nbcsports.com/feed/" },
+  { key: "rss-cbs.xml", url: "https://www.cbssports.com/rss/headlines/nfl/" },
+  { key: "rss-espn.xml", url: "https://www.espn.com/espn/rss/nfl/news" },
+  { key: "rss-rotowire.xml", url: "https://www.rotowire.com/rss/news.php?sport=NFL" },
+];
+
+/** Headline feeds for baked news. Never fatal: a feed with no fixture yields []. */
+export async function fetchRssFeeds(): Promise<SourceResult<NewsItem[]>[]> {
+  return Promise.all(
+    ETL_RSS_FEEDS.map(async ({ key, url }) => {
+      try {
+        return await fetchWithFixture<NewsItem[]>(
+          key,
+          url,
+          (body) => {
+            const items = parseRss(body);
+            if (items.length === 0) throw new Error("no <item> elements");
+            return items;
+          },
+          { headers: { "user-agent": "Mozilla/5.0 (compatible; DraftCockpit/1.0)" } }
+        );
+      } catch (err) {
+        console.warn(`⚠️  ${key}: ${err} — skipped`);
+        return { data: [], fetchedAt: "unknown", fromFixture: true };
+      }
+    })
   );
 }
