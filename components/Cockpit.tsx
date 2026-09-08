@@ -399,6 +399,16 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     for (const p of draft.picks) if (p.playerId) m.set(p.playerId, p.pickNo);
     return m;
   }, [draft.picks]);
+  /** What the room knows, for laying a label-less paste onto the board (lib/draft/pasteLayout.ts). */
+  const pasteRoom = useMemo(
+    () => ({
+      order: config.draftOrder ?? "snake",
+      knownCount: draft.picks.reduce((n, p) => Math.max(n, p.pickNo), 0),
+      placed: placedByPlayer,
+      placeholders: new Set(draft.picks.filter((p) => !p.playerId).map((p) => p.pickNo)),
+    }),
+    [config.draftOrder, draft.picks, placedByPlayer]
+  );
 
   /**
    * One read of a draft BOARD grid from screen sync: every cell carries its
@@ -1290,6 +1300,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           draftedIds={draft.draftedIds}
           teams={config.teams}
           currentPick={draft.currentPick}
+          room={pasteRoom}
           onCommit={(items) => {
             setPasteText(null);
             for (const it of items) scoreAgainstShortlist(it.player);

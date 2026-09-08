@@ -20,6 +20,7 @@ import type { BoardPlayer, Position } from "../types";
 import { scorePlayers } from "./fuzzy";
 import { mergeName } from "../etl/names";
 import { buildVocab, findPlayers, lineHints, surnameCounts, teamCodeOf, tokenize, type Vocab } from "./nameMatch";
+import { inferPasteLayout, type LayoutInference, type PasteShape, type RoomState } from "./pasteLayout";
 
 export interface ParsedLine {
   raw: string;
@@ -46,6 +47,8 @@ export interface PasteResult {
   hasPickNumbers: boolean;
   /** Lines that carried no name at all (headers, blank separators, owner tags). */
   ignored: string[];
+  /** For a paste without pick numbers: how the rows were laid onto the board from what the room already knows. */
+  layout?: LayoutInference;
 }
 
 /** Nickname / city → team code, for team defenses ("Seahawks D/ST", "Baltimore Defense"). */
@@ -213,11 +216,19 @@ function coalesceLines(
 export interface PasteOptions {
   teams: number;
   /**
-   * The paste is a draft BOARD copied row by row with no cell labels: rows are
-   * rounds from `firstRound`, and even rounds read right to left on screen.
-   * Ignored when the paste carries pick numbers of its own.
+   * What the room already knows (picks recorded, who sits where, draft order).
+   * A paste without pick numbers is laid onto the board from it: a board copy
+   * in screen order snakes correctly, a list stays a list, and names already
+   * on the board pin the reading (lib/draft/pasteLayout.ts). Ignored when the
+   * paste carries pick numbers of its own.
    */
-  snakeGrid?: { firstRound: number };
+  room?: Omit<RoomState, "teams"> & { prefer?: PasteShape };
+}
+
+/** Board cells copy with their "(BYE 7)" tag; a paste full of them is a board, not a list. */
+export function looksLikeBoard(text: string, names: number): boolean {
+  const tags = (text.match(/\(BYE\s*\d+\)/gi) ?? []).length;
+  return tags >= Math.max(2, Math.ceil(names * 0.5));
 }
 
 export function parsePastedPicks(
@@ -243,6 +254,7 @@ export function parsePastedPicks(
   const matches: PasteMatch[] = [];
   const bareNumbers: (number | null)[] = [];
   const seen = new Set<string>();
+  const gridCopy = looksLikeBoard(text, 0);
 
   for (const raw of lines) {
     const rp = roundPick(raw, teams);
@@ -280,6 +292,11 @@ export function parsePastedPicks(
         const alt = f.alternatives?.find((a) => !seen.has(a.id));
         if (!alt) continue;
         player = alt;
+      } else if (f.tie && draftedIds.has(player.id)) {
+        // A tie whose best guess is already gone from the room: a paste is
+        // mostly new picks, so it is the candidate still on the board.
+        const alt = f.alternatives?.find((a) => !seen.has(a.id) && !draftedIds.has(a.id));
+        if (alt) player = alt;
       }
       seen.add(player.id);
       pushed = true;
@@ -302,7 +319,7 @@ export function parsePastedPicks(
       });
       bareNumbers.push(found.length === 1 ? bare : null);
     }
-    if (!pushed && opts.snakeGrid) {
+    if (!pushed && gridCopy) {
       // On a board every screen cell counts: a duplicate line keeps its cell
       // (unresolved, with the players it read as) so later cells stay numbered right.
       const nameText = tokens.slice(found[0].start, found[0].end + 1).join(" ");
@@ -322,22 +339,25 @@ export function parsePastedPicks(
   }
 
   let hasPickNumbers = matches.some((m) => m.line.pickNo != null);
-  if (!hasPickNumbers && opts.snakeGrid && matches.length > 0) {
-    // Screen order → pick number: row r is round firstRound + r; odd rounds
-    // run left to right, even rounds right to left.
-    const first = Math.max(1, Math.floor(opts.snakeGrid.firstRound));
-    matches.forEach((m, i) => {
-      const round = first + Math.floor(i / teams);
-      const col = i % teams;
-      const pick = round % 2 === 1 ? col + 1 : teams - col;
-      m.line.pickNo = (round - 1) * teams + pick;
-    });
-    hasPickNumbers = true;
+  let layout: LayoutInference | undefined;
+  if (!hasPickNumbers && opts.room && matches.length > 0) {
+    // No numbers on the paste: lay the rows onto the board from what the room
+    // knows. A board copy (cells with BYE tags) is read in screen order unless
+    // the names already on the board say otherwise.
+    // Cell tags are structural evidence of a board; without them ADP tells a board from a list.
+    const prefer = opts.room.prefer ?? (looksLikeBoard(text, matches.length) ? "grid" : null);
+    const adpById = new Map(players.map((p) => [p.id, p.adp]));
+    const inferred = inferPasteLayout(matches.map((m) => m.player?.id ?? null), { ...opts.room, teams }, prefer, (id) => adpById.get(id));
+    if (inferred) {
+      layout = inferred;
+      matches.forEach((m, i) => (m.line.pickNo = inferred.best.picks[i]));
+      hasPickNumbers = true;
+    }
   }
   if (hasPickNumbers) {
     matches.sort((a, b) => (a.line.pickNo ?? Infinity) - (b.line.pickNo ?? Infinity));
   }
-  return { matches, hasPickNumbers, ignored };
+  return { matches, hasPickNumbers, ignored, layout };
 }
 
 /** Human-readable normalized name, for tests and previews. */

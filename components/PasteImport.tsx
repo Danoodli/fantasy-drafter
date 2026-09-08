@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
 import { parsePastedPicks, type PasteMatch } from "../lib/draft/pasteImport";
+import type { PasteShape, RoomState } from "../lib/draft/pasteLayout";
 import type { ImportItem } from "../lib/client/useDraft";
 import { POS_COLOR } from "../lib/client/pos";
 
@@ -18,6 +19,8 @@ interface Props {
   draftedIds: Set<string>;
   teams: number;
   currentPick: number;
+  /** What the room already knows, so a paste without pick numbers lays itself onto the board. */
+  room: Omit<RoomState, "teams">;
   onCommit: (items: ImportItem[]) => void;
   onClose: () => void;
 }
@@ -29,17 +32,19 @@ interface Row {
   enabled: boolean;
 }
 
-export default function PasteImport({ initialText, players, draftedIds, teams, currentPick, onCommit, onClose }: Props) {
+const SHAPE_LABEL: Record<PasteShape, string> = { grid: "a board grid, snake rows", list: "a pick list, oldest first", newest: "a pick list, newest first" };
+
+export default function PasteImport({ initialText, players, draftedIds, teams, currentPick, room, onCommit, onClose }: Props) {
   const [text, setText] = useState(initialText);
   const [reverse, setReverse] = useState(false);
-  const [snakeGrid, setSnakeGrid] = useState(false);
-  const [firstRound, setFirstRound] = useState(1);
+  /** The user picked another reading than the one inferred (rare; the alternatives chip). */
+  const [prefer, setPrefer] = useState<PasteShape | null>(null);
   const [overrides, setOverrides] = useState<Record<number, BoardPlayer | null>>({});
   const [disabled, setDisabled] = useState<Set<number>>(new Set());
 
   const result = useMemo(
-    () => parsePastedPicks(text, players, draftedIds, { teams, snakeGrid: snakeGrid ? { firstRound } : undefined }),
-    [text, players, draftedIds, teams, snakeGrid, firstRound]
+    () => parsePastedPicks(text, players, draftedIds, { teams, room: { ...room, prefer: prefer ?? undefined } }),
+    [text, players, draftedIds, teams, room, prefer]
   );
 
   /** New text means new rows: per-row edits no longer apply. */
@@ -47,6 +52,7 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
     setText(next);
     setOverrides({});
     setDisabled(new Set());
+    setPrefer(null);
   }
 
   const rows: Row[] = useMemo(() => {
@@ -120,37 +126,30 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
                 {unmatched.length > 0 && <span className="text-warn">{unmatched.length} unrecognized</span>}
                 {lowConf > 0 && <span className="text-ink-dim">{lowConf} best-guess</span>}
                 {behind > 0 && <span className="text-ink-dim">{behind} backfill earlier picks</span>}
-                {result.hasPickNumbers && !snakeGrid ? (
+                {result.layout ? (
+                  <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-ink-faint">
+                    <span title={`Laid onto the board from what the room knows${result.layout.best.anchors ? ` — ${result.layout.best.anchors} pasted name${result.layout.best.anchors === 1 ? " is" : "s are"} already on it` : ""}`}>
+                      read as {SHAPE_LABEL[result.layout.best.shape]}
+                      {result.layout.best.anchors > 0 ? ` · anchored on ${result.layout.best.anchors} known pick${result.layout.best.anchors === 1 ? "" : "s"}` : ""}
+                    </span>
+                    {result.layout.alternatives.map((alt) => (
+                      <button
+                        key={alt.shape}
+                        onClick={() => setPrefer(alt.shape)}
+                        className="rounded border border-line bg-panel px-1.5 py-0.5 text-ink-dim hover:text-ink"
+                        title="Also fits what the room knows — click if the picks below look wrong"
+                      >
+                        or {SHAPE_LABEL[alt.shape]}
+                      </button>
+                    ))}
+                  </span>
+                ) : result.hasPickNumbers ? (
                   <span className="ml-auto font-mono text-[11px] text-ink-faint">ordered by pick number</span>
                 ) : (
-                  <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {!snakeGrid && (
-                      <label className="flex items-center gap-1.5 text-xs text-ink-dim">
-                        <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
-                        list is newest-first (mark bottom to top)
-                      </label>
-                    )}
-                    <label
-                      className="flex items-center gap-1.5 text-xs text-ink-dim"
-                      title="A draft board copied row by row with no pick labels (DraftKings): rows are rounds, even rounds run right to left."
-                    >
-                      <input type="checkbox" checked={snakeGrid} onChange={(e) => setSnakeGrid(e.target.checked)} />
-                      board grid, snake rows
-                    </label>
-                    {snakeGrid && (
-                      <label className="flex items-center gap-1 text-xs text-ink-dim">
-                        first row is round
-                        <input
-                          type="number"
-                          min={1}
-                          max={40}
-                          value={firstRound}
-                          onChange={(e) => setFirstRound(Math.max(1, Number(e.target.value) || 1))}
-                          className="w-12 rounded border border-line bg-field px-1 py-0.5 font-mono text-xs"
-                        />
-                      </label>
-                    )}
-                  </span>
+                  <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-dim">
+                    <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
+                    list is newest-first (mark bottom to top)
+                  </label>
                 )}
               </div>
 

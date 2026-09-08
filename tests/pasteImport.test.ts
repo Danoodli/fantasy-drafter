@@ -218,38 +218,53 @@ describe("parsePastedPicks on a draft BOARD grid (DraftKings)", () => {
     ]);
   });
 
-  it("with no labels at all, the snake-grid option numbers rows as rounds, even rounds right to left", () => {
-    const row1 = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"];
-    const row2 = ["Puka Nacua", "Saquon Barkley", "CeeDee Lamb"]; // screen order; drafted 3.. wait: 2.3, 2.2, 2.1
-    const row3 = ["Malik Nabers", "Ashton Jeanty"];
-    const text = [...row1, ...row2, ...row3].join("\n");
-    const plain = parsePastedPicks(text, players, none, { teams: 3 });
-    expect(plain.hasPickNumbers).toBe(false);
-    const grid = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
-    expect(picks(grid)).toEqual([
-      [1, "Ja'Marr Chase"],
-      [2, "Bijan Robinson"],
-      [3, "Jahmyr Gibbs"],
-      [4, "CeeDee Lamb"],
-      [5, "Saquon Barkley"],
-      [6, "Puka Nacua"],
-      [7, "Malik Nabers"],
-      [8, "Ashton Jeanty"],
+  it("with no labels at all, a board copy lays itself onto the room's board: screen order snakes after the 12th pick", () => {
+    // Picks 1–8 are already marked; the user copies cells 1.9 through 2.1 (screen order: 9..12, then 18 down to 13).
+    const known = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs", "Saquon Barkley", "CeeDee Lamb", "Justin Jefferson", "Puka Nacua", "Malik Nabers"];
+    const placed = new Map(known.map((n, i) => [byName(n).id, i + 1]));
+    const cell = (name: string, tag: string) => `${name}\n${tag}`;
+    const text = [
+      cell("A. Jeanty", "RB LV (BYE 8)"), cell("N. Collins", "WR HOU (BYE 6)"), cell("D. Henry", "RB BAL (BYE 7)"), cell("B. Bowers", "TE LV (BYE 8)"),
+      cell("T. McBride", "TE ARI (BYE 8)"), cell("D. London", "WR ATL (BYE 5)"), cell("J. Taylor", "RB IND (BYE 11)"), cell("A. Brown", "WR NE (BYE 14)"),
+      cell("D. Achane", "RB MIA (BYE 12)"), cell("J. Cook", "RB BUF (BYE 7)"),
+    ].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 12, room: { order: "snake", knownCount: 8, placed } });
+    expect(r.layout?.best.shape).toBe("grid");
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [9, "Ashton Jeanty"],
+      [10, "Nico Collins"],
+      [11, "Derrick Henry"],
+      [12, "Brock Bowers"],
+      [13, "James Cook III"],
+      [14, "De'Von Achane"],
+      [15, "A.J. Brown"],
+      [16, "Jonathan Taylor"],
+      [17, "Drake London"],
+      [18, "Trey McBride"],
     ]);
   });
 
-  it("the snake-grid option can start at a later round, and never overrides labels that are present", () => {
-    const text = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs", "Puka Nacua"].join("\n");
-    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 6 } });
-    // Round 6 is even: right to left on screen, so the first screen cell is pick 6.3 = 18.
-    expect(picks(r)).toEqual([
-      [16, "Jahmyr Gibbs"],
-      [17, "Bijan Robinson"],
-      [18, "Ja'Marr Chase"],
-      [19, "Puka Nacua"],
+  it("names already on the board anchor the reading, so any subsection of the grid works — and a plain list stays a list", () => {
+    const known = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"];
+    const placed = new Map(known.map((n, i) => [byName(n).id, i + 1]));
+    // Board copy from 1.3 across into round 2 for a 3-team room: cells 1.3 | 2.3, 2.2, 2.1 → picks 3, 6, 5, 4.
+    const grid = parsePastedPicks("J. Gibbs\nRB DET (BYE 6)\nP. Nacua\nWR LAR (BYE 11)\nC. Lamb\nWR DAL (BYE 14)\nS. Barkley\nRB PHI (BYE 10)", players, none, {
+      teams: 3,
+      room: { order: "snake", knownCount: 3, placed },
+    });
+    expect(grid.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [3, "Jahmyr Gibbs"],
+      [4, "Saquon Barkley"],
+      [5, "CeeDee Lamb"],
+      [6, "Puka Nacua"],
     ]);
-    const labelled = parsePastedPicks([...round6, ...round7].join("\n"), players, none, { teams: 12, snakeGrid: { firstRound: 1 } });
-    expect(picks(labelled).map((p) => p[0])).toEqual([70, 71, 72, 73, 74, 75]);
+    // The same names as a plain list (no cell tags): chronological.
+    const list = parsePastedPicks("Jahmyr Gibbs\nPuka Nacua\nCeeDee Lamb\nSaquon Barkley", players, none, { teams: 3, room: { order: "snake", knownCount: 3, placed } });
+    expect(list.layout?.best.shape).toBe("list");
+    expect(list.matches.map((m) => m.line.pickNo)).toEqual([3, 4, 5, 6]);
+    // Labels, when present, always win.
+    const labelled = parsePastedPicks([...round6, ...round7].join("\n"), players, none, { teams: 12, room: { order: "snake", knownCount: 0, placed: new Map() } });
+    expect(labelled.matches.map((p) => p.line.pickNo)).toEqual([70, 71, 72, 73, 74, 75]);
   });
 });
 
@@ -257,8 +272,8 @@ describe("parsePastedPicks: duplicates in a label-less board copy", () => {
   it("a tied abbreviation whose best guess is already in the paste falls to the other candidate", () => {
     // Round 1 is "A. St. Brown", round 2 (screen order 2.3, 2.2, 2.1) starts with
     // "A. Brown" — also read as Amon-Ra first, but he is taken: it is A.J. Brown.
-    const text = ["A. St. Brown", "J. Gibbs", "C. Lamb", "A. Brown", "J. Taylor", "J. Chase"].join("\n");
-    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
+    const text = ["A. St. Brown", "WR DET (BYE 6)", "J. Gibbs", "RB DET (BYE 6)", "C. Lamb", "WR DAL (BYE 14)", "A. Brown", "WR NE (BYE 14)", "J. Taylor", "RB IND (BYE 11)", "J. Chase", "WR CIN (BYE 6)"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 3, room: { order: "snake", knownCount: 0, placed: new Map() } });
     expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
       [1, "Amon-Ra St. Brown"],
       [2, "Jahmyr Gibbs"],
@@ -269,9 +284,17 @@ describe("parsePastedPicks: duplicates in a label-less board copy", () => {
     ]);
   });
 
+  it("a tie whose best guess is already gone from the room resolves to the candidate still available", () => {
+    // Amon-Ra St. Brown was drafted earlier; a new cell reads "A. Brown · WR NE" — that is A.J. Brown, not a re-paste of Amon-Ra.
+    const amon = byName("Amon-Ra St. Brown");
+    // No position/team on the line, so the names alone are a tie.
+    const r = parsePastedPicks("A. Brown", players, new Set([amon.id]), { teams: 12 });
+    expect(r.matches.map((m) => m.player?.name)).toEqual(["A.J. Brown"]);
+  });
+
   it("an exact duplicate line still holds its cell so later cells keep their numbers", () => {
-    const text = ["J. Gibbs", "C. Lamb", "J. Taylor", "J. Gibbs", "J. Chase", "P. Nacua"].join("\n");
-    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
+    const text = ["J. Gibbs", "RB DET (BYE 6)", "C. Lamb", "WR DAL (BYE 14)", "J. Taylor", "RB IND (BYE 11)", "J. Gibbs", "RB DET (BYE 6)", "J. Chase", "WR CIN (BYE 6)", "P. Nacua", "WR LAR (BYE 11)"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 3, room: { order: "snake", knownCount: 0, placed: new Map() } });
     expect(r.matches.map((m) => [m.line.pickNo, m.player?.name ?? null])).toEqual([
       [1, "Jahmyr Gibbs"],
       [2, "CeeDee Lamb"],
@@ -281,6 +304,6 @@ describe("parsePastedPicks: duplicates in a label-less board copy", () => {
       [6, null],
     ]);
     // In a plain list a duplicate is simply dropped, as before.
-    expect(names(text, none, 3)).toEqual(["Jahmyr Gibbs", "CeeDee Lamb", "Jonathan Taylor", "Ja'Marr Chase", "Puka Nacua"]);
+    expect(names("J. Gibbs\nC. Lamb\nJ. Taylor\nJ. Gibbs\nJ. Chase\nP. Nacua", none, 3)).toEqual(["Jahmyr Gibbs", "CeeDee Lamb", "Jonathan Taylor", "Ja'Marr Chase", "Puka Nacua"]);
   });
 });
