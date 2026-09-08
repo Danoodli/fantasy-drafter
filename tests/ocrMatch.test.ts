@@ -25,6 +25,15 @@ describe("normalizeOcr", () => {
   it("fixes digit-for-letter glyphs only inside words", () => {
     expect(normalizeOcr("Rob1nson 1.05")).toEqual(["roblnson", "1", "05"]);
   });
+
+  it("splits an initial glued to the surname ('C.Lamb') but still merges true initials ('A.J.')", () => {
+    // OCR drops the space after a board's "C. Lamb" often enough.
+    expect(normalizeOcr("C.Lamb")).toEqual(["c", "lamb"]);
+    expect(normalizeOcr("J.Smith-Njigba")).toEqual(["j", "smith", "njigba"]);
+    expect(normalizeOcr("A.J. Brown")).toEqual(["aj", "brown"]);
+    expect(normalizeOcr("T.J.Hockenson")).toEqual(["tj", "hockenson"]);
+    expect(normalizeOcr("A. J. Brown")).toEqual(["aj", "brown"]);
+  });
 });
 
 describe("matchOcrLines", () => {

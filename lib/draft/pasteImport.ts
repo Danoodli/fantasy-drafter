@@ -77,10 +77,16 @@ const NOISE = new Set([
   "the", "queue", "queued", "you", "your", "me", "and", "of", "at", "vs", "week", "wk",
 ]);
 
-/** "1.05", "R1P5", "1-05", "Round 1, Pick 5", "Rd 1 Pk 5", "R1, P5" → overall pick (needs teams). */
+/**
+ * "1.05", "R1P5", "1-05", "Round 1, Pick 5", "Rd 1 Pk 5", "R1, P5" → overall
+ * pick (needs teams). A board grid writes picks 1–9 without the zero ("7.1");
+ * that form counts only when it leads the line, so "6.5 pts" mid-line is not
+ * a pick.
+ */
 function roundPick(text: string, teams: number): number | null {
   const patterns: RegExp[] = [
     /(?:^|\s)(\d{1,2})[.\-:](\d{2})(?=\s|$|[),:])/,
+    /^\s*(\d{1,2})[.\-:](\d{1,2})(?=\s|$|[),:])/,
     /\bR(?:ound|d)?\.?\s*(\d{1,2})\s*[,\-–—]?\s*P(?:ick|k)?\.?\s*(\d{1,2})\b/i,
     /\bR(\d{1,2})P(\d{1,2})\b/i,
   ];
@@ -93,6 +99,18 @@ function roundPick(text: string, teams: number): number | null {
     return (round - 1) * teams + pick;
   }
   return null;
+}
+
+/** A board row copied as ONE line ("7.1 73 T. Kraft TE GB  7.2 74 …"): split it at every cell label. */
+function splitCells(line: string): string[] {
+  const re = /(?:^|\s)(\d{1,2})\.(\d{1,2})(?=\s|$)/g;
+  const starts: number[] = [];
+  for (let m = re.exec(line); m; m = re.exec(line)) starts.push(m.index + (m[0].length - m[1].length - 1 - m[2].length));
+  if (starts.length < 2) return [line];
+  const out: string[] = [];
+  if (starts[0] > 0 && line.slice(0, starts[0]).trim()) out.push(line.slice(0, starts[0]));
+  for (let i = 0; i < starts.length; i++) out.push(line.slice(starts[i], starts[i + 1] ?? line.length));
+  return out;
 }
 
 /** A leading bare number: "17", "#17", "17.", "17)", "17 (5)". */
@@ -192,11 +210,21 @@ function coalesceLines(
   return { lines: out, ignored };
 }
 
+export interface PasteOptions {
+  teams: number;
+  /**
+   * The paste is a draft BOARD copied row by row with no cell labels: rows are
+   * rounds from `firstRound`, and even rounds read right to left on screen.
+   * Ignored when the paste carries pick numbers of its own.
+   */
+  snakeGrid?: { firstRound: number };
+}
+
 export function parsePastedPicks(
   text: string,
   players: BoardPlayer[],
   draftedIds: Set<string>,
-  opts: { teams: number }
+  opts: PasteOptions
 ): PasteResult {
   const teams = Math.max(2, opts.teams);
   const vocab: Vocab[] = buildVocab(players);
@@ -209,7 +237,8 @@ export function parsePastedPicks(
       findDefense(line, h.team, players) != null
     );
   };
-  const { lines, ignored } = coalesceLines(text.replace(/\r/g, "").replace(/\t/g, "  ").split("\n"), teams, namesPlayer);
+  const rawLines = text.replace(/\r/g, "").replace(/\t/g, "  ").split("\n").flatMap(splitCells);
+  const { lines, ignored } = coalesceLines(rawLines, teams, namesPlayer);
 
   const matches: PasteMatch[] = [];
   const bareNumbers: (number | null)[] = [];
@@ -276,7 +305,19 @@ export function parsePastedPicks(
     if (distinct && (asc || desc)) matches.forEach((m, i) => (m.line.pickNo = m.line.pickNo ?? bares[i]));
   }
 
-  const hasPickNumbers = matches.some((m) => m.line.pickNo != null);
+  let hasPickNumbers = matches.some((m) => m.line.pickNo != null);
+  if (!hasPickNumbers && opts.snakeGrid && matches.length > 0) {
+    // Screen order → pick number: row r is round firstRound + r; odd rounds
+    // run left to right, even rounds right to left.
+    const first = Math.max(1, Math.floor(opts.snakeGrid.firstRound));
+    matches.forEach((m, i) => {
+      const round = first + Math.floor(i / teams);
+      const col = i % teams;
+      const pick = round % 2 === 1 ? col + 1 : teams - col;
+      m.line.pickNo = (round - 1) * teams + pick;
+    });
+    hasPickNumbers = true;
+  }
   if (hasPickNumbers) {
     matches.sort((a, b) => (a.line.pickNo ?? Infinity) - (b.line.pickNo ?? Infinity));
   }

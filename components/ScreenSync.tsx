@@ -44,6 +44,8 @@ interface Props {
   draftedIds: Set<string>;
   /** League size: a board grid's "round.pick" labels need it for the overall pick number. */
   teams: number;
+  /** Players already on the board, by pick number: lets a grid cell's "B. Robinson" tie resolve to whoever is NOT already placed elsewhere. */
+  placed: Map<string, number>;
   /** Apply one ordered read of a pick LIST. Returns what was placed. */
   onFrame: (playerIds: string[]) => SequenceOutcome | void;
   /** Apply one read of a board GRID: every cell carries its pick number. Returns what changed. */
@@ -66,7 +68,7 @@ function loadNewestFirst(): boolean {
   }
 }
 
-export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid, onClose }: Props) {
+export default function ScreenSync({ players, draftedIds, teams, placed, onFrame, onGrid, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -98,10 +100,10 @@ export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid
   };
 
   // Latest props for the async loop without re-subscribing every render.
-  const latest = useRef({ players, draftedIds, region, newestFirst, teams, onFrame, onGrid });
+  const latest = useRef({ players, draftedIds, region, newestFirst, teams, placed, onFrame, onGrid });
   useEffect(() => {
-    latest.current = { players, draftedIds, region, newestFirst, teams, onFrame, onGrid };
-  }, [players, draftedIds, region, newestFirst, teams, onFrame, onGrid]);
+    latest.current = { players, draftedIds, region, newestFirst, teams, placed, onFrame, onGrid };
+  }, [players, draftedIds, region, newestFirst, teams, placed, onFrame, onGrid]);
 
   const stopAll = useCallback(() => {
     stopCapture(streamRef.current, videoRef.current);
@@ -186,7 +188,7 @@ export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid
       if (cancelled || inFlightRef.current >= OCR_WORKERS) return;
       const video = videoRef.current;
       if (!video) return;
-      const { players, draftedIds, region, newestFirst, teams, onFrame, onGrid } = latest.current;
+      const { players, draftedIds, region, newestFirst, teams, placed, onFrame, onGrid } = latest.current;
       const frame = grabFrame(video, region);
       if (!frame) return;
       const seq = ++frameSeqRef.current;
@@ -203,7 +205,7 @@ export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid
         // A board GRID: cells labelled "round.pick". Two labels in the frame
         // and the grid reader takes over — the labels are the pick numbers,
         // so snake direction and panel order never matter.
-        const grid = readGrid(words, players, { teams });
+        const grid = readGrid(words, players, { teams, placed });
         if (grid.anchors >= 2) {
           setMode("grid");
           agreement.observe(grid.picks);
@@ -327,7 +329,12 @@ export default function ScreenSync({ players, draftedIds, teams, onFrame, onGrid
               Share draft screen
             </button>
             <p className="mt-2 text-[11px] text-ink-faint">
-              Pick the draft <em>tab</em> in the browser&apos;s picker. First use downloads the OCR engine (a few MB).
+              Pick the draft <em>tab</em> in the browser&apos;s picker. First use downloads the OCR engine (a few MB). No room
+              open?{" "}
+              <a href="/mock-board?autoplay=1&speed=4000" target="_blank" rel="noreferrer" className="underline hover:text-ink">
+                Open a mock draft board
+              </a>{" "}
+              in a new tab and share that.
             </p>
           </>
         )}

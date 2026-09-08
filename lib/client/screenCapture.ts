@@ -70,12 +70,25 @@ export function stopCapture(stream: MediaStream | null, video: HTMLVideoElement 
   if (video) video.srcObject = null;
 }
 
+/** Upscaled frame width Tesseract reads small UI text best at (a 12-column board's 11 px labels become ~33 px). */
+export const TARGET_FRAME_WIDTH = 4300;
+
+/**
+ * How much to upscale a region so it lands near TARGET_FRAME_WIDTH: a
+ * 1440 px board → 3×, a Retina 2880 px capture → 1.5×, a narrow pick list → 4×.
+ * Measured on the mock board (scripts/ocr-grid-check.ts): 2× dropped the dot
+ * from every other "1.2"-style label, 3× kept them.
+ */
+export function scaleFor(regionWidthPx: number): number {
+  return Math.min(4, Math.max(1, Math.round((TARGET_FRAME_WIDTH / Math.max(1, regionWidthPx)) * 2) / 2));
+}
+
 /**
  * Grab the region from the live video as an upscaled, high-contrast canvas.
- * UI fonts in a shared tab are small; 2× and grayscale/contrast stretch make
- * Tesseract markedly more reliable on them.
+ * UI fonts in a shared tab are small; upscaling and grayscale/contrast stretch
+ * make Tesseract markedly more reliable on them.
  */
-export function grabFrame(video: HTMLVideoElement, region: Region, scale = 2): HTMLCanvasElement | null {
+export function grabFrame(video: HTMLVideoElement, region: Region, scale?: number): HTMLCanvasElement | null {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (!vw || !vh) return null;
@@ -83,6 +96,7 @@ export function grabFrame(video: HTMLVideoElement, region: Region, scale = 2): H
   const sy = Math.floor(region.y * vh);
   const sw = Math.max(1, Math.floor(region.w * vw));
   const sh = Math.max(1, Math.floor(region.h * vh));
+  scale ??= scaleFor(sw);
   const canvas = document.createElement("canvas");
   canvas.width = sw * scale;
   canvas.height = sh * scale;
@@ -91,10 +105,19 @@ export function grabFrame(video: HTMLVideoElement, region: Region, scale = 2): H
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  // Grayscale + contrast stretch. Dark-mode draft rooms (light text on dark)
-  // are inverted so the OCR sees black text on white, its training domain.
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
+  enhancePixels(img.data);
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/**
+ * Grayscale + contrast stretch, in place. Dark-mode draft rooms (light text on
+ * dark) are inverted so the OCR sees black text on white, its training domain.
+ * Self-contained on purpose: scripts/ocr-grid-check.ts injects it into a page
+ * so the harness sees exactly what screen sync sees.
+ */
+export function enhancePixels(d: Uint8ClampedArray): void {
   let sum = 0;
   for (let i = 0; i < d.length; i += 4) {
     const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
@@ -109,8 +132,6 @@ export function grabFrame(video: HTMLVideoElement, region: Region, scale = 2): H
     g = Math.max(0, Math.min(255, (g - 128) * 1.35 + 128));
     d[i] = d[i + 1] = d[i + 2] = g;
   }
-  ctx.putImageData(img, 0, 0);
-  return canvas;
 }
 
 type TesseractModule = typeof import("tesseract.js");
@@ -182,7 +203,7 @@ interface TessLine {
   bbox: { y0: number };
   words?: TessWord[];
 }
-interface TessBlock {
+export interface TessBlock {
   paragraphs?: { lines?: TessLine[] }[];
 }
 
@@ -196,9 +217,13 @@ export interface FrameRead {
 /** OCR a canvas once into both lines (vertical order preserved) and words with boxes. */
 export async function recognizeFrame(scheduler: TesseractScheduler, canvas: HTMLCanvasElement): Promise<FrameRead> {
   const { data } = await scheduler.addJob("recognize", canvas, {}, { text: true, blocks: true });
+  return flattenBlocks((data as unknown as { blocks?: TessBlock[] | null }).blocks, data.text);
+}
+
+/** Tesseract's block tree → lines in vertical order + every word with its box. Pure; shared with the OCR harness. */
+export function flattenBlocks(blocks: TessBlock[] | null | undefined, fallbackText?: string): FrameRead {
   const lines: OcrLine[] = [];
   const words: OcrWord[] = [];
-  const blocks = (data as unknown as { blocks?: TessBlock[] | null }).blocks;
   if (blocks && blocks.length) {
     for (const b of blocks)
       for (const p of b.paragraphs ?? [])
@@ -210,8 +235,8 @@ export async function recognizeFrame(scheduler: TesseractScheduler, canvas: HTML
           }
         }
   }
-  if (lines.length === 0 && data.text) {
-    data.text.split("\n").forEach((t, i) => {
+  if (lines.length === 0 && fallbackText) {
+    fallbackText.split("\n").forEach((t, i) => {
       if (t.trim()) lines.push({ text: t.trim(), confidence: 50, y: i });
     });
   }

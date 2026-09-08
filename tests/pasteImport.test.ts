@@ -167,3 +167,88 @@ R2, P6 - Team 9`;
     expect(r.matches.filter((m) => m.player).length).toBe(1);
   });
 });
+
+describe("parsePastedPicks on a draft BOARD grid (DraftKings)", () => {
+  // Copying the board yields the cells in screen order — left to right, row
+  // by row — but even rounds run right to left. Order is useless; the cell
+  // labels are the truth, and picks 1–9 are written "7.1", not "7.01".
+  const cell = (label: string, overall: number | null, name: string, tag: string) =>
+    [label, overall == null ? null : String(overall), name, tag].filter((x) => x != null).join("\n");
+  const round6 = [
+    cell("6.12", 72, "Q. Johnston", "WR LAC (BYE 7)"),
+    cell("6.11", 71, "C. Williams", "QB CHI (BYE 10)"),
+    cell("6.10", 70, "T. Henderson", "RB NE (BYE 11)"),
+  ];
+  const round7 = [
+    cell("7.1", 73, "T. Kraft", "TE GB (BYE 11)"),
+    cell("7.2", 74, "J. Williams", "WR DET (BYE 8)"),
+    cell("7.3", 75, "D. Prescott", "QB DAL (BYE 14)"),
+  ];
+  const picks = (r: ReturnType<typeof parsePastedPicks>) => r.matches.map((m) => [m.line.pickNo, m.player?.name]);
+
+  it("reads one-field-per-line cells with single-digit picks and sorts by the label", () => {
+    const r = parsePastedPicks([...round6, ...round7].join("\n"), players, none, { teams: 12 });
+    expect(r.hasPickNumbers).toBe(true);
+    expect(picks(r)).toEqual([
+      [70, "TreVeyon Henderson"],
+      [71, "Caleb Williams"],
+      [72, "Quentin Johnston"],
+      [73, "Tucker Kraft"],
+      [74, "Jameson Williams"],
+      [75, "Dak Prescott"],
+    ]);
+    expect(r.matches.every((m) => m.confidence === "high")).toBe(true);
+  });
+
+  it("reads cells without the overall pick number", () => {
+    const text = [cell("6.12", null, "Q. Johnston", "WR LAC (BYE 7)"), cell("7.1", null, "T. Kraft", "TE GB (BYE 11)"), cell("7.2", null, "J. Williams", "WR DET (BYE 8)")].join("\n");
+    expect(picks(parsePastedPicks(text, players, none, { teams: 12 }))).toEqual([
+      [72, "Quentin Johnston"],
+      [73, "Tucker Kraft"],
+      [74, "Jameson Williams"],
+    ]);
+  });
+
+  it("splits a row copied as one tab-separated line into its cells", () => {
+    const row = round7.map((c) => c.replace(/\n/g, "\t")).join("\t");
+    expect(picks(parsePastedPicks(row, players, none, { teams: 12 }))).toEqual([
+      [73, "Tucker Kraft"],
+      [74, "Jameson Williams"],
+      [75, "Dak Prescott"],
+    ]);
+  });
+
+  it("with no labels at all, the snake-grid option numbers rows as rounds, even rounds right to left", () => {
+    const row1 = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs"];
+    const row2 = ["Puka Nacua", "Saquon Barkley", "CeeDee Lamb"]; // screen order; drafted 3.. wait: 2.3, 2.2, 2.1
+    const row3 = ["Malik Nabers", "Ashton Jeanty"];
+    const text = [...row1, ...row2, ...row3].join("\n");
+    const plain = parsePastedPicks(text, players, none, { teams: 3 });
+    expect(plain.hasPickNumbers).toBe(false);
+    const grid = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
+    expect(picks(grid)).toEqual([
+      [1, "Ja'Marr Chase"],
+      [2, "Bijan Robinson"],
+      [3, "Jahmyr Gibbs"],
+      [4, "CeeDee Lamb"],
+      [5, "Saquon Barkley"],
+      [6, "Puka Nacua"],
+      [7, "Malik Nabers"],
+      [8, "Ashton Jeanty"],
+    ]);
+  });
+
+  it("the snake-grid option can start at a later round, and never overrides labels that are present", () => {
+    const text = ["Ja'Marr Chase", "Bijan Robinson", "Jahmyr Gibbs", "Puka Nacua"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 6 } });
+    // Round 6 is even: right to left on screen, so the first screen cell is pick 6.3 = 18.
+    expect(picks(r)).toEqual([
+      [16, "Jahmyr Gibbs"],
+      [17, "Bijan Robinson"],
+      [18, "Ja'Marr Chase"],
+      [19, "Puka Nacua"],
+    ]);
+    const labelled = parsePastedPicks([...round6, ...round7].join("\n"), players, none, { teams: 12, snakeGrid: { firstRound: 1 } });
+    expect(picks(labelled).map((p) => p[0])).toEqual([70, 71, 72, 73, 74, 75]);
+  });
+});

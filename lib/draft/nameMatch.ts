@@ -44,12 +44,20 @@ export interface Found {
   surnameOnly: boolean;
   /** Set when another player fit the same tokens about as well. */
   tie: boolean;
+  /** The other players in the tie (onTie "best" only), so a caller with more context can settle it. */
+  alternatives?: BoardPlayer[];
 }
 
 export interface FindOptions {
   minScore?: number;
   /** "skip": drop ties (safe for automation). "best": keep the earlier-ADP player, flagged. */
   onTie?: "skip" | "best";
+  /**
+   * The text may cut names short with an ellipsis (a board cell: "D. Montgo…",
+   * "J. Croskey-M…"): a 4+ letter prefix of the surname, or an exact middle
+   * name-part, stands for the surname — with first-name evidence only.
+   */
+  truncated?: boolean;
 }
 
 const SUFFIX = new Set(["jr", "sr", "ii", "iii", "iv"]);
@@ -79,7 +87,8 @@ function fixGlyphs(tok: string): string {
  */
 export function tokenize(text: string, opts: { ocr?: boolean } = {}): string[] {
   const prepared = text
-    .replace(/(?<=[A-Za-z])\.(?=[A-Za-z])/g, "") // A.J. → AJ, D.J. → DJ
+    // A.J. → AJ, D.J. → DJ — only between two single letters, so OCR's "C.Lamb" still splits into an initial and a surname.
+    .replace(/(?<=(?<![A-Za-z])[A-Za-z])\.(?=[A-Za-z](?![A-Za-z]))/g, "")
     .replace(/[./|·•,;:()[\]{}"#*+=<>_~\\-]/g, " ")
     .replace(/[–—]/g, " ");
   const raw = mergeName(prepared)
@@ -186,8 +195,16 @@ export function findPlayers(
       if (t.length < 3 && v.last.length >= 3) continue;
       if (/^\d+$/.test(t)) continue;
       const d = editDistance(t, v.last, tol);
-      if (d > tol) continue;
-      const lastScore = d === 0 ? 1 : d === 1 ? 0.8 : 0.6;
+      let lastScore = d === 0 ? 1 : d === 1 ? 0.8 : 0.6;
+      let cut = false;
+      if (d > tol) {
+        if (!opts.truncated) continue;
+        // "Montgo" for Montgomery, "Croskey" for Croskey-Merritt.
+        if (t.length >= 4 && v.last.length > t.length && v.last.startsWith(t)) lastScore = 0.75;
+        else if (v.tokens.length > 2 && v.tokens.slice(1, -1).includes(t)) lastScore = 0.85;
+        else continue;
+        cut = true;
+      }
 
       // First-name evidence: look back over as many tokens as the name has
       // ("amon ra st brown" needs three), then one or two tokens forward for
@@ -217,6 +234,7 @@ export function findPlayers(
       let score: number;
       let surnameOnly = false;
       if (firstScore === 0) {
+        if (cut) continue; // a cut-off surname alone is too little
         surnameOnly = true;
         // A word right before the surname that is not this player's first name
         // means the line names a DIFFERENT person with that surname.
@@ -252,17 +270,19 @@ export function findPlayers(
     if (overlaps) continue;
     // A different player reading the SAME surname token about as well: a tie.
     let tie = false;
+    const alternatives: BoardPlayer[] = [];
     for (let cj = ci + 1; cj < cands.length; cj++) {
       const o = cands[cj];
       if (dropped.has(cj) || o.player.id === c.player.id || o.lastIdx !== c.lastIdx) continue;
       if (c.score - o.score > 0.05) break; // sorted: the rest are further away
       tie = true;
+      alternatives.push(o.player);
       dropped.add(cj);
     }
     if (tie && onTie === "skip") continue;
     for (let k = c.start; k <= c.end; k++) claimed[k] = 1;
     seen.add(c.player.id);
-    out.push({ player: c.player, score: c.score, start: c.start, end: c.end, surnameOnly: c.surnameOnly, tie });
+    out.push({ player: c.player, score: c.score, start: c.start, end: c.end, surnameOnly: c.surnameOnly, tie, ...(tie ? { alternatives } : {}) });
   }
   out.sort((a, b) => a.start - b.start);
   return out;

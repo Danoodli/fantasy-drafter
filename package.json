@@ -16,7 +16,8 @@
     "calibrate": "tsx scripts/calibrate-outcomes.ts",
     "calibrate:survival": "tsx scripts/calibrate-survival.ts",
     "backtest:gate": "tsx scripts/backtest-gate.ts",
-    "simulate": "tsx scripts/simulate-season.ts"
+    "simulate": "tsx scripts/simulate-season.ts",
+    "ocr:check": "tsx scripts/ocr-grid-check.ts"
   },
   "dependencies": {
     "next": "16.3.1",

@@ -42,3 +42,6 @@ next-env.d.ts
 
 # fetched nflverse weekly stats (rebuildable; the FFA snapshots are what gets committed)
 /data/cache/
+
+# tesseract language data pulled by scripts/ocr-grid-check.ts
+/.tesseract-cache/

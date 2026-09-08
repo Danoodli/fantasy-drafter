@@ -32,10 +32,15 @@ interface Row {
 export default function PasteImport({ initialText, players, draftedIds, teams, currentPick, onCommit, onClose }: Props) {
   const [text, setText] = useState(initialText);
   const [reverse, setReverse] = useState(false);
+  const [snakeGrid, setSnakeGrid] = useState(false);
+  const [firstRound, setFirstRound] = useState(1);
   const [overrides, setOverrides] = useState<Record<number, BoardPlayer | null>>({});
   const [disabled, setDisabled] = useState<Set<number>>(new Set());
 
-  const result = useMemo(() => parsePastedPicks(text, players, draftedIds, { teams }), [text, players, draftedIds, teams]);
+  const result = useMemo(
+    () => parsePastedPicks(text, players, draftedIds, { teams, snakeGrid: snakeGrid ? { firstRound } : undefined }),
+    [text, players, draftedIds, teams, snakeGrid, firstRound]
+  );
 
   /** New text means new rows: per-row edits no longer apply. */
   function updateText(next: string) {
@@ -115,13 +120,37 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
                 {unmatched.length > 0 && <span className="text-warn">{unmatched.length} unrecognized</span>}
                 {lowConf > 0 && <span className="text-ink-dim">{lowConf} best-guess</span>}
                 {behind > 0 && <span className="text-ink-dim">{behind} backfill earlier picks</span>}
-                {result.hasPickNumbers ? (
+                {result.hasPickNumbers && !snakeGrid ? (
                   <span className="ml-auto font-mono text-[11px] text-ink-faint">ordered by pick number</span>
                 ) : (
-                  <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-dim">
-                    <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
-                    list is newest-first (mark bottom to top)
-                  </label>
+                  <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {!snakeGrid && (
+                      <label className="flex items-center gap-1.5 text-xs text-ink-dim">
+                        <input type="checkbox" checked={reverse} onChange={(e) => setReverse(e.target.checked)} />
+                        list is newest-first (mark bottom to top)
+                      </label>
+                    )}
+                    <label
+                      className="flex items-center gap-1.5 text-xs text-ink-dim"
+                      title="A draft board copied row by row with no pick labels (DraftKings): rows are rounds, even rounds run right to left."
+                    >
+                      <input type="checkbox" checked={snakeGrid} onChange={(e) => setSnakeGrid(e.target.checked)} />
+                      board grid, snake rows
+                    </label>
+                    {snakeGrid && (
+                      <label className="flex items-center gap-1 text-xs text-ink-dim">
+                        first row is round
+                        <input
+                          type="number"
+                          min={1}
+                          max={40}
+                          value={firstRound}
+                          onChange={(e) => setFirstRound(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-12 rounded border border-line bg-field px-1 py-0.5 font-mono text-xs"
+                        />
+                      </label>
+                    )}
+                  </span>
                 )}
               </div>
 

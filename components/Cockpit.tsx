@@ -373,6 +373,13 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     return out;
   }
 
+  /** Who sits at which pick already — screen sync's grid reader uses it to settle "B. Robinson"-style ties. */
+  const placedByPlayer = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of draft.picks) if (p.playerId) m.set(p.playerId, p.pickNo);
+    return m;
+  }, [draft.picks]);
+
   /**
    * One read of a draft BOARD grid from screen sync: every cell carries its
    * pick number, so it takes the numbered import path (a placeholder at that
@@ -1211,6 +1218,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           players={gradedBoard.players}
           draftedIds={draft.draftedIds}
           teams={config.teams}
+          placed={placedByPlayer}
           onFrame={applyScreenFrame}
           onGrid={applyScreenGrid}
           onClose={() => setScreenSync(false)}
