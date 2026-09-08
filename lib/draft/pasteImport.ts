@@ -271,27 +271,43 @@ export function parsePastedPicks(
       } else ignored.push(raw);
       continue;
     }
+    let pushed = false;
     for (const f of found) {
-      if (seen.has(f.player.id)) continue;
-      seen.add(f.player.id);
+      let player = f.player;
+      if (seen.has(player.id)) {
+        // A tie whose best guess is already in the paste ("A. Brown" after
+        // "A. St. Brown"): it must be the other one.
+        const alt = f.alternatives?.find((a) => !seen.has(a.id));
+        if (!alt) continue;
+        player = alt;
+      }
+      seen.add(player.id);
+      pushed = true;
       const nameText = tokens.slice(f.start, f.end + 1).join(" ");
       const high = !f.surnameOnly && !f.tie && f.score >= 0.85;
       // Alternatives for the preview: same surname first, then the fuzzy neighbours.
       const suggestions = high
         ? []
         : [...new Map(
-            [...scorePlayers(nameText, players), ...scorePlayers(f.player.name.split(" ").slice(-1)[0], players)]
+            [...scorePlayers(nameText, players), ...scorePlayers(player.name.split(" ").slice(-1)[0], players)]
               .map((s) => [s.player.id, s.player] as const)
           ).values()].slice(0, 4);
       matches.push({
         // A line with several names can't say which one its pick number belongs to.
         line: { ...base, pickNo: found.length === 1 ? rp : null, nameText },
-        player: f.player,
+        player,
         confidence: high ? "high" : "low",
         suggestions,
-        alreadyDrafted: draftedIds.has(f.player.id),
+        alreadyDrafted: draftedIds.has(player.id),
       });
       bareNumbers.push(found.length === 1 ? bare : null);
+    }
+    if (!pushed && opts.snakeGrid) {
+      // On a board every screen cell counts: a duplicate line keeps its cell
+      // (unresolved, with the players it read as) so later cells stay numbered right.
+      const nameText = tokens.slice(found[0].start, found[0].end + 1).join(" ");
+      matches.push({ line: { ...base, nameText }, player: null, confidence: "low", suggestions: found.map((f) => f.player).slice(0, 4), alreadyDrafted: false });
+      bareNumbers.push(bare);
     }
   }
 

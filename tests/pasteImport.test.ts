@@ -252,3 +252,35 @@ describe("parsePastedPicks on a draft BOARD grid (DraftKings)", () => {
     expect(picks(labelled).map((p) => p[0])).toEqual([70, 71, 72, 73, 74, 75]);
   });
 });
+
+describe("parsePastedPicks: duplicates in a label-less board copy", () => {
+  it("a tied abbreviation whose best guess is already in the paste falls to the other candidate", () => {
+    // Round 1 is "A. St. Brown", round 2 (screen order 2.3, 2.2, 2.1) starts with
+    // "A. Brown" — also read as Amon-Ra first, but he is taken: it is A.J. Brown.
+    const text = ["A. St. Brown", "J. Gibbs", "C. Lamb", "A. Brown", "J. Taylor", "J. Chase"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [1, "Amon-Ra St. Brown"],
+      [2, "Jahmyr Gibbs"],
+      [3, "CeeDee Lamb"],
+      [4, "Ja'Marr Chase"],
+      [5, "Jonathan Taylor"],
+      [6, "A.J. Brown"],
+    ]);
+  });
+
+  it("an exact duplicate line still holds its cell so later cells keep their numbers", () => {
+    const text = ["J. Gibbs", "C. Lamb", "J. Taylor", "J. Gibbs", "J. Chase", "P. Nacua"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 3, snakeGrid: { firstRound: 1 } });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name ?? null])).toEqual([
+      [1, "Jahmyr Gibbs"],
+      [2, "CeeDee Lamb"],
+      [3, "Jonathan Taylor"],
+      [4, "Puka Nacua"],
+      [5, "Ja'Marr Chase"],
+      [6, null],
+    ]);
+    // In a plain list a duplicate is simply dropped, as before.
+    expect(names(text, none, 3)).toEqual(["Jahmyr Gibbs", "CeeDee Lamb", "Jonathan Taylor", "Ja'Marr Chase", "Puka Nacua"]);
+  });
+});
