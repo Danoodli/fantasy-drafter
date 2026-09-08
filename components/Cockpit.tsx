@@ -17,6 +17,7 @@ import {
   type CustomStrategyParams,
 } from "../lib/client/config";
 import TierBoard from "./TierBoard";
+import DraftBoardGrid from "./DraftBoardGrid";
 import SearchBox, { type SearchBoxHandle } from "./SearchBox";
 import InjuryBadge from "./InjuryBadge";
 import Confetti, { type Burst } from "./Confetti";
@@ -40,6 +41,8 @@ import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
 import { pickOwner, picksForSlot } from "../lib/draft/snake";
 import { startWalkthrough } from "./Walkthrough";
 import { simulateRoom } from "../lib/engine/season";
+
+const BOARD_VIEW_KEY = "draft-cockpit-board-view-v1";
 
 interface Props {
   board: Board;
@@ -372,6 +375,23 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     showToast(`Screen sync: ${parts.join(" · ")}.`, true, () => draft.restoreManual(out.snapshot));
     return out;
   }
+
+  /** Right-hand view: the tier board, or the room's draft board drawn like DraftKings draws it. */
+  const [boardView, setBoardView] = useState<"tiers" | "grid">(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem(BOARD_VIEW_KEY) === "grid" ? "grid" : "tiers";
+    } catch {
+      return "tiers";
+    }
+  });
+  const switchBoardView = (v: "tiers" | "grid") => {
+    setBoardView(v);
+    try {
+      localStorage.setItem(BOARD_VIEW_KEY, v);
+    } catch {
+      // fine
+    }
+  };
 
   /** Who sits at which pick already — screen sync's grid reader uses it to settle "B. Robinson"-style ties. */
   const placedByPlayer = useMemo(() => {
@@ -1165,8 +1185,45 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           </div>
         </section>
 
-        {/* Tier board */}
-        <section data-tour="board" className="min-h-0 min-w-0 flex-1" aria-label="Tier board">
+        {/* Tier board / draft board */}
+        <section data-tour="board" className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={boardView === "grid" ? "Draft board" : "Tier board"}>
+          <div className="mb-1.5 flex items-center gap-1" role="group" aria-label="Board view">
+            {(["tiers", "grid"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchBoardView(v)}
+                aria-pressed={boardView === v}
+                className={`rounded-full px-2.5 py-0.5 font-mono text-xs font-semibold ${
+                  boardView === v ? "bg-ink text-field" : "bg-panel text-ink-dim hover:text-ink"
+                }`}
+                title={v === "grid" ? "The room's board: every pick in its cell, snaking like DraftKings draws it" : "Players by position and tier"}
+              >
+                {v === "grid" ? "Draft board" : "Tiers"}
+              </button>
+            ))}
+            {boardView === "grid" && (
+              <span className="ml-2 font-mono text-[11px] text-ink-faint">
+                pick {Math.min(draft.currentPick, totalPicks)} of {totalPicks} · click a cell for the player, an unknown cell to name him
+              </span>
+            )}
+          </div>
+          {boardView === "grid" ? (
+            <DraftBoardGrid
+              teams={config.teams}
+              rounds={config.rounds}
+              order={config.draftOrder}
+              picks={draft.picks}
+              byId={byId}
+              currentPick={draftOver ? 0 : draft.currentPick}
+              mySlot={mySlot}
+              onOpen={setModalPlayer}
+              onFillUnknown={(index, pickNo) => {
+                setFillTarget({ index, pickNo });
+                searchRef.current?.focus();
+              }}
+              className="tier-scroll min-h-0 flex-1 rounded-lg"
+            />
+          ) : (
           <TierBoard
             players={gradedBoard.players}
             draftedIds={draft.draftedIds}
@@ -1186,6 +1243,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
               (pos) => (config.rosterSlots[pos] ?? 0) > 0 || !["K", "DST"].includes(pos)
             )}
           />
+          )}
         </section>
       </div>
 
