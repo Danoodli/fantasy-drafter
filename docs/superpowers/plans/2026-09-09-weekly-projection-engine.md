@@ -263,7 +263,9 @@ The primary source and the baseline the whole model is measured against. Verifie
 
 **Interfaces:**
 - Consumes: `SourceResult<T>`, `FetchOpts` from `lib/etl/fetchers.ts`.
-- Produces: `interface WeeklyProjection { stats: StatLine; status: string | null; team: string; pos: Position }`, `parseSleeperWeekly(rows: unknown[]): Record<string, WeeklyProjection>`, `fetchSleeperWeekly(season: number, week: number, opts?: FetchOpts): Promise<SourceResult<Record<string, WeeklyProjection>>>`.
+- Produces: `interface WeeklyProjection { stats: StatLine; points?: number; status: string | null; team: string; pos: Position }`, `parseSleeperWeekly(rows: unknown[]): Record<string, WeeklyProjection>`, `fetchSleeperWeekly(season: number, week: number, opts?: FetchOpts): Promise<SourceResult<Record<string, WeeklyProjection>>>`.
+
+`points` exists for **K and DST only**. Sleeper reports kickers as `fgm`/`fga`/`fgm_40_49` and defenses as points-allowed buckets — none of which map to `StatLine` — so those two positions carry the source's published total instead of a re-scorable line. This mirrors the season board, where `BoardPlayer.stats` is documented "Absent for K/DST (their projPoints come from ESPN's applied total)". Offensive players with no stat line are still dropped.
 
 - [ ] **Step 1: Write the fixture**
 
@@ -328,8 +330,34 @@ describe("parseSleeperWeekly", () => {
     }
   });
 
-  it("drops rows with no usable stat line rather than emitting a zero player", () => {
+  it("drops an OFFENSIVE row with no usable stat line rather than emitting a zero player", () => {
     expect(parseSleeperWeekly(rows)["99999"]).toBeUndefined();
+  });
+
+  it("keeps kickers and defenses via a direct point total — they have no mappable stat line", () => {
+    const kdst = [
+      {
+        week: 2, season: "2026", player_id: "K1",
+        stats: { fga: 2.1, fgm: 1.8, fgm_40_49: 0.6, pts_half_ppr: 8.4 },
+        player: { position: "K", team: "DAL", injury_status: null },
+      },
+      {
+        week: 2, season: "2026", player_id: "DEN",
+        stats: { pts_half_ppr: 7.2 },
+        player: { position: "DEF", team: "DEN", injury_status: null },
+      },
+    ];
+    const out = parseSleeperWeekly(kdst);
+    // Without this the weekly board has no K and no DST, and a lineup needs both.
+    expect(out["K1"].points).toBeCloseTo(8.4, 6);
+    expect(out["K1"].stats).toEqual({});
+    expect(out["DEN"].pos).toBe("DST");
+    expect(out["DEN"].points).toBeCloseTo(7.2, 6);
+  });
+
+  it("still drops a K with neither a stat line nor any point total", () => {
+    const bare = [{ week: 2, season: "2026", player_id: "K2", stats: { fga: 0 }, player: { position: "K", team: "DAL", injury_status: null } }];
+    expect(parseSleeperWeekly(bare)["K2"]).toBeUndefined();
   });
 
   it("re-scoring the parsed line reproduces Sleeper's own pts_ppr within rounding", () => {
@@ -366,6 +394,14 @@ const RAW_DIR = join(process.cwd(), "data", "raw", "weekly");
 
 export interface WeeklyProjection {
   stats: StatLine;
+  /**
+   * K and DST ONLY: the source's published point total. Sleeper reports
+   * kickers as fgm/fga/fgm_40_49 and defenses as points-allowed buckets, none
+   * of which map to StatLine, so these two positions cannot be re-scored under
+   * league settings. Same accepted limitation as the season board, where
+   * BoardPlayer.stats is documented absent for K/DST.
+   */
+  points?: number;
   /** Sleeper's injury_status at the time of the projection: fits availability. */
   status: string | null;
   team: string;
@@ -407,15 +443,33 @@ export function parseSleeperWeekly(rows: unknown[]): Record<string, WeeklyProjec
     set("rushFd", s.rush_fd);
     set("recFd", s.rec_fd);
     set("passFd", s.pass_fd);
-    // A row with no stats at all is a rostered player Sleeper has no opinion
-    // on. Emitting him as a 0.0 projection would put a phantom in every
-    // ranking, so drop him and let the board's own player list decide.
-    if (Object.keys(stats).length === 0) continue;
+    const pos = (posRaw === "DEF" ? "DST" : posRaw) as Position;
+    let points: number | undefined;
+    if (Object.keys(stats).length === 0) {
+      // K and DST never have a mappable stat line, so they take the published
+      // total instead — without this, a weekly board has no kicker and no
+      // defense, and a lineup needs one of each.
+      if (pos !== "K" && pos !== "DST") {
+        // An offensive row with no stats is a rostered player Sleeper has no
+        // opinion on. Emitting him as 0.0 would put a phantom in every
+        // ranking, so drop him and let the board's player list decide.
+        continue;
+      }
+      for (const key of ["pts_half_ppr", "pts_ppr", "pts_std"] as const) {
+        const v = s[key];
+        if (typeof v === "number" && v !== 0) {
+          points = v;
+          break;
+        }
+      }
+      if (points === undefined) continue;
+    }
     out[id] = {
       stats,
+      points,
       status: raw.player?.injury_status ?? null,
       team: canonicalTeam(raw.player?.team),
-      pos: (posRaw === "DEF" ? "DST" : posRaw) as Position,
+      pos,
     };
   }
   return out;
@@ -1818,7 +1872,7 @@ Note the deliberate decoupling: this module does **not** import the ETL's file s
 - Produces:
   - `interface WeekLine { total: number; ownSpread: number; opp: string }`
   - `type DvpLookup = (defense: string, pos: Position) => { allowed?: number; leagueAvg?: number; games: number }`
-  - `interface WeekPlayerInput { id: string; pos: Position; team: string; bye: number | null; status: string | null; sleeper?: StatLine; espn?: StatLine; dk?: number; usage?: StatLine }`
+  - `interface WeekPlayerInput { id: string; pos: Position; team: string; bye: number | null; status: string | null; sleeper?: StatLine; sleeperPoints?: number; espn?: StatLine; dk?: number; usage?: StatLine }` — `sleeperPoints` is the K/DST total-only fallback; see Task 2
   - `interface WeekOutlook { ... }` (as in the spec)
   - `blendMarket(input: WeekPlayerInput, scoring: ScoringSettings, p: WeeklyModelParams): number`
   - `buildWeekOutlooks(args: { week: number; players: WeekPlayerInput[]; linesByTeam: Record<string, WeekLine>; dvp: DvpLookup; scoring: ScoringSettings; params: WeeklyModelParams }): WeekOutlook[]`
@@ -1993,6 +2047,12 @@ export interface WeekPlayerInput {
   status: string | null;
   /** Projected stat lines per market source. DK publishes a total, not a line. */
   sleeper?: StatLine;
+  /**
+   * K and DST only: Sleeper's published total, used when there is no
+   * re-scorable stat line (see lib/etl/weekly/sleeperWeekly.ts). Ignored
+   * whenever `sleeper` is present.
+   */
+  sleeperPoints?: number;
   espn?: StatLine;
   dk?: number;
   /** Our own usage model's projected stat line, when we have usage for him. */
@@ -2033,8 +2093,13 @@ export function blendMarket(
 ): number {
   const isTE = input.pos === "TE";
   const parts: { w: number; v: number }[] = [];
-  if (input.sleeper && p.sourceWeights.sleeper > 0) {
-    parts.push({ w: p.sourceWeights.sleeper, v: scoreStatLine(input.sleeper, scoring, isTE) });
+  if (p.sourceWeights.sleeper > 0) {
+    // A stat line is preferred because it can be re-scored under league
+    // settings; `sleeperPoints` is the K/DST fallback, which cannot.
+    const v = input.sleeper
+      ? scoreStatLine(input.sleeper, scoring, isTE)
+      : input.sleeperPoints;
+    if (typeof v === "number") parts.push({ w: p.sourceWeights.sleeper, v });
   }
   if (input.espn && p.sourceWeights.espn > 0) {
     parts.push({ w: p.sourceWeights.espn, v: scoreStatLine(input.espn, scoring, isTE) });
@@ -3085,7 +3150,8 @@ async function main() {
         team: p.team,
         bye: byeOf.get(p.id) ?? p.bye,
         status: s?.status ?? p.injury,
-        sleeper: s?.stats,
+        sleeper: s?.stats && Object.keys(s.stats).length > 0 ? s.stats : undefined,
+        sleeperPoints: s?.points,
         espn: espnBySleeper[p.id]?.stats,
         usage,
       };
