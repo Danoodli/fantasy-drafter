@@ -109,7 +109,7 @@ Expected: FAIL — cannot resolve `../lib/engine/weekly/model`.
   "modelWeights": { "market": 1, "usage": 0 },
   "usage": { "lambda": 0.75, "priorGames": 4, "effReliability": 0.15 },
   "environment": { "alpha": {}, "beta": {}, "leagueAvgItp": 22.5 },
-  "matchup": { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5 },
+  "matchup": { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5, "dvpLambda": 0.85 },
   "sigma": {
     "sigma0": { "QB": 0.45, "RB": 0.7, "WR": 0.8, "TE": 0.85, "K": 0.55, "DST": 0.75 },
     "v0": { "QB": 32, "RB": 16, "WR": 7, "TE": 5, "K": 2, "DST": 1 },
@@ -165,6 +165,12 @@ export interface WeeklyModelParams {
     gamma: Partial<Record<Position, number>>;
     shrinkGames: number;
     priorSeasonWeight: number;
+    /**
+     * Recency weight for the rolling defense-vs-position table: a week's
+     * weight is dvpLambda^(weeksAgo). 1 is a flat mean. Must be > 0 — a
+     * lambda of exactly 0 makes the weight sum 0 and every entry NaN.
+     */
+    dvpLambda: number;
   };
   sigma: {
     sigma0: Partial<Record<Position, number>>;
@@ -1008,7 +1014,7 @@ Splits into a Node-side table builder and a pure multiplier. The table is the ex
 - Test: `tests/weeklyMatchup.test.ts`
 
 **Interfaces:**
-- Consumes: `parseCsv`, `canonicalTeam`, `statLineFromNflverse`, `num` from `lib/etl/nflverse.ts`; `scoreStatLine`, `SCORING_PRESETS`; `WeeklyModelParams`.
+- Consumes: `canonicalTeam`, `statLineFromNflverse`, `type Row` from `lib/etl/nflverse.ts`; `scoreStatLine`, `SCORING_PRESETS` from `lib/scoring.ts`; `WeeklyModelParams` from `lib/engine/weekly/model.ts`. (`buildDvp` takes already-parsed `Row[]`, so it needs neither `parseCsv` nor `num` — CSV reading belongs to its caller.)
 - Produces:
   - `type DvpTable = Record<string, Partial<Record<Position, number>>>` (mean PPR points allowed per game)
   - `interface DvpResult { table: DvpTable; leagueAvg: Partial<Record<Position, number>>; gamesByTeam: Record<string, number> }`
@@ -1143,7 +1149,7 @@ export function buildDvp(
 ): DvpResult {
   const { season, throughWeek, lambda } = opts;
   // team → pos → { weightedPts, weight }
-  const acc: Record<string, Partial<Record<Position, { pts: number; w: number }>>> = {};
+  const acc: Record<string, Partial<Record<Position, { pts: number }>>> = {};
   const weeks: Record<string, Set<number>> = {};
 
   for (const r of rows) {
@@ -1158,9 +1164,8 @@ export function buildDvp(
     // Recency weight: lambda^(weeks ago). lambda = 1 is a flat mean.
     const w = Math.pow(lambda, throughWeek - 1 - week);
     const byPos = (acc[def] ??= {});
-    const cell = (byPos[pos] ??= { pts: 0, w: 0 });
+    const cell = (byPos[pos] ??= { pts: 0 });
     cell.pts += pts * w;
-    cell.w += w;
     (weeks[def] ??= new Set()).add(week);
   }
 
@@ -1169,13 +1174,15 @@ export function buildDvp(
   for (const [team, byPos] of Object.entries(acc)) {
     const weekCount = weeks[team]?.size ?? 0;
     gamesByTeam[team] = weekCount;
-    if (weekCount === 0) continue;
     // Total weighted points allowed, spread over the weeks observed: this is
     // per-GAME points allowed to the position group, not per player.
-    const totalW = Array.from(weeks[team]).reduce(
+    const totalW = Array.from(weeks[team] ?? []).reduce(
       (s, wk) => s + Math.pow(lambda, throughWeek - 1 - wk),
       0
     );
+    // A zero weight sum would make every entry NaN and poison the table
+    // silently. Reachable with lambda 0, or by underflow on a tiny lambda.
+    if (!(totalW > 0)) continue;
     const out: Partial<Record<Position, number>> = {};
     for (const pos of DVP_POS) {
       const cell = byPos[pos];
@@ -3136,7 +3143,11 @@ async function main() {
   }
 
   // --- defense vs position, through the week being predicted ---------------
-  const dvpRes = buildDvp(nfl.data, { season: SEASON, throughWeek: week, lambda: 0.85 });
+  const dvpRes = buildDvp(nfl.data, {
+    season: SEASON,
+    throughWeek: week,
+    lambda: DEFAULT_WEEKLY_MODEL.matchup.dvpLambda,
+  });
   const dvpLookup = (defense: string, pos: Position) => ({
     allowed: dvpRes.table[defense]?.[pos],
     leagueAvg: dvpRes.leagueAvg[pos],

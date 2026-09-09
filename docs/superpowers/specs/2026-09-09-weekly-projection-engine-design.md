@@ -168,7 +168,7 @@ mean        = meanIfPlays · pPlay
   "modelWeights":  { "market": 1, "usage": 0 },
   "usage":       { "lambda": 0.75, "priorGames": 4, "effReliability": 0.15 },
   "environment": { "alpha": {}, "beta": {}, "leagueAvgItp": 22.5 },
-  "matchup":     { "gamma": {}, "shrinkGames": 6 },
+  "matchup":     { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5, "dvpLambda": 0.85 },
   "sigma":       { "sigma0": {}, "v0": {}, "delta": 0 },
   "availability":{ "byStatus": {} },
   "correlation": { "game": 0, "team": 0.28, "unit": 0, "dstVsOppTeam": 0 }
