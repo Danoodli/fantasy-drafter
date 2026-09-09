@@ -3765,13 +3765,24 @@ import { encodeHistory, decodeHistory, type HistRow } from "../lib/etl/weekly/hi
 
 const rows: HistRow[] = [
   {
-    id: "6813", pos: "RB", team: "DET", wk: 3, opp: "CHI", st: null,
+    id: "6813", pos: "RB", team: "DET", wk: 3, opp: "CHI", stNow: null,
     proj: { rushYds: 99.634, rushTD: 1.0512, receptions: 3.95 },
     act: { rushYds: 112, rushTD: 1, receptions: 2 },
     tot: 49.5, spr: -6.5,
   },
   {
-    id: "4034", pos: "QB", team: "KC", wk: 3, opp: "LV", st: "Questionable",
+    // PLAYED but recorded nothing. This row is the whole point of the encoding:
+    // an empty stat line must survive as {} and never collapse to null, or
+    // "appeared and did nothing" becomes "did not appear" and the availability
+    // signal is destroyed. A test with only null and non-empty rows would pass
+    // even if the encoder collapsed {} to null.
+    id: "0000", pos: "WR", team: "NYJ", wk: 3, opp: "BUF", stNow: null,
+    proj: { receptions: 2.1, recYds: 18.4 },
+    act: {},
+    tot: 38.5, spr: 2.5,
+  },
+  {
+    id: "4034", pos: "QB", team: "KC", wk: 3, opp: "LV", stNow: "Questionable",
     proj: { passYds: 268 },
     act: null,
     tot: 44, spr: -3,
@@ -3779,19 +3790,40 @@ const rows: HistRow[] = [
 ];
 
 describe("history encoding", () => {
-  it("round-trips every field, distinguishing 'did not play' from 'scored zero'", () => {
+  it("round-trips every field, distinguishing 'did not play' from 'played and scored zero'", () => {
     const back = decodeHistory(encodeHistory(rows));
-    expect(back).toHaveLength(2);
+    expect(back).toHaveLength(3);
     expect(back[0].act?.rushYds).toBe(112);
-    expect(back[1].act).toBeNull();
-    expect(back[1].st).toBe("Questionable");
+    // The three states must stay three states.
+    expect(back[1].act).toEqual({}); // played, recorded nothing
+    expect(back[1].act).not.toBeNull();
+    expect(back[2].act).toBeNull(); // did not appear
+    expect(back[2].stNow).toBe("Questionable");
+    expect(back[0].stNow).toBeNull();
     expect(back[0].spr).toBe(-6.5);
+  });
+
+  it("pins the code-to-field mapping, so a code can never be reassigned", () => {
+    // The committed snapshots are keyed by these two-letter codes. Reordering
+    // CODES is harmless because pack/unpack look up BY NAME — but reusing or
+    // reassigning a code would silently reinterpret five seasons of data as a
+    // different stat. This decodes a hand-written payload to pin the mapping.
+    const packed = JSON.stringify([
+      { i: "x", p: "QB", t: "KC", w: 1, o: "LV", j: { py: 250, pt: 2, pi: 1 }, a: { ry: 30, rt: 1 }, v: 44, d: -3 },
+    ]);
+    const [row] = decodeHistory(packed);
+    expect(row.proj.passYds).toBe(250);
+    expect(row.proj.passTD).toBe(2);
+    expect(row.proj.passInt).toBe(1);
+    expect(row.act?.rushYds).toBe(30);
+    expect(row.act?.rushTD).toBe(1);
   });
 
   it("rounds projections to two decimals — five seasons must fit in the repo", () => {
     const back = decodeHistory(encodeHistory(rows));
     expect(back[0].proj.rushYds).toBe(99.63);
     expect(back[0].proj.rushTD).toBe(1.05);
+    expect(back[0].act?.rushYds).toBe(112); // actuals are rounded too
   });
 
   it("produces materially smaller output than naive JSON", () => {
@@ -3844,8 +3876,17 @@ export interface HistRow {
   spr: number;
 }
 
-/** StatLine keys → one- or two-char codes. Order is frozen: changing it
- *  invalidates every committed snapshot, so append, never reorder. */
+/**
+ * StatLine keys → two-char codes.
+ *
+ * pack/unpack look up BY CODE NAME, not by position, so REORDERING this array
+ * is harmless. The invariant that actually matters is narrower and more
+ * dangerous: **never reuse or reassign a code.** Pointing `ry` at a different
+ * StatLine key would silently reinterpret five committed seasons as a
+ * different stat, with no error and no test failure anywhere else — which is
+ * why tests/weeklyHistory.test.ts decodes a hand-written payload to pin the
+ * mapping. To add a stat, add a new unused code.
+ */
 const CODES: [keyof StatLine, string][] = [
   ["passYds", "py"], ["passTD", "pt"], ["passInt", "pi"], ["pass2pt", "p2"],
   ["rushYds", "ry"], ["rushTD", "rt"], ["rush2pt", "r2"],
@@ -3951,11 +3992,34 @@ async function main() {
 
     // actuals: sleeperId|week → stat line
     const actual = new Map<string, ReturnType<typeof statLineFromNflverse>>();
+    const unmapped = new Set<string>();
+    const seen = new Set<string>();
     for (const r of nfl.data) {
       if (r.season !== String(season) || r.season_type !== "REG") continue;
-      const sid = gsisToSleeper[r.player_id ?? ""];
-      if (!sid) continue;
+      const gsis = r.player_id ?? "";
+      if (gsis) seen.add(gsis);
+      const sid = gsisToSleeper[gsis];
+      // A crosswalk miss is NOT harmless: this player's real played game never
+      // reaches `actual`, so his row later gets act: null and reads as "did not
+      // play". That inflates the measured did-not-play rate and quietly biases
+      // anything fitted from availability. Count it and say so.
+      if (!sid) {
+        if (gsis) unmapped.add(gsis);
+        continue;
+      }
       actual.set(`${sid}|${r.week}`, statLineFromNflverse(r));
+    }
+    const missPct = seen.size ? (100 * unmapped.size) / seen.size : 0;
+    console.log(
+      `${season}: crosswalk mapped ${seen.size - unmapped.size}/${seen.size} gsis ids ` +
+        `(${missPct.toFixed(1)}% unmapped)`
+    );
+    if (missPct > 5) {
+      throw new Error(
+        `${season}: ${missPct.toFixed(1)}% of gsis ids are absent from db_playerids.csv. ` +
+          `Their played games would be recorded as "did not play", inflating the DNP rate. ` +
+          `Refresh the crosswalk (full lane) before trusting this fit set.`
+      );
     }
 
     const rows: HistRow[] = [];
