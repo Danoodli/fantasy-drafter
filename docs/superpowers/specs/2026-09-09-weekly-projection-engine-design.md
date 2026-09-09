@@ -271,7 +271,7 @@ status logic to a component.
 
 | # | Gate | Why it is the right bar |
 |---|---|---|
-| 1 | RMSE and MAE beat raw Sleeper, per position, on held-out seasons | If it cannot beat one free API call it is not worth shipping |
+| 1 | RMSE and MAE beat raw Sleeper, per position, on held-out seasons | If it cannot beat one free API call it is not worth shipping. **See the measured-result note below: this is expected to TIE, not win.** |
 | 2 | Per-position Spearman ρ of predicted vs actual weekly finish ≥ baseline | Start/sit is a ranking problem, not a point-estimate problem |
 | 3 | **Distribution calibration**: p90 exceeded ~10% of the time, p10 undercut ~10%; PIT histogram near-uniform | Matters more than MAE for start/sit and GPP, and almost nobody checks it |
 | 4 | **Decision accuracy**: replayed over historical weeks, the recommended lineup beats naive "start the highest projection" in realized points and in matchup wins | The only gate that measures the actual product |
@@ -280,6 +280,41 @@ status logic to a component.
 Fit on 2021–2024, hold out 2025, then refit on all five. Gate 1 and gate 4 are
 blocking: if either fails, the config default stays in its off state and ships
 as opt-in, exactly as the unified model is currently handled.
+
+### Measured result: there is no detectable mean signal to add
+
+Calibrating on 10,131 player-weeks (2021–24, holding out 2025) produced **not
+one** environment or matchup coefficient distinguishable from zero:
+
+| coefficient | QB | RB | WR | TE |
+|---|---|---|---|---|
+| alpha, t | 0.66 | 1.65 | −0.61 | −1.05 |
+| gamma, t | −0.10 | 0.70 | −1.62 | −1.06 |
+
+The log-residual standard deviation is 0.57–0.84 by position. That is the real
+noise floor of weekly fantasy football, and at this sample size it swamps any
+environment or matchup effect **left over after Sleeper's own projection**. The
+negative WR/TE signs look like "the market over-corrects" but are noise; their
+sign is arbitrary.
+
+So the calibration keeps a coefficient only when |t| ≥ 2, and at present that
+zeroes alpha, beta and gamma entirely. Two consequences, stated plainly rather
+than worked around:
+
+1. **Gate 1 is expected to tie, not win.** With every mean-affecting
+   coefficient neutral, `meanIfPlays` equals the re-scored market number by
+   construction. A tie fails a gate worded "must beat", and that verdict is
+   reported as-is — the gate is not being reworded after seeing the data.
+2. **Leg A's value is in the distribution, not the mean.** Fitted sigma,
+   fitted correlations, per-week availability and exact byes are all things
+   raw Sleeper does not provide at all, and they are what start/sit and DFS
+   actually consume. Sigma and the correlations are *measured quantities*
+   rather than hypothesis tests — 10,000 noisy rows determine a spread
+   precisely even when they cannot resolve a mean effect — so they are exempt
+   from the significance filter and remain the substance of what ships.
+
+What would change this: more seasons, or a projection source that prices in
+less. Both are follow-ups, not blockers.
 
 ## Performance budgets
 

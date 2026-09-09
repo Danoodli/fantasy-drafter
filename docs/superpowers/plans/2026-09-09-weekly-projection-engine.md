@@ -4115,7 +4115,16 @@ The statistics, as pure tested functions, so the calibration script in Task 16 i
 ```ts
 // tests/weeklyFit.test.ts
 import { describe, it, expect } from "vitest";
-import { olsSlope, stdev, pearson, fitSigmaByVolume, empiricalPlayRate, pitCoverage } from "../lib/engine/weekly/fit";
+import {
+  olsSlope,
+  olsFit,
+  MIN_ABS_T,
+  stdev,
+  pearson,
+  fitSigmaByVolume,
+  empiricalPlayRate,
+  pitCoverage,
+} from "../lib/engine/weekly/fit";
 
 describe("olsSlope", () => {
   it("recovers a known slope", () => {
@@ -4128,6 +4137,47 @@ describe("olsSlope", () => {
   });
   it("is zero on fewer than three points — a two-point 'fit' is a line, not evidence", () => {
     expect(olsSlope([1, 2], [1, 4])).toBe(0);
+  });
+});
+
+describe("olsFit significance", () => {
+  it("reports a large t for a clean relationship and a small one for noise", () => {
+    const xs = Array.from({ length: 400 }, (_, i) => i / 400);
+    const clean = olsFit(xs, xs.map((x) => 2 * x));
+    expect(clean.slope).toBeCloseTo(2, 6);
+    expect(Math.abs(clean.t)).toBeGreaterThan(MIN_ABS_T);
+    // Deterministic alternating noise, uncorrelated with x by construction.
+    const noise = olsFit(xs, xs.map((_, i) => (i % 2 ? 1 : -1)));
+    expect(Math.abs(noise.t)).toBeLessThan(MIN_ABS_T);
+  });
+
+  it("is not estimable without variance or enough points", () => {
+    expect(olsFit([2, 2, 2], [1, 5, 9])).toEqual({ slope: 0, se: 0, t: 0, n: 3 });
+    expect(olsFit([1, 2], [1, 4]).t).toBe(0);
+  });
+
+  it("agrees with olsSlope, which now delegates to it", () => {
+    const xs = [1, 2, 3, 4, 5];
+    const ys = xs.map((x) => 3 + 2 * x);
+    expect(olsSlope(xs, ys)).toBeCloseTo(olsFit(xs, ys).slope, 12);
+  });
+});
+
+describe("fitSigmaByVolume degenerate input", () => {
+  it("degrades to a flat sd when there are too few points to bucket", () => {
+    const points = Array.from({ length: 12 }, (_, i) => ({ volume: 8, logResidual: i % 2 ? 0.5 : -0.5 }));
+    const { sigma0, delta } = fitSigmaByVolume(points, 8);
+    expect(delta).toBe(0);
+    expect(sigma0).toBeCloseTo(stdev(points.map((p) => p.logResidual)), 10);
+  });
+
+  it("never returns NaN when every bucket is unusable", () => {
+    // All-identical volumes AND zero spread: every bucket has sd 0 and is
+    // filtered, which previously left the means as 0/0.
+    const points = Array.from({ length: 80 }, () => ({ volume: 8, logResidual: 0 }));
+    const { sigma0, delta } = fitSigmaByVolume(points, 8);
+    expect(Number.isFinite(sigma0)).toBe(true);
+    expect(Number.isFinite(delta)).toBe(true);
   });
 });
 
@@ -4252,8 +4302,32 @@ export function stdev(xs: number[]): number {
 }
 
 export function olsSlope(xs: number[], ys: number[]): number {
+  return olsFit(xs, ys).slope;
+}
+
+export interface OlsFit {
+  slope: number;
+  /** Standard error of the slope. 0 when the slope is not estimable. */
+  se: number;
+  /** slope / se. 0 when not estimable. */
+  t: number;
+  n: number;
+}
+
+/**
+ * OLS slope WITH its standard error, so a caller can ask whether the
+ * coefficient is distinguishable from zero before shipping it.
+ *
+ * This matters more here than it usually would. Weekly fantasy residuals are
+ * enormously noisy — the log-residual standard deviation is 0.57 to 0.84 by
+ * position — so a regression over thousands of rows can still produce a
+ * confident-looking coefficient that is pure noise. Measured on 10,131 fitted
+ * player-weeks, every environment and matchup coefficient came out with
+ * |t| < 1.96. Shipping those would add variance with no signal.
+ */
+export function olsFit(xs: number[], ys: number[]): OlsFit {
   const n = Math.min(xs.length, ys.length);
-  if (n < MIN_FIT_N) return 0;
+  if (n < MIN_FIT_N) return { slope: 0, se: 0, t: 0, n };
   let sx = 0, sy = 0;
   for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; }
   const mx = sx / n, my = sy / n;
@@ -4262,8 +4336,20 @@ export function olsSlope(xs: number[], ys: number[]): number {
     num += (xs[i] - mx) * (ys[i] - my);
     den += (xs[i] - mx) ** 2;
   }
-  return den > 0 ? num / den : 0;
+  if (!(den > 0)) return { slope: 0, se: 0, t: 0, n };
+  const slope = num / den;
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const yhat = my + slope * (xs[i] - mx);
+    sse += (ys[i] - yhat) ** 2;
+  }
+  // n - 2 residual degrees of freedom: intercept plus slope.
+  const se = Math.sqrt(sse / (n - 2) / den);
+  return { slope, se, t: se > 0 ? slope / se : 0, n };
 }
+
+/** |t| a coefficient must clear to be kept rather than zeroed. */
+export const MIN_ABS_T = 2;
 
 export function pearson(xs: number[], ys: number[]): number {
   const n = Math.min(xs.length, ys.length);
@@ -4296,15 +4382,21 @@ export function fitSigmaByVolume(
   const per = Math.floor(sorted.length / BUCKETS);
   const xs: number[] = [];
   const ys: number[] = [];
-  const sds: { v: number; sd: number }[] = [];
   for (let b = 0; b < BUCKETS; b++) {
     const slice = sorted.slice(b * per, b === BUCKETS - 1 ? sorted.length : (b + 1) * per);
     const sd = stdev(slice.map((p) => p.logResidual));
     const meanV = slice.reduce((s, p) => s + p.volume, 0) / slice.length;
     if (sd <= 0 || meanV <= 0) continue;
-    sds.push({ v: meanV, sd });
     xs.push(Math.log(v0 / meanV));
     ys.push(Math.log(sd));
+  }
+  // Every bucket filtered out (all-identical volumes, or all-zero spread)
+  // would leave xs/ys empty, making the means 0/0 = NaN and sigma0
+  // exp(NaN) = NaN. loadWeeklyModel would reject that on the next import, but
+  // one step removed from its cause — as a config-load error after a
+  // calibration that reported success. Degrade to the flat sd instead.
+  if (xs.length < MIN_FIT_N) {
+    return { sigma0: stdev(points.map((p) => p.logResidual)), delta: 0 };
   }
   const delta = olsSlope(xs, ys);
   // sigma0 is the fitted sd at v = v0, i.e. where log(v0/v) = 0.
@@ -4411,7 +4503,7 @@ Orchestration only — the math lives in Task 15. Fits every coefficient on the 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { decodeHistory, type HistRow } from "../lib/etl/weekly/history";
-import { olsSlope, stdev, fitSigmaByVolume, empiricalPlayRate } from "../lib/engine/weekly/fit";
+import { olsFit, MIN_ABS_T, stdev, fitSigmaByVolume } from "../lib/engine/weekly/fit";
 import { impliedTeamPoints } from "../lib/engine/weekly/environment";
 import { projectedVolume } from "../lib/engine/weekly/spread";
 import { SCORING_PRESETS, scoreStatLine } from "../lib/scoring";
@@ -4552,6 +4644,35 @@ function main() {
   // After a season of those, availability becomes calibratable from them.
   console.log("availability: NOT fitted (historical status is a live field — see comment)");
 
+  // --- KEEP ONLY WHAT THE DATA CAN DISTINGUISH FROM ZERO -------------------
+  //
+  // Weekly fantasy residuals are enormously noisy: the log-residual standard
+  // deviation is 0.57 to 0.84 by position. A regression over thousands of rows
+  // can therefore produce a confident-looking coefficient that is pure noise,
+  // and shipping it adds variance with no signal.
+  //
+  // Measured on 10,131 fitted player-weeks (2021-24, holding out 2025), EVERY
+  // environment and matchup coefficient came out with |t| < 1.96:
+  //   alpha  QB t=0.66  RB t=1.65  WR t=-0.61  TE t=-1.05
+  //   gamma  QB t=-0.10 RB t=0.70  WR t=-1.62  TE t=-1.06
+  // The negative WR/TE signs that look like "the market over-corrects" are not
+  // a finding — they are noise, and their sign is arbitrary.
+  //
+  // So a coefficient is kept only when |t| >= MIN_ABS_T, and omitted
+  // otherwise, which leaves that lever exactly neutral. Expect most or all of
+  // alpha, beta and gamma to be omitted at this sample size. That is the
+  // honest result, not a failure: it says Sleeper's projection already prices
+  // in the environment and the matchup, and the value this engine adds is in
+  // the DISTRIBUTION (fitted sigma, fitted correlation, availability, exact
+  // byes) rather than in a better mean.
+  const keep = (label: string, f: { slope: number; t: number; n: number }): number | null => {
+    const ok = Math.abs(f.t) >= MIN_ABS_T;
+    console.log(
+      `  ${label}: ${f.slope.toFixed(4)} (t=${f.t.toFixed(2)}, n=${f.n}) ${ok ? "KEPT" : "zeroed — indistinguishable from 0"}`
+    );
+    return ok ? round3(f.slope) : null;
+  };
+
   // --- environment: alpha on log(itp / leagueAvgItp) ------------------------
   const avgItp = active.reduce((s, r) => s + r.itpOwn, 0) / active.length;
   params.environment.leagueAvgItp = Math.round(avgItp * 10) / 10;
@@ -4559,8 +4680,8 @@ function main() {
     const sub = active.filter((r) => r.pos === pos);
     const xs = sub.map((r) => Math.log(Math.max(0.2, r.itpOwn / avgItp)));
     const ys = sub.map((r) => Math.log(r.actual / r.base));
-    const a = olsSlope(xs, ys);
-    if (Math.abs(a) > 0.01) params.environment.alpha[pos] = round3(a);
+    const a = keep(`alpha.${pos}`, olsFit(xs, ys));
+    if (a !== null) params.environment.alpha[pos] = a;
   }
   // DST reads the OPPONENT's implied total. No DST rows are in the history set
   // (Sleeper's DEF projections carry no yardage), so alpha.DST stays unfitted
@@ -4578,8 +4699,8 @@ function main() {
     const ys = sub.map(
       (r) => Math.log(r.actual / r.base) - a * Math.log(Math.max(0.2, r.itpOwn / avgItp))
     );
-    const b = olsSlope(xs, ys);
-    if (Math.abs(b) > 0.005) params.environment.beta[pos] = round3(b);
+    const b = keep(`beta.${pos}`, olsFit(xs, ys));
+    if (b !== null) params.environment.beta[pos] = b;
   }
   console.log("environment.beta:", params.environment.beta);
 
@@ -4596,12 +4717,18 @@ function main() {
         a * Math.log(Math.max(0.2, r.itpOwn / avgItp)) -
         Math.log(Math.max(0.4, 1 + b * (r.spr / 7)))
     );
-    const g = olsSlope(xs, ys);
-    if (Math.abs(g) > 0.01) params.matchup.gamma[pos] = round3(g);
-    console.log(`  ${pos}: gamma ${g.toFixed(3)} over ${sub.length} rows`);
+    const g = keep(`gamma.${pos}`, olsFit(xs, ys));
+    if (g !== null) params.matchup.gamma[pos] = g;
   }
 
   // --- sigma: fitted on the residual AFTER all adjustments -----------------
+  //
+  // NOT subject to the significance filter above, and the distinction is the
+  // point. Alpha/beta/gamma are asking "is there a mean effect here at all",
+  // which the data cannot answer. Sigma asks "how wide is the residual", which
+  // is directly measured and extremely well determined — that spread is the
+  // one thing 10,000 noisy rows tell you precisely. Same for the correlations
+  // below: they are measured co-movement, not a hypothesis test.
   for (const pos of POSITIONS) {
     const sub = active.filter((r) => r.pos === pos);
     const v0 = DEFAULT_WEEKLY_MODEL.sigma.v0[pos] ?? 8;
