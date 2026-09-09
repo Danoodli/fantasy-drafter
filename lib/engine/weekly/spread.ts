@@ -13,7 +13,17 @@ const V0_FALLBACK = 8;
 /** Volume can never be 0 in the sigma formula — it is a denominator. */
 const MIN_VOLUME = 0.5;
 
-/** Touches (or attempts) the projection implies. */
+/**
+ * Touches (or attempts) the projection implies.
+ *
+ * The per-position divisors below are unit conversions, NOT tuned levers, and
+ * deliberately do not live in config. Sigma depends only on the ratio
+ * `v0 / v`, and `v = raw / divisor`, so sigma depends on `v0 * divisor` —
+ * the divisor and `v0[pos]` are the same degree of freedom. Exposing both
+ * would give the calibration two knobs for one parameter, which is
+ * unidentifiable: divisor 0.65 with v0 7 is indistinguishable from divisor 1
+ * with v0 4.55. `v0` is the knob; these are the units it is expressed in.
+ */
 export function projectedVolume(pos: Position, stats: StatLine): number {
   switch (pos) {
     case "QB":
@@ -33,15 +43,34 @@ export function projectedVolume(pos: Position, stats: StatLine): number {
   }
 }
 
+/**
+ * One clamp, applied on every path, so the off state and the on state cannot
+ * enforce different output invariants.
+ * A 0.1-volume player must not get a sigma of 4 and dominate every ceiling
+ * ranking on the strength of arithmetic.
+ */
+function clampSigma(sigma: number): number {
+  return Math.min(2.5, Math.max(0.15, sigma));
+}
+
+/** Positions with no touch count, whose sigma must not vary with volume. */
+const VOLUME_BLIND: ReadonlySet<Position> = new Set<Position>(["K", "DST"]);
+
 export function weeklySigma(pos: Position, volume: number, p: WeeklyModelParams): number {
   const sigma0 = p.sigma.sigma0[pos] ?? SIGMA_FALLBACK;
-  if (!p.sigma.delta) return sigma0;
+  // K and DST have no touch count, so `volume` carries no information about
+  // them and their sigma is flat BY CONSTRUCTION here — not by relying on
+  // v0[pos] happening to equal projectedVolume's constant. That coincidence
+  // holds for DST (v0 1, volume 1) and fails for K (v0 2, volume 1), which
+  // would give 0.70 instead of 0.55 at delta 0.35.
+  if (VOLUME_BLIND.has(pos)) return clampSigma(sigma0);
+  // Short-circuit only: Math.pow(x, 0) is 1, so the general path below already
+  // returns sigma0 when delta is 0. No test can distinguish the two, and none
+  // should claim to.
+  if (!p.sigma.delta) return clampSigma(sigma0);
   const v0 = p.sigma.v0[pos] ?? V0_FALLBACK;
   const v = Math.max(MIN_VOLUME, volume);
-  const scaled = sigma0 * Math.pow(v0 / v, p.sigma.delta);
-  // Clamp: a 0.1-volume player must not get a sigma of 4 and dominate every
-  // ceiling ranking on the strength of arithmetic.
-  return Math.min(2.5, Math.max(0.15, scaled));
+  return clampSigma(sigma0 * Math.pow(v0 / v, p.sigma.delta));
 }
 
 /** Inverse normal CDF, Acklam's rational approximation (|error| < 1.15e-9). */

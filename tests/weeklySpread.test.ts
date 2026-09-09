@@ -6,11 +6,19 @@ const OFF = DEFAULT_WEEKLY_MODEL;
 const ON: WeeklyModelParams = { ...OFF, sigma: { ...OFF.sigma, delta: 0.35 } };
 
 describe("projectedVolume", () => {
-  it("counts the touches that matter for the position", () => {
-    expect(projectedVolume("RB", { rushYds: 80, receptions: 3 })).toBeGreaterThan(0);
-    expect(projectedVolume("QB", { passYds: 250 })).toBeGreaterThan(0);
-    expect(projectedVolume("WR", { receptions: 5, recYds: 70 })).toBeGreaterThan(0);
-    expect(projectedVolume("DST", {})).toBeGreaterThan(0); // never zero — sigma must not divide by it
+  it("counts the touches that matter for the position, on the right scale", () => {
+    // Asserting VALUES, not just > 0: a version where every branch returned
+    // MIN_VOLUME would satisfy a bare positivity check.
+    expect(projectedVolume("RB", { rushYds: 86, receptions: 3 })).toBeCloseTo(86 / 4.3 + 3, 6);
+    expect(projectedVolume("QB", { passYds: 250 })).toBeCloseTo(250 / 7.5, 6);
+    expect(projectedVolume("WR", { receptions: 5, recYds: 70 })).toBeCloseTo(5 / 0.65, 6);
+    expect(projectedVolume("TE", { receptions: 5, recYds: 70 })).toBeCloseTo(5 / 0.65, 6);
+  });
+
+  it("floors at MIN_VOLUME so it can never be a zero denominator", () => {
+    for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as const) {
+      expect(projectedVolume(pos, {})).toBeGreaterThanOrEqual(0.5);
+    }
   });
 });
 
@@ -26,16 +34,30 @@ describe("weeklySigma", () => {
     expect(bigBack).toBeLessThan(flier);
   });
 
-  it("is finite and positive at zero volume rather than exploding", () => {
-    const s = weeklySigma("WR", 0, ON);
-    expect(Number.isFinite(s)).toBe(true);
-    expect(s).toBeGreaterThan(0);
-    expect(s).toBeLessThan(3);
+  it("floors zero volume at MIN_VOLUME rather than letting the clamp absorb it", () => {
+    // Exact value matters: without the MIN_VOLUME floor, v0/v is Infinity and
+    // the clamp alone would return 2.5 — still finite, positive and < 3, so a
+    // loose assertion could not tell the floor was gone.
+    expect(weeklySigma("WR", 0, ON)).toBeCloseTo(2.0148, 3);
   });
 
-  it("falls back to a sane default for a position with no fitted sigma", () => {
-    const bare: WeeklyModelParams = { ...OFF, sigma: { sigma0: {}, v0: {}, delta: 0 } };
-    expect(weeklySigma("WR", 8, bare)).toBeGreaterThan(0);
+  it("keeps K and DST flat whatever delta is — they have no touch count", () => {
+    // K is the case that catches a v0-coincidence: v0.K is 2 while its volume
+    // is a constant 1, so a v0-dependent path would give ~0.70, not 0.55.
+    for (const delta of [0, 0.35, 1]) {
+      const p: WeeklyModelParams = { ...ON, sigma: { ...ON.sigma, delta } };
+      expect(weeklySigma("K", 1, p)).toBeCloseTo(OFF.sigma.sigma0.K!, 10);
+      expect(weeklySigma("DST", 1, p)).toBeCloseTo(OFF.sigma.sigma0.DST!, 10);
+    }
+  });
+
+  it("falls back for a position with neither a fitted sigma nor a fitted v0", () => {
+    // delta must be NONZERO or the early return fires and V0_FALLBACK is never read.
+    const bare: WeeklyModelParams = { ...OFF, sigma: { sigma0: {}, v0: {}, delta: 0.35 } };
+    // SIGMA_FALLBACK 0.8, V0_FALLBACK 8, volume 8 => ratio 1 => exactly 0.8.
+    expect(weeklySigma("WR", 8, bare)).toBeCloseTo(0.8, 10);
+    // And it still varies with volume, proving V0_FALLBACK is in play.
+    expect(weeklySigma("WR", 2, bare)).toBeGreaterThan(weeklySigma("WR", 32, bare));
   });
 });
 
