@@ -920,6 +920,23 @@ describe("startSitAdvice", () => {
     expect(a.swaps.find((s) => s.inId === "qb2" && s.outId !== "qb")).toBeUndefined();
   });
 
+  it("on a FLEX config, a bench RB may replace the flexed WR but a bench QB may not", () => {
+    // QB1 RB1 WR1 FLEX1 (RB/WR/TE): starters qb, rb, wr1 and flex wr2 (11 > rb2 9).
+    const flexCfg: LeagueConfig = { ...cfg, rosterSlots: { QB: 1, RB: 1, WR: 1, TE: 0, FLEX: 1, K: 0, DST: 0 } };
+    const a = startSitAdvice(input({
+      config: flexCfg,
+      players: [me("qb", "QB", 18), me("rb", "RB", 12), me("wr1", "WR", 14), me("wr2", "WR", 11), me("rb2", "RB", 30), me("qb2", "QB", 40)],
+      opponent: { kind: "roster", players: [them("oqb", "QB", 18), them("orb", "RB", 12), them("owr", "WR", 14), them("owr2", "WR", 11)] },
+    }));
+    expect(a.lineup.starters).toHaveLength(4);
+    expect(a.lineup.starters.map((s) => s.player.id).sort()).toEqual(["qb", "rb", "wr1", "wr2"]);
+    // rb2 (30) is legal in place of ANY of rb, wr1 or wr2 (the set still fills 4 slots); qb2 only in place of qb.
+    expect(a.swaps.some((s) => s.inId === "rb2" && s.outId === "wr2")).toBe(true);
+    expect(a.swaps.find((s) => s.inId === "qb2" && s.outId !== "qb")).toBeUndefined();
+    expect(a.recommended.starters.map((s) => s.player.id)).toContain("rb2");
+    expect(a.recommended.starters.map((s) => s.player.id)).toContain("qb2");
+  });
+
   it("prefers the CEILING when I am a heavy underdog, even at lower projected points", () => {
     // Pre-computed at seed 5: P(win) 0.0295 with boring, 0.0605 with swingy.
     const boring = me("boring", "WR", 11, { sigma: 0.2, p90: 14 });
@@ -1200,27 +1217,21 @@ export function startSitAdvice(input: AdviceInput): Advice {
   const n = all.length;
 
   // --- current lineup ---------------------------------------------------------
-  const startable = players.filter((p) => p.outlook.projected && p.outlook.pPlay > 0);
-  let lineup: Lineup;
-  if (input.starterIds && input.starterIds.length > 0) {
-    const ids = input.starterIds.filter((id) => byId.has(id));
+  /** The best assignment over `ids`, with EVERY other roster player on the bench (not just the startable ones). */
+  const toLineup = (ids: string[]): Lineup => {
     const l = bestLineup(ids.map(asLineupPlayer), config);
     const started = new Set(l.starters.map((s) => s.player.id));
-    lineup = {
+    return {
       ...l,
       benched: players.filter((p) => !started.has(p.id)).map((p) => asLineupPlayer(p.id))
         .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
     };
-  } else {
-    // Only players who can score are candidates; the rest are benched below.
-    const l = bestLineup(startable.map((p) => asLineupPlayer(p.id)), config);
-    const started = new Set(l.starters.map((s) => s.player.id));
-    lineup = {
-      ...l,
-      benched: players.filter((p) => !started.has(p.id)).map((p) => asLineupPlayer(p.id))
-        .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
-    };
-  }
+  };
+  const startable = players.filter((p) => p.outlook.projected && p.outlook.pPlay > 0);
+  const lineup = input.starterIds && input.starterIds.length > 0
+    ? toLineup(input.starterIds.filter((id) => byId.has(id)))
+    // Only players who can score are candidates; the rest are benched.
+    : toLineup(startable.map((p) => p.id));
   const currentSet = lineup.starters.map((s) => s.player.id);
 
   // --- my total per draw for the current lineup, and the opponent's ---------
@@ -1309,13 +1320,7 @@ export function startSitAdvice(input: AdviceInput): Advice {
     set = set.map((id) => (id === best.outId ? best.inId : id));
     setWin = wpOf(set);
   }
-  const rec = bestLineup(set.map(asLineupPlayer), config);
-  const recStarted = new Set(rec.starters.map((s) => s.player.id));
-  const recommended: Lineup = {
-    ...rec,
-    benched: players.filter((p) => !recStarted.has(p.id)).map((p) => asLineupPlayer(p.id))
-      .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
-  };
+  const recommended = toLineup(set);
 
   // --- forced swaps: a starter who cannot or is not expected to play ---------
   const forced: ForcedSwap[] = [];
@@ -1366,7 +1371,7 @@ export function startSitAdvice(input: AdviceInput): Advice {
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/seasonAdvice.test.ts tests/seasonLevers.test.ts`
-Expected: PASS, 21 tests.
+Expected: PASS, 22 tests.
 
 The two most important are `prefers the CEILING when I am a heavy underdog` and `prefers the FLOOR when I am a heavy favourite`. **If either fails, do not adjust its tolerance — report it with the computed numbers.** They are the feature's entire justification, and the controller pre-computed both with this algorithm (deltas +0.031 and +0.024 at seed 5, well above the 0.01 asserted).
 
@@ -1482,7 +1487,7 @@ export function currentNflWeek(now: Date, seasonStart: Date): number {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/weekBoardClient.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
 
