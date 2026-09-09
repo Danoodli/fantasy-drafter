@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePastedPicks } from "../lib/draft/pasteImport";
+import { looksLikeBoard, parsePastedPicks } from "../lib/draft/pasteImport";
 import type { Board } from "../lib/types";
 
 const board: Board = JSON.parse(
@@ -305,5 +305,29 @@ describe("parsePastedPicks: duplicates in a label-less board copy", () => {
     ]);
     // In a plain list a duplicate is simply dropped, as before.
     expect(names("J. Gibbs\nC. Lamb\nJ. Taylor\nJ. Gibbs\nJ. Chase\nP. Nacua", none, 3)).toEqual(["Jahmyr Gibbs", "CeeDee Lamb", "Jonathan Taylor", "Ja'Marr Chase", "Puka Nacua"]);
+  });
+});
+
+describe("parsePastedPicks on a real board copy: empty cells and tag variants", () => {
+  it("labels of empty cells before a name are ignored — the name takes the label right above it", () => {
+    // Round 8 is filling from the right: the copy starts with the empty cells' labels (with or without overall numbers).
+    const bare = "8.12\n8.11\n8.10\n8.9\n8.8\n8.7\n8.6\n8.5\n89\nT. Kraft\nTE GB (BYE 11)";
+    expect(parsePastedPicks(bare, players, none, { teams: 12 }).matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([[89, "Tucker Kraft"]]);
+    const withOverall = "8.12\n96\n8.11\n95\n8.5\n89\nT. Kraft\nTE GB (BYE 11)\n8.4\n88\nJ. Williams\nWR DET (BYE 8)";
+    expect(parsePastedPicks(withOverall, players, none, { teams: 12 }).matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [88, "Jameson Williams"],
+      [89, "Tucker Kraft"],
+    ]);
+  });
+
+  it("label and overall on one line, and a BYE tag without parentheses, still read", () => {
+    const r = parsePastedPicks("6.12 72\nQ. Johnston\nWR LAC BYE 7\n7.1 73\nT. Kraft\nTE GB BYE 11", players, none, { teams: 12 });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [72, "Quentin Johnston"],
+      [73, "Tucker Kraft"],
+    ]);
+    expect(looksLikeBoard("Q. Johnston\nWR LAC BYE 7\nT. Kraft\nTE GB BYE 11", 2)).toBe(true);
+    expect(looksLikeBoard("Q. Johnston\nWR LAC · Bye 7\nT. Kraft\nTE GB · Bye 11", 2)).toBe(true);
+    expect(looksLikeBoard("Puka Nacua / LAR WR\nR1, P2 - Team 7", 1)).toBe(false);
   });
 });

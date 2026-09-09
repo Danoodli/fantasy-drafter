@@ -39,13 +39,48 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
   const [reverse, setReverse] = useState(false);
   /** The user picked another reading than the one inferred (rare; the alternatives chip). */
   const [prefer, setPrefer] = useState<PasteShape | null>(null);
+  /** The pasted pick numbers looked misread and the user asked to lay the names out from the room instead. */
+  const [ignoreNumbers, setIgnoreNumbers] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [overrides, setOverrides] = useState<Record<number, BoardPlayer | null>>({});
   const [disabled, setDisabled] = useState<Set<number>>(new Set());
 
   const result = useMemo(
-    () => parsePastedPicks(text, players, draftedIds, { teams, room: { ...room, prefer: prefer ?? undefined } }),
-    [text, players, draftedIds, teams, room, prefer]
+    () => parsePastedPicks(text, players, draftedIds, { teams, room: { ...room, prefer: prefer ?? undefined }, ignoreNumbers }),
+    [text, players, draftedIds, teams, room, prefer, ignoreNumbers]
   );
+
+  // Impossible numbering: a draft fills picks in order, so the numbers on a
+  // paste of N new names may leave at most a handful of picks unaccounted for
+  // between what the room knows and the last pasted pick. Far more gaps than
+  // names means the numbers were misread (a board copy whose labels came out
+  // wrong) — say so and offer to lay the names out from the room instead.
+  const numbered = result.matches.filter((m) => m.line.pickNo != null && m.player);
+  const maxPick = numbered.reduce((n, m) => Math.max(n, m.line.pickNo!), 0);
+  const covered = new Set<number>([...numbered.map((m) => m.line.pickNo!), ...room.placed.values()]);
+  let gaps = 0;
+  for (let p = room.knownCount + 1; p <= maxPick; p++) if (!covered.has(p) && !room.placeholders?.has(p)) gaps++;
+  const implausible = !result.layout && result.hasPickNumbers && numbered.length > 0 && gaps > Math.max(2, numbered.length);
+
+  async function copyDebug() {
+    const report = {
+      when: new Date().toISOString(),
+      teams,
+      room: { order: room.order, knownCount: room.knownCount, placed: [...room.placed.entries()], placeholders: [...(room.placeholders ?? [])] },
+      hasPickNumbers: result.hasPickNumbers,
+      layout: result.layout ? { best: result.layout.best, alternatives: result.layout.alternatives.map((a) => a.shape) } : null,
+      matches: result.matches.map((m) => ({ raw: m.line.raw, pickNo: m.line.pickNo, player: m.player?.name ?? null, confidence: m.confidence, alreadyDrafted: m.alreadyDrafted })),
+      ignored: result.ignored,
+      text,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   /** New text means new rows: per-row edits no longer apply. */
   function updateText(next: string) {
@@ -115,6 +150,23 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
             placeholder={"Copy the drafted-players list from your draft room and paste it here.\nAny format works: \"1.05 Bijan Robinson RB ATL\", \"Chase, Ja'Marr\", one name per line…"}
             className="w-full rounded border border-line bg-field px-3 py-2 font-mono text-xs leading-relaxed placeholder:text-ink-faint"
           />
+          {text.trim() && (
+            <div className="mt-1 flex justify-end">
+              <button onClick={copyDebug} className="text-[11px] text-ink-faint hover:text-ink" title="Copies the pasted text and how it was read, to report a paste that came out wrong">
+                {copied ? "copied" : "copy debug report"}
+              </button>
+            </div>
+          )}
+          {implausible && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-warn/15 px-3 py-2 text-xs text-warn">
+              <span>
+                These pick numbers can&apos;t be right: {numbered.length} names would leave {gaps} picks between them unaccounted for, and a draft fills picks in order.
+              </span>
+              <button onClick={() => setIgnoreNumbers(true)} className="rounded border border-warn/50 px-2 py-0.5 font-semibold hover:bg-warn/20">
+                Ignore the numbers, lay them out from the board
+              </button>
+            </div>
+          )}
 
           {rows.length > 0 && (
             <>

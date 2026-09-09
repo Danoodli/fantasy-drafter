@@ -83,6 +83,10 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
   const [error, setError] = useState<string | null>(null);
   const [lastLines, setLastLines] = useState<OcrLine[]>([]);
   const [mode, setMode] = useState<"list" | "grid" | null>(null);
+  /** The last frame OCR'd (enhanced canvas) and everything read from it — for the debug report. */
+  const lastFrameRef = useRef<HTMLCanvasElement | null>(null);
+  const lastReadRef = useRef<Record<string, unknown> | null>(null);
+  const [copiedReport, setCopiedReport] = useState(false);
   const [lastNames, setLastNames] = useState<string[]>([]);
   const [reads, setReads] = useState(0);
   const [marked, setMarked] = useState(0);
@@ -206,6 +210,17 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
         // and the grid reader takes over — the labels are the pick numbers,
         // so snake direction and panel order never matter.
         const grid = readGrid(words, players, { teams, placed });
+        lastFrameRef.current = frame;
+        lastReadRef.current = {
+          when: new Date().toISOString(),
+          region,
+          frame: { width: frame.width, height: frame.height, video: { width: video.videoWidth, height: video.videoHeight } },
+          teams,
+          mode: grid.anchors >= 2 ? "grid" : "list",
+          grid: { anchors: grid.anchors, picks: grid.picks.map((p) => ({ pickNo: p.pickNo, round: p.round, pick: p.pick, name: p.player.name, score: p.score, text: p.text })) },
+          lines: lines.map((l) => l.text),
+          words,
+        };
         if (grid.anchors >= 2) {
           setMode("grid");
           agreement.observe(grid.picks);
@@ -397,6 +412,37 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
             {lastLines.length > 0 && (
               <details className="mt-1">
                 <summary className="cursor-pointer text-[11px] text-ink-faint hover:text-ink">what the OCR read</summary>
+                <div className="mt-1 flex gap-3">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(JSON.stringify(lastReadRef.current, null, 1));
+                        setCopiedReport(true);
+                        setTimeout(() => setCopiedReport(false), 1500);
+                      } catch {
+                        setCopiedReport(false);
+                      }
+                    }}
+                    className="text-[11px] text-ink-faint hover:text-ink"
+                    title="Every word the OCR found in the last frame, with positions, and what the grid reader made of them"
+                  >
+                    {copiedReport ? "copied" : "copy OCR report"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const c = lastFrameRef.current;
+                      if (!c) return;
+                      const a = document.createElement("a");
+                      a.href = c.toDataURL("image/png");
+                      a.download = `screen-sync-frame-${Date.now()}.png`;
+                      a.click();
+                    }}
+                    className="text-[11px] text-ink-faint hover:text-ink"
+                    title="The last frame exactly as the OCR saw it (upscaled, grayscale)"
+                  >
+                    download last frame
+                  </button>
+                </div>
                 <pre className="mt-1 max-h-32 overflow-auto rounded bg-field p-2 font-mono text-[10px] leading-snug text-ink-dim">
                   {lastLines.map((l) => l.text).join("\n")}
                 </pre>

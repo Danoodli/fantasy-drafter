@@ -28,6 +28,9 @@ function arg(name: string, def: string): string {
 }
 
 const url = arg("url", "http://localhost:3000/mock-board?picks=80&autoplay=0&seed=7");
+/** A frame downloaded from Screen sync ("download last frame"): OCR it as-is instead of rendering the mock. */
+const pngPath = arg("png", "");
+const teamsArg = Number(arg("teams", "12"));
 const scale = Number(arg("scale", "2"));
 const psm = arg("psm", "");
 const dpr = Number(arg("dpr", "1"));
@@ -44,8 +47,39 @@ interface Truth {
   visible?: number[];
 }
 
+async function ocr(png: Buffer) {
+  const worker = await createWorker("eng", 1, { cachePath: join(process.cwd(), ".tesseract-cache"), logger: () => {} });
+  await worker.setParameters({
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'’.-/#()&, ",
+    preserve_interword_spaces: "1",
+    user_defined_dpi: "144",
+    ...(psm ? { tessedit_pageseg_mode: psm as never } : {}),
+  });
+  const t0 = Date.now();
+  const { data } = await worker.recognize(png, {}, { text: true, blocks: true });
+  const ms = Date.now() - t0;
+  await worker.terminate();
+  return { ...flattenBlocks((data as unknown as { blocks?: TessBlock[] | null }).blocks, data.text), ms };
+}
+
+/** --png: a real frame from the app. No ground truth — print what the reader sees so a miss can be diagnosed. */
+async function checkPng(board: Board) {
+  const png = readFileSync(pngPath);
+  const { words, lines, ms } = await ocr(png);
+  writeFileSync(join(outDir, "frame-words.json"), JSON.stringify(words, null, 1));
+  const read = readGrid(words, board.players, { teams: teamsArg });
+  const labelWords = words.filter((w) => /^\d{1,2}[.,:]\d{1,2}$/.test(w.text));
+  console.log(`frame      ${pngPath} — OCR ${ms} ms, ${lines.length} lines, ${words.length} words, teams ${teamsArg}`);
+  console.log(`labels     ${read.anchors} anchors · label-shaped words: ${labelWords.map((w) => `${w.text}@${w.x0},${w.y0}`).join(" ")}`);
+  console.log(`picks      ${read.picks.length}`);
+  for (const p of read.picks) console.log(`  ${p.round}.${p.pick} (#${p.pickNo}) ${p.player.name} ← "${p.text}"`);
+  console.log(`lines\n  ${lines.map((l) => l.text).join("\n  ")}`);
+  console.log(`words in ${outDir}/frame-words.json`);
+}
+
 async function main() {
   const board: Board = JSON.parse(readFileSync(join(process.cwd(), "public", "data", "board-ppr.json"), "utf8"));
+  if (pngPath) return checkPng(board);
   if (replay) {
     const words: OcrWord[] = JSON.parse(readFileSync(join(replay, "mock-words.json"), "utf8"));
     const truth: Truth = JSON.parse(readFileSync(join(replay, "mock-truth.json"), "utf8"));

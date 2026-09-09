@@ -196,7 +196,12 @@ function coalesceLines(
     const label = labelKind(line, teams);
     const words = nameWords(line);
     if (label === "bare" && labelsFirst) {
-      pendingPrefix = `${pendingPrefix} ${line}`.trim();
+      // A second cell label before any name means the cell above was empty (a
+      // future pick copied along): drop it — a name takes the label nearest it.
+      if (roundPick(line, teams) != null && roundPick(pendingPrefix, teams) != null) {
+        ignored.push(pendingPrefix);
+        pendingPrefix = line;
+      } else pendingPrefix = `${pendingPrefix} ${line}`.trim();
     } else if (label != null && out.length > 0) {
       out[out.length - 1] = `${out[out.length - 1]} ${line}`;
     } else if (label != null) {
@@ -223,11 +228,13 @@ export interface PasteOptions {
    * paste carries pick numbers of its own.
    */
   room?: Omit<RoomState, "teams"> & { prefer?: PasteShape };
+  /** Read the paste as if it carried no pick numbers (the preview's escape hatch when the numbers look misread). */
+  ignoreNumbers?: boolean;
 }
 
-/** Board cells copy with their "(BYE 7)" tag; a paste full of them is a board, not a list. */
+/** Board cells copy with their "(BYE 7)" / "Bye 7" tag; a paste full of them is a board, not a list. */
 export function looksLikeBoard(text: string, names: number): boolean {
-  const tags = (text.match(/\(BYE\s*\d+\)/gi) ?? []).length;
+  const tags = (text.match(/\bBYE\s*:?\s*\d+/gi) ?? []).length;
   return tags >= Math.max(2, Math.ceil(names * 0.5));
 }
 
@@ -257,8 +264,8 @@ export function parsePastedPicks(
   const gridCopy = looksLikeBoard(text, 0);
 
   for (const raw of lines) {
-    const rp = roundPick(raw, teams);
-    const bare = rp == null ? leadingNumber(raw) : null;
+    const rp = opts.ignoreNumbers ? null : roundPick(raw, teams);
+    const bare = rp == null && !opts.ignoreNumbers ? leadingNumber(raw) : null;
     const tokens = tokenize(raw);
     const hints = lineHints(tokens, raw);
     const found = findPlayers(tokens, vocab, counts, { pos: hints.pos, team: hints.team }, { onTie: "best" });
