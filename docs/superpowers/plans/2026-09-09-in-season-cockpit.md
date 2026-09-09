@@ -356,11 +356,26 @@ describe("bestLineup", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("is deterministic on ties", () => {
+  it("is deterministic on ties: the same players start whatever the input order", () => {
     const players = [p("a", "RB", 10), p("b", "RB", 10), p("c", "RB", 10)];
     const one = bestLineup(players, cfg());
     const two = bestLineup([...players].reverse(), cfg());
-    expect(one.total).toBeCloseTo(two.total, 10);
+    // Two RB slots, three equal RBs: the id tiebreak must pick the same two
+    // both times. A first-encountered rule would start a,b then c,b.
+    expect(one.starters.map((s) => s.player.id)).toEqual(two.starters.map((s) => s.player.id));
+    expect(one.benched.map((b) => b.id)).toEqual(two.benched.map((b) => b.id));
+  });
+
+  it("fills as many flex slots as there are eligible leftovers, not none", () => {
+    // Two flex slots, one leftover (rb2): a search over compositions summing
+    // to exactly 2 finds nothing feasible and would leave both empty.
+    const l = bestLineup(
+      [p("rb1", "RB", 10), p("rb2", "RB", 5), p("wr1", "WR", 8)],
+      cfg({ rosterSlots: { QB: 0, RB: 1, WR: 1, TE: 0, FLEX: 2, K: 0, DST: 0 } })
+    );
+    expect(l.starters.filter((s) => s.slot === "FLEX").map((s) => s.player.id)).toEqual(["rb2"]);
+    expect(l.total).toBeCloseTo(23, 6);
+    expect(l.benched).toEqual([]);
   });
 });
 ```
@@ -440,11 +455,16 @@ export function bestLineup(players: LineupPlayer[], config: LeagueConfig): Lineu
 
   const flexSlots = config.rosterSlots.FLEX ?? 0;
   const eligible = config.flexEligible.filter((pos) => (byPos.get(pos) ?? []).length > (used.get(pos) ?? 0));
+  // Fill as many flex slots as there are eligible leftovers: with fewer
+  // leftovers than slots, a composition summing to flexSlots is infeasible and
+  // an exact-sum search would leave EVERY flex slot empty.
+  const leftover = eligible.reduce((s, pos) => s + (byPos.get(pos) ?? []).length - (used.get(pos) ?? 0), 0);
+  const toFill = Math.min(flexSlots, leftover);
 
   let bestFlex: LineupPlayer[] = [];
   let bestGain = -1;
-  if (flexSlots > 0 && eligible.length > 0) {
-    for (const alloc of allocations(eligible.length, flexSlots)) {
+  if (toFill > 0) {
+    for (const alloc of allocations(eligible.length, toFill)) {
       const picked: LineupPlayer[] = [];
       let ok = true;
       for (let i = 0; i < eligible.length; i++) {
@@ -478,7 +498,7 @@ export function bestLineup(players: LineupPlayer[], config: LeagueConfig): Lineu
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/seasonLineup.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Confirm the equivalence claim**
 
@@ -657,7 +677,7 @@ export function matchupWinProbability(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/seasonWinProb.test.ts`
-Expected: PASS, 10 tests. The statistical ones carry the controller's pre-computed values in comments; if one fails, print the computed probability and report it rather than widening a tolerance.
+Expected: PASS, 9 tests. The statistical ones carry the controller's pre-computed values in comments; if one fails, print the computed probability and report it rather than widening a tolerance.
 
 - [ ] **Step 5: Commit**
 
