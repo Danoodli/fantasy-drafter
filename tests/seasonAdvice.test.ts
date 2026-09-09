@@ -105,6 +105,25 @@ describe("startSitAdvice", () => {
     expect(a.swaps.find((s) => s.inId === "qb2" && s.outId !== "qb")).toBeUndefined();
   });
 
+  it("on a FLEX config, a bench RB may replace the flexed WR but a bench QB may not", () => {
+    // QB1 RB1 WR1 FLEX1 (RB/WR/TE). The LOCKED lineup is qb, rb, wr1 + flex wr2;
+    // rb2 (30) and qb2 (40) sit on the bench, so both swaps are on offer.
+    const flexCfg: LeagueConfig = { ...cfg, rosterSlots: { QB: 1, RB: 1, WR: 1, TE: 0, FLEX: 1, K: 0, DST: 0 } };
+    const a = startSitAdvice(input({
+      config: flexCfg,
+      players: [me("qb", "QB", 18), me("rb", "RB", 12), me("wr1", "WR", 14), me("wr2", "WR", 11), me("rb2", "RB", 30), me("qb2", "QB", 40)],
+      starterIds: ["qb", "rb", "wr1", "wr2"],
+      opponent: { kind: "roster", players: [them("oqb", "QB", 18), them("orb", "RB", 12), them("owr", "WR", 14), them("owr2", "WR", 11)] },
+    }));
+    expect(a.lineup.starters).toHaveLength(4);
+    expect(a.lineup.starters.map((s) => s.player.id).sort()).toEqual(["qb", "rb", "wr1", "wr2"]);
+    // rb2 (30) is legal in place of ANY of rb, wr1 or wr2 (the set still fills 4 slots); qb2 only in place of qb.
+    expect(a.swaps.some((s) => s.inId === "rb2" && s.outId === "wr2")).toBe(true);
+    expect(a.swaps.find((s) => s.inId === "qb2" && s.outId !== "qb")).toBeUndefined();
+    expect(a.recommended.starters.map((s) => s.player.id)).toContain("rb2");
+    expect(a.recommended.starters.map((s) => s.player.id)).toContain("qb2");
+  });
+
   it("prefers the CEILING when I am a heavy underdog, even at lower projected points", () => {
     // Pre-computed at seed 5: P(win) 0.0295 with boring, 0.0605 with swingy.
     const boring = me("boring", "WR", 11, { sigma: 0.2, p90: 14 });

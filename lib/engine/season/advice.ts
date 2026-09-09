@@ -174,27 +174,21 @@ export function startSitAdvice(input: AdviceInput): Advice {
   const n = all.length;
 
   // --- current lineup ---------------------------------------------------------
-  const startable = players.filter((p) => p.outlook.projected && p.outlook.pPlay > 0);
-  let lineup: Lineup;
-  if (input.starterIds && input.starterIds.length > 0) {
-    const ids = input.starterIds.filter((id) => byId.has(id));
+  /** The best assignment over `ids`, with EVERY other roster player on the bench (not just the startable ones). */
+  const toLineup = (ids: string[]): Lineup => {
     const l = bestLineup(ids.map(asLineupPlayer), config);
     const started = new Set(l.starters.map((s) => s.player.id));
-    lineup = {
+    return {
       ...l,
       benched: players.filter((p) => !started.has(p.id)).map((p) => asLineupPlayer(p.id))
         .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
     };
-  } else {
-    // Only players who can score are candidates; the rest are benched below.
-    const l = bestLineup(startable.map((p) => asLineupPlayer(p.id)), config);
-    const started = new Set(l.starters.map((s) => s.player.id));
-    lineup = {
-      ...l,
-      benched: players.filter((p) => !started.has(p.id)).map((p) => asLineupPlayer(p.id))
-        .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
-    };
-  }
+  };
+  const startable = players.filter((p) => p.outlook.projected && p.outlook.pPlay > 0);
+  const lineup = input.starterIds && input.starterIds.length > 0
+    ? toLineup(input.starterIds.filter((id) => byId.has(id)))
+    // Only players who can score are candidates; the rest are benched.
+    : toLineup(startable.map((p) => p.id));
   const currentSet = lineup.starters.map((s) => s.player.id);
 
   // --- my total per draw for the current lineup, and the opponent's ---------
@@ -282,13 +276,7 @@ export function startSitAdvice(input: AdviceInput): Advice {
     set = set.map((id) => (id === best.outId ? best.inId : id));
     setWin = wpOf(set);
   }
-  const rec = bestLineup(set.map(asLineupPlayer), config);
-  const recStarted = new Set(rec.starters.map((s) => s.player.id));
-  const recommended: Lineup = {
-    ...rec,
-    benched: players.filter((p) => !recStarted.has(p.id)).map((p) => asLineupPlayer(p.id))
-      .sort((a, b) => b.points - a.points || a.id.localeCompare(b.id)),
-  };
+  const recommended = toLineup(set);
 
   // --- forced swaps: a starter who cannot or is not expected to play ---------
   const forced: ForcedSwap[] = [];
