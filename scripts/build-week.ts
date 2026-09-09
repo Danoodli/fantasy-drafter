@@ -60,7 +60,15 @@ async function main() {
   const sources: WeekBoard["meta"]["sources"] = [];
   const track = <T extends { fetchedAt: string; fromFixture: boolean }>(name: string, r: T): T => {
     sources.push({ name, fetchedAt: r.fetchedAt, fromFixture: r.fromFixture });
-    if (r.fromFixture) warnings.push(`${name} came from a committed fixture (${r.fetchedAt})`);
+    // Three distinct states, three distinct messages. "unavailable" means the
+    // live fetch failed AND no fixture existed, so a neutral default was
+    // substituted — saying it "came from a committed fixture" would assert
+    // something false about data the user is about to trust.
+    if (r.fetchedAt === "unavailable") {
+      warnings.push(`${name} was UNAVAILABLE — no live data and no fixture, a neutral default was used`);
+    } else if (r.fromFixture) {
+      warnings.push(`${name} came from a committed fixture (${r.fetchedAt})`);
+    }
     return r;
   };
 
@@ -133,7 +141,7 @@ async function main() {
       let usage: import("../lib/types").StatLine | undefined;
       if (hist.length > 0 && EFF_PRIOR[p.pos]) {
         const observed = rollingShares(hist, DEFAULT_WEEKLY_MODEL.usage.lambda);
-        const prior = priorShares(p, seasonBoard, teamVol);
+        const prior = priorShares(p, seasonBoard);
         const shares = blendWithPrior(observed, prior, DEFAULT_WEEKLY_MODEL.usage.priorGames);
         usage = projectUsageStatLine(
           {
@@ -222,11 +230,12 @@ function teamVolumes(
  * team's, converted into a share of team volume. Crude but the right shape —
  * it is what week 1 leans on, and it is shrunk out by week 8.
  */
-function priorShares(
-  p: Board["players"][number],
-  board: Board,
-  teamVol: Record<string, { targets: number; carries: number; attempts: number }>
-): Shares {
+/**
+ * Returns FRACTIONS of team volume, not absolute volume — the team's level is
+ * applied separately by projectUsageStatLine, so this deliberately does not
+ * take the team-volume table.
+ */
+function priorShares(p: Board["players"][number], board: Board): Shares {
   const mates = board.players.filter((x) => x.team === p.team && x.pos === p.pos);
   const posTotal = mates.reduce((s, x) => s + Math.max(0, x.projPoints), 0);
   const frac = posTotal > 0 ? Math.max(0, p.projPoints) / posTotal : 0;
