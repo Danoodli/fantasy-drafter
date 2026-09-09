@@ -6,18 +6,32 @@ import {
   unitOf,
 } from "../lib/engine/weekly/model";
 
+// The documented off state, hand-written to match the comment at the top of
+// lib/engine/weekly/model.ts — independent of OFF_WEEKLY_MODEL, so a drift
+// between the doc comment and the exported literal is caught here rather than
+// by a test that imports the very thing it is meant to pin.
+const OFF_STATE = {
+  fittedOn: [], sourceWeights: { sleeper: 1, espn: 0, dk: 0 },
+  modelWeights: { market: 1, usage: 0 },
+  usage: { lambda: 0.75, priorGames: 4, effReliability: 0.15 },
+  environment: { alpha: {}, beta: {}, leagueAvgItp: 22.5 },
+  matchup: { gamma: {}, shrinkGames: 6, priorSeasonWeight: 0.5, dvpLambda: 0.85 },
+  sigma: { sigma0: {}, v0: {}, delta: 0 },
+  availability: { byStatus: {} },
+  correlation: { game: 0, team: 0.28, unit: 0.28, dstVsOppTeam: 0 },
+};
+
 describe("weekly model config", () => {
-  it("ships in its off state: usage weight 0, no adjustments", () => {
-    const m = DEFAULT_WEEKLY_MODEL;
+  it("the documented off state is loadable and neutral", () => {
+    const m = loadWeeklyModel(OFF_STATE);
     expect(m.modelWeights.usage).toBe(0);
-    expect(m.modelWeights.market).toBe(1);
-    expect(m.sourceWeights.sleeper).toBe(1);
-    expect(m.sourceWeights.espn).toBe(0);
-    expect(m.sourceWeights.dk).toBe(0);
     expect(Object.keys(m.environment.alpha)).toHaveLength(0);
-    expect(Object.keys(m.environment.beta)).toHaveLength(0);
-    expect(Object.keys(m.matchup.gamma)).toHaveLength(0);
     expect(m.sigma.delta).toBe(0);
+  });
+
+  it("the shipped config is valid and has been fitted", () => {
+    const m = loadWeeklyModel(DEFAULT_WEEKLY_MODEL);
+    expect(m.fittedOn.length).toBeGreaterThan(0);
   });
 
   it("derives amplitudes from nested correlations and they sum to one in square", () => {

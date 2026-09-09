@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { buildWeekOutlooks, blendMarket, type WeekPlayerInput, type WeekLine } from "../lib/engine/weekly/outlook";
-import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 import { SCORING_PRESETS, scoreStatLine } from "../lib/scoring";
 
 const scoring = SCORING_PRESETS.ppr;
-const OFF = DEFAULT_WEEKLY_MODEL;
+const OFF = OFF_WEEKLY_MODEL;
 
 const gibbs: WeekPlayerInput = {
   id: "6813", pos: "RB", team: "DET", bye: 8, status: null,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { sampleWeek, simulateWeek, type WeekSimPlayer } from "../lib/engine/weekSim";
-import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 import { makeRng } from "../lib/engine/montecarlo";
 
 function p(id: string, pos: WeekSimPlayer["pos"], team: string, gameId: string, opp: string): WeekSimPlayer {
@@ -36,7 +36,7 @@ function columns(draws: Float64Array[], k: number): number[] {
 
 describe("weekSim correlation structure", () => {
   const CORR: WeeklyModelParams = {
-    ...DEFAULT_WEEKLY_MODEL,
+    ...OFF_WEEKLY_MODEL,
     correlation: { game: 0.15, team: 0.35, unit: 0.55, dstVsOppTeam: 0.3 },
   };
 
@@ -69,7 +69,7 @@ describe("weekSim correlation structure", () => {
 
   it("reproduces the season model's behaviour when game and unit are off", () => {
     const flat: WeeklyModelParams = {
-      ...DEFAULT_WEEKLY_MODEL,
+      ...OFF_WEEKLY_MODEL,
       correlation: { game: 0, team: 0.28, unit: 0.28, dstVsOppTeam: 0 },
     };
     const draws = simulateWeek(players, flat, 8000, 3);
@@ -83,14 +83,14 @@ describe("weekSim correlation structure", () => {
 
 describe("weekSim mechanics", () => {
   it("is deterministic for a given seed", () => {
-    const a = sampleWeek(players, DEFAULT_WEEKLY_MODEL, makeRng(99));
-    const b = sampleWeek(players, DEFAULT_WEEKLY_MODEL, makeRng(99));
+    const a = sampleWeek(players, OFF_WEEKLY_MODEL, makeRng(99));
+    const b = sampleWeek(players, OFF_WEEKLY_MODEL, makeRng(99));
     expect(Array.from(a)).toEqual(Array.from(b));
   });
 
   it("the sample mean recovers meanIfPlays for a certain starter", () => {
     const one = [p("solo", "WR", "DET", "DET-CHI", "CHI")];
-    const draws = simulateWeek(one, DEFAULT_WEEKLY_MODEL, 20000, 5);
+    const draws = simulateWeek(one, OFF_WEEKLY_MODEL, 20000, 5);
     const mean = draws.reduce((s, d) => s + d[0], 0) / draws.length;
     expect(mean).toBeGreaterThan(14);
     expect(mean).toBeLessThan(16);
@@ -98,14 +98,14 @@ describe("weekSim mechanics", () => {
 
   it("a player who does not play scores exactly zero, not a small number", () => {
     const out = [{ ...p("hurt", "WR", "DET", "DET-CHI", "CHI"), pPlay: 0 }];
-    const draws = simulateWeek(out, DEFAULT_WEEKLY_MODEL, 200, 1);
+    const draws = simulateWeek(out, OFF_WEEKLY_MODEL, 200, 1);
     expect(draws.every((d) => d[0] === 0)).toBe(true);
   });
 
   it("DK bonuses add points only in big statistical weeks", () => {
     const big = [{ ...p("bell", "WR", "DET", "DET-CHI", "CHI"), sigma: 0.9 }];
-    const plain = simulateWeek(big, DEFAULT_WEEKLY_MODEL, 4000, 11);
-    const bonused = simulateWeek(big, DEFAULT_WEEKLY_MODEL, 4000, 11, { dkBonuses: true });
+    const plain = simulateWeek(big, OFF_WEEKLY_MODEL, 4000, 11);
+    const bonused = simulateWeek(big, OFF_WEEKLY_MODEL, 4000, 11, { dkBonuses: true });
     const mean = (d: Float64Array[]) => d.reduce((s, x) => s + x[0], 0) / d.length;
     expect(mean(bonused)).toBeGreaterThan(mean(plain));
     // Bonuses are rare-ish: they must not inflate the mean by more than ~3.

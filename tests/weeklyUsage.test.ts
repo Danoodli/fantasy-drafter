@@ -7,7 +7,7 @@ import {
   type Efficiency,
   type UsageWeek,
 } from "../lib/engine/weekly/usageModel";
-import { DEFAULT_WEEKLY_MODEL } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL } from "../lib/engine/weekly/model";
 
 function nflRow(o: Record<string, string>): Record<string, string> {
   return {
@@ -109,7 +109,7 @@ describe("projectUsageStatLine", () => {
         efficiency: eff,
         priorEfficiency: priorEff,
       },
-      DEFAULT_WEEKLY_MODEL
+      OFF_WEEKLY_MODEL
     );
     // 0.25 * 32 = 8 targets. effReliability 0.15 → ydsPerTarget ≈ 8.6.
     expect(stats.receptions).toBeCloseTo(8 * (0.65 + 0.15 * (0.7 - 0.65)), 4);
@@ -120,8 +120,8 @@ describe("projectUsageStatLine", () => {
   it("gives a QB passing volume and a back carries, not each other's", () => {
     const shares = { targetShare: 0.05, carryShare: 0.6, attemptShare: 0.95, games: 8 };
     const teamVolume = { targets: 32, carries: 24, attempts: 32 };
-    const rb = projectUsageStatLine({ pos: "RB", shares, teamVolume, efficiency: eff, priorEfficiency: priorEff }, DEFAULT_WEEKLY_MODEL);
-    const qb = projectUsageStatLine({ pos: "QB", shares, teamVolume, efficiency: eff, priorEfficiency: priorEff }, DEFAULT_WEEKLY_MODEL);
+    const rb = projectUsageStatLine({ pos: "RB", shares, teamVolume, efficiency: eff, priorEfficiency: priorEff }, OFF_WEEKLY_MODEL);
+    const qb = projectUsageStatLine({ pos: "QB", shares, teamVolume, efficiency: eff, priorEfficiency: priorEff }, OFF_WEEKLY_MODEL);
     expect(rb.rushYds).toBeGreaterThan(0);
     expect(rb.passYds ?? 0).toBe(0);
     expect(qb.passYds).toBeGreaterThan(0);

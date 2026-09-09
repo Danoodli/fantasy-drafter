@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { projectedVolume, weeklySigma, lognormalQuantile } from "../lib/engine/weekly/spread";
-import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 
-const OFF = DEFAULT_WEEKLY_MODEL;
+const OFF = OFF_WEEKLY_MODEL;
 const ON: WeeklyModelParams = { ...OFF, sigma: { ...OFF.sigma, delta: 0.35 } };
 
 describe("projectedVolume", () => {

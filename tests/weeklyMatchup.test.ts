@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { buildDvp } from "../lib/etl/weekly/dvp";
 import { matchMult } from "../lib/engine/weekly/matchup";
-import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 
-const OFF = DEFAULT_WEEKLY_MODEL;
+const OFF = OFF_WEEKLY_MODEL;
 const ON: WeeklyModelParams = {
   ...OFF,
   matchup: { gamma: { RB: 0.5, WR: 0.5 }, shrinkGames: 6, priorSeasonWeight: 0.5, dvpLambda: 0.85 },

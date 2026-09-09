@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { pPlay, FALLBACK_PLAY_PROB } from "../lib/engine/weekly/availability";
 import { SEASON_LONG } from "../lib/engine/injuryFeed";
-import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
+import { OFF_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 
-const OFF = DEFAULT_WEEKLY_MODEL;
+const OFF = OFF_WEEKLY_MODEL;
 
 describe("pPlay", () => {
   it("a bye is zero, unconditionally — no status can rescue it", () => {

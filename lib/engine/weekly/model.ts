@@ -2,10 +2,11 @@
 // scripts/calibrate-weekly.ts, never hand-tuned. The engine imports the JSON
 // as data; tests inject their own.
 //
-// Off state (as committed): sourceWeights sleeper-only, usage weight 0, empty
-// alpha/beta/gamma, delta 0. That reproduces raw Sleeper weekly projections
-// re-scored with the league's scoring settings — the baseline every gate
-// measures against.
+// Off state: sourceWeights sleeper-only, usage weight 0, empty alpha/beta/
+// gamma, delta 0. That reproduces raw Sleeper weekly projections re-scored
+// with the league's scoring settings — the baseline every gate measures
+// against. config/weekly-model.json now ships FITTED (see `fittedOn`), so the
+// off state itself lives only as the OFF_WEEKLY_MODEL literal below.
 import type { Position } from "../../types";
 import weeklyJson from "../../../config/weekly-model.json";
 
@@ -65,6 +66,33 @@ export interface WeeklyModelParams {
   * silent NaN into a startup error naming the field.
   */
 export const DEFAULT_WEEKLY_MODEL = loadWeeklyModel(weeklyJson);
+
+/**
+ * The off state, frozen as a literal: alpha/beta/gamma empty, sigma.delta 0,
+ * correlation at its pre-calibration flat value (game 0, team = unit = 0.28).
+ * This is the config as it shipped BEFORE scripts/calibrate-weekly.ts first
+ * ran. Once that script overwrote config/weekly-model.json with fitted
+ * coefficients, DEFAULT_WEEKLY_MODEL stopped being a neutral "no adjustments"
+ * stand-in — tests that want envMult/scriptMult/matchMult == 1 or a flat
+ * per-position sigma import THIS instead.
+ */
+const OFF_STATE: WeeklyModelParams = {
+  fittedOn: [],
+  sourceWeights: { sleeper: 1, espn: 0, dk: 0 },
+  modelWeights: { market: 1, usage: 0 },
+  usage: { lambda: 0.75, priorGames: 4, effReliability: 0.15 },
+  environment: { alpha: {}, beta: {}, leagueAvgItp: 22.5 },
+  matchup: { gamma: {}, shrinkGames: 6, priorSeasonWeight: 0.5, dvpLambda: 0.85 },
+  sigma: {
+    sigma0: { QB: 0.45, RB: 0.7, WR: 0.8, TE: 0.85, K: 0.55, DST: 0.75 },
+    v0: { QB: 32, RB: 16, WR: 7, TE: 5, K: 2, DST: 1 },
+    delta: 0,
+  },
+  availability: { byStatus: {}, healthy: 0.97 },
+  correlation: { game: 0, team: 0.28, unit: 0.28, dstVsOppTeam: 0 },
+};
+
+export const OFF_WEEKLY_MODEL = loadWeeklyModel(OFF_STATE);
 
 export interface Amplitudes {
   game: number;

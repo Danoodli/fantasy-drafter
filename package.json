@@ -16,6 +16,7 @@
     "build:ffa-snapshot": "tsx scripts/build-ffa-snapshot.ts",
     "calibrate": "tsx scripts/calibrate-outcomes.ts",
     "calibrate:survival": "tsx scripts/calibrate-survival.ts",
+    "calibrate:weekly": "tsx scripts/calibrate-weekly.ts",
     "backtest:gate": "tsx scripts/backtest-gate.ts",
     "simulate": "tsx scripts/simulate-season.ts",
     "ocr:check": "tsx scripts/ocr-grid-check.ts",

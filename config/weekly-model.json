@@ -1,15 +1,76 @@
 {
-  "fittedOn": [],
-  "sourceWeights": { "sleeper": 1, "espn": 0, "dk": 0 },
-  "modelWeights": { "market": 1, "usage": 0 },
-  "usage": { "lambda": 0.75, "priorGames": 4, "effReliability": 0.15 },
-  "environment": { "alpha": {}, "beta": {}, "leagueAvgItp": 22.5 },
-  "matchup": { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5, "dvpLambda": 0.85 },
-  "sigma": {
-    "sigma0": { "QB": 0.45, "RB": 0.7, "WR": 0.8, "TE": 0.85, "K": 0.55, "DST": 0.75 },
-    "v0": { "QB": 32, "RB": 16, "WR": 7, "TE": 5, "K": 2, "DST": 1 },
-    "delta": 0
+  "fittedOn": [
+    2021,
+    2022,
+    2023,
+    2024
+  ],
+  "sourceWeights": {
+    "sleeper": 1,
+    "espn": 0,
+    "dk": 0
   },
-  "availability": { "byStatus": {}, "healthy": 0.97 },
-  "correlation": { "game": 0, "team": 0.28, "unit": 0.28, "dstVsOppTeam": 0 }
+  "modelWeights": {
+    "market": 1,
+    "usage": 0
+  },
+  "usage": {
+    "lambda": 0.75,
+    "priorGames": 4,
+    "effReliability": 0.15
+  },
+  "environment": {
+    "alpha": {
+      "QB": 0.053,
+      "RB": 0.16,
+      "WR": -0.043,
+      "TE": -0.098
+    },
+    "beta": {
+      "QB": -0.007,
+      "WR": 0.009,
+      "TE": -0.008
+    },
+    "leagueAvgItp": 22.4
+  },
+  "matchup": {
+    "gamma": {
+      "QB": -0.014,
+      "RB": 0.078,
+      "WR": -0.186,
+      "TE": -0.121
+    },
+    "shrinkGames": 6,
+    "priorSeasonWeight": 0.5,
+    "dvpLambda": 0.85
+  },
+  "sigma": {
+    "sigma0": {
+      "QB": 0.601,
+      "RB": 0.678,
+      "WR": 0.698,
+      "TE": 0.72,
+      "K": 0.55,
+      "DST": 0.75
+    },
+    "v0": {
+      "QB": 32,
+      "RB": 16,
+      "WR": 7,
+      "TE": 5,
+      "K": 2,
+      "DST": 1
+    },
+    "delta": 0.294
+  },
+  "availability": {
+    "byStatus": {},
+    "healthy": 0.97
+  },
+  "correlation": {
+    "game": 0.115,
+    "team": 0.21,
+    "unit": 0.265,
+    "dstVsOppTeam": 0
+  }
 }
