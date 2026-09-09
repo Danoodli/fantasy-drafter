@@ -57,6 +57,13 @@ export interface WeekOutlook {
   p50: number;
   p90: number;
   pPlay: number;
+  /**
+   * False when NO source had an opinion on this player, weighted or not.
+   * Such a player's `mean` is 0, which is otherwise indistinguishable from a
+   * bye or an Out designation — very different things for a start/sit call.
+   * A UI must render this as "no projection", never as 0.0.
+   */
+  projected: boolean;
   stats: StatLine;
   drivers: {
     baseMarket: number;
@@ -97,8 +104,26 @@ export function blendMarket(
     parts.push({ w: p.sourceWeights.dk, v: input.dk });
   }
   const wSum = parts.reduce((s, x) => s + x.w, 0);
-  if (wSum <= 0) return 0;
-  return parts.reduce((s, x) => s + x.w * x.v, 0) / wSum;
+  if (wSum > 0) return parts.reduce((s, x) => s + x.w * x.v, 0) / wSum;
+
+  // No WEIGHTED source has an opinion on this player. Fall back to any source
+  // that does, in a fixed order, rather than returning 0 — because a 0 here is
+  // not "we project zero points", it is "we have nothing", and downstream that
+  // reads as "bench him".
+  //
+  // This is not hypothetical. In the shipped off state ESPN sits at weight 0,
+  // and 179 of 526 board players (34%) had no weighted source for 2026 week 1,
+  // including Brock Bowers at ADP 34.5. ESPN had 48 of them, covering every
+  // high-ADP name.
+  //
+  // It does not break the off-state contract either: for a player Sleeper has
+  // no opinion on, "raw re-scored Sleeper" is undefined, so there is nothing to
+  // reproduce. The baseline is Sleeper WHERE SLEEPER HAS AN OPINION.
+  if (input.sleeper) return scoreStatLine(input.sleeper, scoring, isTE);
+  if (typeof input.sleeperPoints === "number") return input.sleeperPoints;
+  if (input.espn) return scoreStatLine(input.espn, scoring, isTE);
+  if (typeof input.dk === "number") return input.dk;
+  return 0;
 }
 
 export function buildWeekOutlooks(args: {
@@ -146,6 +171,12 @@ export function buildWeekOutlooks(args: {
 
     const meanIfPlays = base * mEnv * mScript * mMatch;
     const play = pPlay(player.status, isBye, p);
+    const projected =
+      Boolean(player.sleeper) ||
+      typeof player.sleeperPoints === "number" ||
+      Boolean(player.espn) ||
+      typeof player.dk === "number" ||
+      Boolean(player.usage);
     const stats = player.sleeper ?? player.usage ?? player.espn ?? {};
     const sigma = weeklySigma(player.pos, projectedVolume(player.pos, stats), p);
 
@@ -156,6 +187,7 @@ export function buildWeekOutlooks(args: {
       meanIfPlays,
       mean: meanIfPlays * play,
       sigma,
+      projected,
       p10: lognormalQuantile(meanIfPlays, sigma, 0.1),
       p50: lognormalQuantile(meanIfPlays, sigma, 0.5),
       p90: lognormalQuantile(meanIfPlays, sigma, 0.9),

@@ -173,7 +173,11 @@ async function main() {
       outlooks,
     };
     writeFileSync(join(OUT_DIR, `week-${SEASON}-${week}-${format}.json`), JSON.stringify(board));
-    console.log(`week-${SEASON}-${week}-${format}.json — ${outlooks.length} outlooks`);
+    const unprojected = outlooks.filter((o) => !o.projected).length;
+    console.log(
+      `week-${SEASON}-${week}-${format}.json — ${outlooks.length} outlooks` +
+        (unprojected ? `, ${unprojected} with NO projection from any source` : "")
+    );
   }
 
   if (DEFAULT_WEEKLY_MODEL.fittedOn.length === 0) {

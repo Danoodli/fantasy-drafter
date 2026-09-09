@@ -61,6 +61,18 @@ describe("blendMarket", () => {
   it("returns 0 when no source has an opinion", () => {
     expect(blendMarket({ id: "x", pos: "WR", team: "DET", bye: 8, status: null }, scoring, OFF)).toBe(0);
   });
+
+  it("falls back to a zero-weighted source rather than projecting a real player at 0", () => {
+    // OFF ships espn at weight 0. Without this fallback, a player Sleeper's
+    // weekly feed omits reads as 0.0 — which happened to 34% of the board,
+    // including a top-35 ADP starter.
+    const espnOnly: WeekPlayerInput = {
+      id: "bowers", pos: "TE", team: "LV", bye: 8, status: null,
+      espn: { receptions: 6, recYds: 62, recTD: 0.5 },
+    };
+    expect(OFF.sourceWeights.espn).toBe(0);
+    expect(blendMarket(espnOnly, scoring, OFF)).toBeCloseTo(6 + 6.2 + 3, 6);
+  });
 });
 
 describe("assembly", () => {
@@ -102,6 +114,18 @@ describe("assembly", () => {
     const [o] = buildWeekOutlooks({ week: 2, players: [gibbs], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
     const m = scoreStatLine(gibbs.sleeper!, scoring);
     expect(o.meanIfPlays).toBeCloseTo(m * o.drivers.envMult * o.drivers.scriptMult, 8);
+  });
+
+  it("flags a player no source has an opinion on, so 0 is not mistaken for a bye", () => {
+    const ghost: WeekPlayerInput = { id: "ghost", pos: "WR", team: "DET", bye: 8, status: null };
+    const [o] = buildWeekOutlooks({ week: 2, players: [ghost], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
+    expect(o.projected).toBe(false);
+    expect(o.mean).toBe(0);
+    // A real projection must be flagged true even when its mean is 0 for
+    // another reason — here a bye.
+    const [g] = buildWeekOutlooks({ week: 8, players: [gibbs], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
+    expect(g.projected).toBe(true);
+    expect(g.mean).toBe(0);
   });
 
   it("orders the quantiles and reports the opponent", () => {
