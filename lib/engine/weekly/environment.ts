@@ -47,7 +47,13 @@ export function envMult(
 export function scriptMult(pos: Position, ownSpread: number, p: WeeklyModelParams): number {
   const beta = p.environment.beta[pos];
   if (!beta) return 1;
-  // ownSpread negative = favored, so negate to make "favoredness" positive.
-  const favoredness = -ownSpread / 7;
-  return Math.max(0.4, 1 - beta * favoredness);
+  // Expressed on ownSpread DIRECTLY (negative = favored), matching the spec and
+  // the calibration script. Do not rewrite this as `1 - beta * favoredness`:
+  // that is algebraically identical but the double negative is what made an
+  // earlier draft of this plan invert beta in three places at once.
+  //
+  // So with beta.RB < 0 a favorite's backs go UP (favorites run out the clock),
+  // and with beta.WR > 0 an underdog's receivers go UP (underdogs throw).
+  // Floor at 0.4: a 30-point spread should move a back's projection, not erase it.
+  return Math.max(0.4, 1 + beta * (ownSpread / 7));
 }

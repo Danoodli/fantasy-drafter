@@ -51,8 +51,11 @@ describe("environment multipliers", () => {
   });
 
   it("never returns a negative or zero multiplier, however extreme the spread", () => {
-    for (const spread of [-30, -20, 0, 20, 30]) {
-      expect(scriptMult("RB", spread, ON)).toBeGreaterThan(0);
-    }
+    const steep: WeeklyModelParams = {
+      ...OFF,
+      environment: { ...ON.environment, beta: { RB: -0.5 } },
+    };
+    expect(scriptMult("RB", 30, steep)).toBe(0.4); // unclamped would be -1.14
+    expect(scriptMult("RB", -30, steep)).toBeGreaterThan(1);
   });
 });
