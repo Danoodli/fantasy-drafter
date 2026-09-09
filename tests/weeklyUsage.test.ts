@@ -125,5 +125,8 @@ describe("projectUsageStatLine", () => {
     expect(rb.rushYds).toBeGreaterThan(0);
     expect(rb.passYds ?? 0).toBe(0);
     expect(qb.passYds).toBeGreaterThan(0);
+    // Carries are deliberately NOT position-gated: a QB's own carry share is
+    // real scramble usage. Asserted so the asymmetry is documented, not implied.
+    expect(qb.rushYds).toBeGreaterThan(0);
   });
 });

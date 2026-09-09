@@ -39,6 +39,27 @@ describe("weekly model config", () => {
     ).toThrow(/range/i);
   });
 
+  it("validates the SHIPPED config on import, not just on demand", () => {
+    // DEFAULT_WEEKLY_MODEL is loadWeeklyModel(json), not a bare cast. Before
+    // this, every guard below was dead code in production: the correlation
+    // nesting check never ran on the file the engine actually uses, and
+    // calibrate-weekly.ts WRITES that file.
+    expect(() => loadWeeklyModel(DEFAULT_WEEKLY_MODEL)).not.toThrow();
+  });
+
+  it("rejects out-of-range levers, naming the offending field", () => {
+    const bad = (patch: Record<string, unknown>) => () =>
+      loadWeeklyModel({ ...DEFAULT_WEEKLY_MODEL, ...patch });
+    // A zero lambda collapses a recency weight sum; a zero denominator NaNs a blend.
+    expect(bad({ usage: { ...DEFAULT_WEEKLY_MODEL.usage, lambda: 0 } })).toThrow(/usage\.lambda/);
+    expect(bad({ usage: { ...DEFAULT_WEEKLY_MODEL.usage, priorGames: 0 } })).toThrow(/usage\.priorGames/);
+    expect(bad({ matchup: { ...DEFAULT_WEEKLY_MODEL.matchup, dvpLambda: 0 } })).toThrow(/matchup\.dvpLambda/);
+    expect(bad({ environment: { ...DEFAULT_WEEKLY_MODEL.environment, leagueAvgItp: 0 } })).toThrow(/leagueAvgItp/);
+    expect(bad({ sigma: { ...DEFAULT_WEEKLY_MODEL.sigma, delta: -1 } })).toThrow(/sigma\.delta/);
+    expect(bad({ sourceWeights: { sleeper: 0, espn: 0, dk: 0 } })).toThrow(/all zero/);
+    expect(bad({ availability: { byStatus: { Questionable: 1.5 } } })).toThrow(/Questionable/);
+  });
+
   it("maps positions to correlation units", () => {
     expect(unitOf("QB")).toBe("pass");
     expect(unitOf("WR")).toBe("pass");
