@@ -306,3 +306,17 @@ export interface EngineOutput {
   strategyWarning: string | null; // "Your strategy is no longer optimal…"
   computeMs: number;
 }
+
+/** One week's outlooks, emitted by scripts/build-week.ts, read by the client. */
+export interface WeekBoard {
+  meta: {
+    season: number;
+    week: number;
+    builtAt: string;
+    lane: string;
+    scoring: ScoringFormat;
+    sources: { name: string; fetchedAt: string; fromFixture: boolean }[];
+    warnings: string[];
+  };
+  outlooks: import("./engine/weekly/outlook").WeekOutlook[];
+}

@@ -21,7 +21,13 @@ export function num(v: string | undefined): number {
 /**
  * One team code per franchise, in the app's ESPN-style spelling. nflverse
  * writes LA / JAX / LV (LV retroactively for Oakland); FFA writes LAR / JAC /
- * LVR / OAK. Free agents ("FA", "NA") become "" so they never join a team.
+ * LVR / OAK. ESPN's public scoreboard API (used by lib/etl/weekly/vegas.ts)
+ * spells Washington "WSH", while the kona fantasy API, nflverse and this
+ * app's board all use "WAS" — verified against the season board and the
+ * committed nflverse fixture (both use "WAS"), and ESPN's scoreboard, where
+ * every 2026 week-1 competitor was "WSH" (found when Washington's whole
+ * roster came back with no Vegas line and no opponent in build-week.ts).
+ * Free agents ("FA", "NA") become "" so they never join a team.
  */
 export function canonicalTeam(code: string | undefined): string {
   const c = (code ?? "").toUpperCase().trim();
@@ -32,6 +38,7 @@ export function canonicalTeam(code: string | undefined): string {
     LVR: "LV",
     OAK: "LV",
     SD: "LAC",
+    WSH: "WAS",
     FA: "",
     NA: "",
   };

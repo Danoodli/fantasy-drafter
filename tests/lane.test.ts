@@ -6,3 +6,14 @@ describe("parseLane", () => {
   it("accepts --lane=full", () => expect(parseLane(["x", "--lane=full"])).toBe("full"));
   it("rejects nonsense", () => expect(() => parseLane(["x", "--lane=turbo"])).toThrow(/turbo/));
 });
+
+describe("weekly lane", () => {
+  it("parses --lane=weekly", () => {
+    expect(parseLane(["--lane=weekly"])).toBe("weekly");
+  });
+
+  it("still defaults to full and still rejects nonsense", () => {
+    expect(parseLane([])).toBe("full");
+    expect(() => parseLane(["--lane=hourly"])).toThrow(/expected fast\|full\|weekly/);
+  });
+});

@@ -30,7 +30,7 @@ import {
 import { baselines } from "../lib/engine/baselines";
 import { assignTiers } from "../lib/engine/tiers";
 import { fetchSos, type SosTable } from "../lib/etl/schedule";
-import { parseLane, type Lane } from "../lib/etl/lane";
+import { parseLane } from "../lib/etl/lane";
 import { carryForwardFp } from "../lib/etl/carryForward";
 import { matchNewsToPlayers, type NewsItem } from "../lib/etl/newsMatch";
 import { parseEspnInjuries, type EspnInjuriesJson } from "../lib/client/espnInjuries";
@@ -324,7 +324,7 @@ function buildBoard(
   } | null,
   injuries: SourceResult<EspnInjuriesJson>,
   rss: NewsItem[],
-  lane: Lane
+  lane: "fast" | "full"
 ): Board {
   const warnings: string[] = [];
 
@@ -553,6 +553,9 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
   const LANE = parseLane(process.argv);
+  if (LANE === "weekly") {
+    throw new Error("build-board does not support --lane=weekly; use `pnpm build:week` instead.");
+  }
   const slowOnly = { fixtureOnly: LANE === "fast" };
   console.log(
     `lane: ${LANE}${LANE === "fast" ? " (Sleeper players, FantasyPros, DynastyProcess, nflverse from fixtures)" : ""}`
