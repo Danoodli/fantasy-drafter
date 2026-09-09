@@ -111,7 +111,7 @@ Implied team points from the line: `ITP_dog = total/2 − |spread|/2`,
 `ITP_fav = total/2 + |spread|/2`.
 
 - `envMult = (ITP / leagueAvgITP) ^ α_pos`
-- `scriptMult = 1 + β_pos · (ownSpread / 7)` — favorites run out the clock
+- `scriptMult = 1 + β_pos · (ownSpread / 7)` — on ownSpread DIRECTLY (negative = favored); β_RB < 0 raises a favorite's backs, β_WR > 0 raises an underdog's receivers. The calibration must regress on the same quantity — favorites run out the clock
   (β_RB > 0), underdogs throw (β_WR, β_QB > 0 on the dog side). Signs come
   from the fit, not from folklore.
 - **DST inverts both**: a defense wants its *opponent's* implied points to be

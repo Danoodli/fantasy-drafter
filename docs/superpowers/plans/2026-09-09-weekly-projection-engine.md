@@ -956,15 +956,21 @@ export function envMult(
 
 /**
  * Game script. Favorites run out the clock; underdogs throw. Expressed per
- * seven points of spread so the coefficient reads as "per touchdown of spread".
+ * seven points of spread on `ownSpread` itself, so the coefficient reads as
+ * "per touchdown of spread" and carries the same sign the calibration fits.
  * Floored well above zero: a 30-point spread should not zero out a running back.
  */
 export function scriptMult(pos: Position, ownSpread: number, p: WeeklyModelParams): number {
   const beta = p.environment.beta[pos];
   if (!beta) return 1;
-  // ownSpread negative = favored, so negate to make "favoredness" positive.
-  const favoredness = -ownSpread / 7;
-  return Math.max(0.4, 1 + beta * favoredness);
+  // Expressed on ownSpread DIRECTLY (negative = favored), matching the spec and
+  // the calibration script. Do not rewrite this as `1 - beta * favoredness`:
+  // that is algebraically identical but the double negative is what made an
+  // earlier draft of this plan invert beta in three places at once.
+  //
+  // So with beta.RB < 0 a favorite's backs go UP (favorites run out the clock),
+  // and with beta.WR > 0 an underdog's receivers go UP (underdogs throw).
+  return Math.max(0.4, 1 + beta * (ownSpread / 7));
 }
 ```
 
@@ -4051,7 +4057,10 @@ function main() {
   for (const pos of POSITIONS) {
     const sub = active.filter((r) => r.pos === pos);
     const a = params.environment.alpha[pos] ?? 0;
-    const xs = sub.map((r) => -r.spr / 7);
+    // On ownSpread directly, matching scriptMult in lib/engine/weekly/environment.ts.
+    // Regressing on -spr/7 here while the runtime applies +spr/7 would invert
+    // every fitted game-script adjustment, silently and undetectably.
+    const xs = sub.map((r) => r.spr / 7);
     const ys = sub.map(
       (r) => Math.log(r.actual / r.base) - a * Math.log(Math.max(0.2, r.itpOwn / avgItp))
     );
@@ -4071,7 +4080,7 @@ function main() {
       (r) =>
         Math.log(r.actual / r.base) -
         a * Math.log(Math.max(0.2, r.itpOwn / avgItp)) -
-        Math.log(Math.max(0.4, 1 + b * (-r.spr / 7)))
+        Math.log(Math.max(0.4, 1 + b * (r.spr / 7)))
     );
     const g = olsSlope(xs, ys);
     if (Math.abs(g) > 0.01) params.matchup.gamma[pos] = round3(g);
@@ -4124,7 +4133,7 @@ function adjustedMean(
   const g = p.matchup.gamma[r.pos] ?? 0;
   const ratio = ratios.get(r);
   const mEnv = a ? Math.pow(Math.max(0.2, r.itpOwn / avgItp), a) : 1;
-  const mScript = b ? Math.max(0.4, 1 + b * (-r.spr / 7)) : 1;
+  const mScript = b ? Math.max(0.4, 1 + b * (r.spr / 7)) : 1;
   const mMatch = g && ratio ? Math.pow(Math.max(0.2, ratio), g) : 1;
   return Math.max(0.1, r.base * mEnv * mScript * mMatch);
 }
