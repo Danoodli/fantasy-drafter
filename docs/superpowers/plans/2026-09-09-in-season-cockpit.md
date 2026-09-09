@@ -325,11 +325,11 @@ describe("bestLineup", () => {
       cfg({ rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 2, K: 1, DST: 1 } })
     );
     const flex = l.starters.filter((s) => s.slot === "FLEX").map((s) => s.player.id).sort();
-    // Dedicated slots take the best at each position first: WR wr1 14 + wr3 13,
-    // TE te2 12. Leftovers are rb3 10, wr2 11, te1 8 -> the two flex slots take
-    // wr2 and rb3, and te1 is the only bench player.
+    // Dedicated slots take the best at each position first: RB rb1 12 + rb3 10,
+    // WR wr1 14 + wr3 13, TE te2 12. Leftovers are rb2 9, wr2 11, te1 8 -> the
+    // two flex slots take wr2 and rb2, and te1 is the only bench player.
     expect(l.starters.find((s) => s.slot === "TE")?.player.id).toBe("te2");
-    expect(flex).toEqual(["rb3", "wr2"]);
+    expect(flex).toEqual(["rb2", "wr2"]);
     expect(l.benched.map((b) => b.id)).toEqual(["te1"]);
     expect(l.total).toBeCloseTo(20 + 12 + 9 + 10 + 14 + 13 + 11 + 12 + 7 + 6, 6);
   });
