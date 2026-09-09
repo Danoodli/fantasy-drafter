@@ -309,8 +309,12 @@ describe("bestLineup", () => {
 
   it("puts the best leftover in the flex, whatever its position", () => {
     const l = bestLineup([p("qb1", "QB", 20), p("rb1", "RB", 12), p("rb2", "RB", 9), p("rb3", "RB", 8), p("wr1", "WR", 14), p("wr2", "WR", 11), p("wr3", "WR", 13), p("te1", "TE", 8), p("k1", "K", 7), p("d1", "DST", 6)], cfg());
-    // Leftovers are rb3 8, wr3 13, so the flex takes wr3.
-    expect(l.starters.find((s) => s.slot === "FLEX")?.player.id).toBe("wr3");
+    // The two WR slots take the two best WRs (wr1 14, wr3 13) regardless of
+    // input order, so the leftovers are rb3 8 and wr2 11: the flex takes wr2.
+    expect(l.starters.filter((s) => s.slot === "WR").map((s) => s.player.id).sort()).toEqual(["wr1", "wr3"]);
+    expect(l.starters.find((s) => s.slot === "FLEX")?.player.id).toBe("wr2");
+    expect(l.total).toBeCloseTo(20 + 12 + 9 + 14 + 13 + 11 + 8 + 7 + 6, 6);
+    expect(l.benched.map((b) => b.id)).toEqual(["rb3"]);
   });
 
   it("fills two flex slots with the two best eligible leftovers", () => {
@@ -321,8 +325,13 @@ describe("bestLineup", () => {
       cfg({ rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 2, K: 1, DST: 1 } })
     );
     const flex = l.starters.filter((s) => s.slot === "FLEX").map((s) => s.player.id).sort();
-    // Leftovers: rb3 10, wr3 13, te2 12 -> take wr3 and te2.
-    expect(flex).toEqual(["te2", "wr3"]);
+    // Dedicated slots take the best at each position first: WR wr1 14 + wr3 13,
+    // TE te2 12. Leftovers are rb3 10, wr2 11, te1 8 -> the two flex slots take
+    // wr2 and rb3, and te1 is the only bench player.
+    expect(l.starters.find((s) => s.slot === "TE")?.player.id).toBe("te2");
+    expect(flex).toEqual(["rb3", "wr2"]);
+    expect(l.benched.map((b) => b.id)).toEqual(["te1"]);
+    expect(l.total).toBeCloseTo(20 + 12 + 9 + 10 + 14 + 13 + 11 + 12 + 7 + 6, 6);
   });
 
   it("handles superflex, where the second-best QB can beat every flex option", () => {
@@ -2545,7 +2554,7 @@ and add to `tests/teams.test.ts`:
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/sleeperLeague.test.ts tests/teams.test.ts`
-Expected: PASS — 22 in sleeperLeague, 9 in teams.
+Expected: PASS — 21 in sleeperLeague, 9 in teams.
 
 - [ ] **Step 7: Write the Sleeper tab**
 
@@ -5350,7 +5359,7 @@ export function histRowToBoardPlayer(row: HistRow, scoring: ScoringSettings): Bo
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/seasonReplay.test.ts`
-Expected: PASS, 7 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Write the script**
 
