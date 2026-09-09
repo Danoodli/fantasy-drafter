@@ -186,6 +186,13 @@ export default function Setup({
         >
           Newsroom →
         </Link>
+        <Link
+          href="/season"
+          className="ml-2 mt-2 inline-block rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-ink-dim hover:text-ink"
+          title="In-season start/sit — lineup and swap advice once your draft is over"
+        >
+          In-season →
+        </Link>
       </header>
 
       {resume && (
