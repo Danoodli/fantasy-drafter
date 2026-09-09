@@ -84,6 +84,18 @@ describe("weekly model config", () => {
     ).toThrow(/range/i);
   });
 
+  it("rejects a game/DST pair that leaves a defense no residual variance", () => {
+    // Each value is individually legal and the nesting chain holds; only their
+    // SUM is impossible. Without this check the DST residual amplitude clamps
+    // to 0 and every defense silently carries a total variance of 1.2.
+    expect(() =>
+      loadWeeklyModel({
+        ...DEFAULT_WEEKLY_MODEL,
+        correlation: { game: 0.6, team: 0.7, unit: 0.8, dstVsOppTeam: 0.6 },
+      })
+    ).toThrow(/residual variance/i);
+  });
+
   it("validates the SHIPPED config on import, not just on demand", () => {
     // DEFAULT_WEEKLY_MODEL is loadWeeklyModel(json), not a bare cast. Before
     // this, every guard below was dead code in production: the correlation
@@ -251,6 +263,18 @@ function assertCorrelation(c: CorrelationParams): void {
   if (!(c.game <= c.team && c.team <= c.unit)) {
     throw new Error(
       `weekly-model correlation nesting violated: expected game (${c.game}) <= team (${c.team}) <= unit (${c.unit})`
+    );
+  }
+  // A DST's variance decomposes as game + dstVsOppTeam + residual, so the
+  // first two must leave room for a real residual. Each being individually in
+  // [0,1] is not enough: at game 0.6 and dstVsOppTeam 0.6 the residual
+  // amplitude would be the square root of a negative number, and a clamp there
+  // would silently give every defense a total variance of 1.2 instead of 1 —
+  // wider ceilings than the model intends. Validate, don't clamp.
+  if (c.game + c.dstVsOppTeam > 1) {
+    throw new Error(
+      `weekly-model correlation.game (${c.game}) + dstVsOppTeam (${c.dstVsOppTeam}) = ` +
+        `${c.game + c.dstVsOppTeam} exceeds 1, leaving no residual variance for a DST`
     );
   }
 }
@@ -2619,7 +2643,7 @@ The other half of the foundation. Generalizes `makeTeamShocks` from one team-wee
 - Test: `tests/weekSim.test.ts`
 
 **Interfaces:**
-- Consumes: `makeRng` and `gaussian` (`gaussian` currently lives in `lib/engine/outcome.ts` and is already exported — import it from there, do not duplicate it), `correlationAmplitudes`/`unitOf`/`WeeklyModelParams` (Task 1), `scaleStatLine`/`dkBonusPoints` (Task 10), `scoreStatLine`.
+- Consumes: `makeRng` from `lib/engine/montecarlo.ts` and `gaussian` from `lib/engine/outcome.ts` (already exported — import it, do not duplicate the Box–Muller), `correlationAmplitudes`/`unitOf`/`WeeklyModelParams` (Task 1), `scaleStatLine`/`dkBonusPoints` (Task 10). NOT `scoreStatLine`: DK bonuses are flat, so the sampler needs no scoring settings.
 - Produces:
   - `interface WeekSimPlayer { id: string; pos: Position; team: string; gameId: string; opp: string; meanIfPlays: number; sigma: number; pPlay: number; stats: StatLine }`
   - `sampleWeek(players: WeekSimPlayer[], p: WeeklyModelParams, rng: () => number, opts?: { dkBonuses?: boolean }): Float64Array`
@@ -2821,13 +2845,26 @@ export function sampleWeek(
 ): Float64Array {
   const a = correlationAmplitudes(p.correlation);
   const aDst = Math.sqrt(p.correlation.dstVsOppTeam);
-  // Residual amplitude for a DST, so its variance still sums to one.
+  // Residual amplitude for a DST, so its variance sums to exactly one.
+  // loadWeeklyModel guarantees game + dstVsOppTeam <= 1, so the max() is
+  // unreachable through the config path and exists only for params objects
+  // built by hand in tests, which bypass that validation. It must never be
+  // the thing that "fixes" a bad config: a clamp here would leave a DST with
+  // a total variance above 1 and no error anywhere.
   const aDstOwn = Math.sqrt(Math.max(0, 1 - p.correlation.game - p.correlation.dstVsOppTeam));
   const shock = makeShocks(rng);
   const out = new Float64Array(players.length);
 
   for (let i = 0; i < players.length; i++) {
     const pl = players[i];
+    // NOTE for callers assembling `players`: a skipped player consumes no
+    // random draws while a playing one consumes at least one, so the stream
+    // every LATER player sees depends on how many earlier ones were skipped.
+    // Two runs with the same seed but a different roster composition — say
+    // after a Questionable flips to Out — diverge for every subsequent player,
+    // not just the changed one. Inherent to shared-stream Monte Carlo (the
+    // draft sim has the same property); it means "same seed" reproduces a run
+    // only for an identical player array.
     if (pl.pPlay <= 0 || pl.meanIfPlays <= 0) continue;
     if (rng() > pl.pPlay) continue; // inactive this iteration: exactly zero
 
