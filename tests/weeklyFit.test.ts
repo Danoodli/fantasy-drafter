@@ -1,0 +1,92 @@
+import { describe, it, expect } from "vitest";
+import { olsSlope, stdev, pearson, fitSigmaByVolume, empiricalPlayRate, pitCoverage } from "../lib/engine/weekly/fit";
+
+describe("olsSlope", () => {
+  it("recovers a known slope", () => {
+    const xs = [1, 2, 3, 4, 5];
+    const ys = xs.map((x) => 3 + 2 * x);
+    expect(olsSlope(xs, ys)).toBeCloseTo(2, 10);
+  });
+  it("is zero when x has no variance, rather than NaN", () => {
+    expect(olsSlope([2, 2, 2], [1, 5, 9])).toBe(0);
+  });
+  it("is zero on fewer than three points — a two-point 'fit' is a line, not evidence", () => {
+    expect(olsSlope([1, 2], [1, 4])).toBe(0);
+  });
+});
+
+describe("stdev and pearson", () => {
+  it("stdev of a constant is zero", () => expect(stdev([4, 4, 4])).toBe(0));
+  it("pearson of identical series is 1", () => expect(pearson([1, 2, 3], [1, 2, 3])).toBeCloseTo(1, 10));
+  it("pearson of opposed series is -1", () => expect(pearson([1, 2, 3], [3, 2, 1])).toBeCloseTo(-1, 10));
+  it("pearson is 0 when a series is flat", () => expect(pearson([1, 1, 1], [1, 2, 3])).toBe(0));
+});
+
+describe("fitSigmaByVolume", () => {
+  it("recovers sigma0 and a positive delta from synthetic data where low volume is noisier", () => {
+    const points: { volume: number; logResidual: number }[] = [];
+    // sigma(v) = 0.8 * (8/v)^0.4 ; emit +/- sigma so the bucket sd equals it.
+    for (const v of [2, 4, 8, 16, 32]) {
+      const s = 0.8 * Math.pow(8 / v, 0.4);
+      for (let i = 0; i < 200; i++) points.push({ volume: v, logResidual: i % 2 ? s : -s });
+    }
+    const { sigma0, delta } = fitSigmaByVolume(points, 8);
+    expect(sigma0).toBeCloseTo(0.8, 1);
+    expect(delta).toBeGreaterThan(0.25);
+    expect(delta).toBeLessThan(0.55);
+  });
+
+  it("returns delta 0 when volume carries no information", () => {
+    const points = Array.from({ length: 500 }, (_, i) => ({ volume: 1 + (i % 20), logResidual: i % 2 ? 0.5 : -0.5 }));
+    expect(Math.abs(fitSigmaByVolume(points, 8).delta)).toBeLessThan(0.1);
+  });
+});
+
+describe("empiricalPlayRate", () => {
+  it("measures P(played | status) per designation", () => {
+    const rows = [
+      { status: "Questionable", played: true },
+      { status: "Questionable", played: true },
+      { status: "Questionable", played: false },
+      { status: "Questionable", played: true },
+      { status: "Out", played: false },
+      { status: "Out", played: false },
+      { status: null, played: true },
+    ];
+    const t = empiricalPlayRate(rows);
+    expect(t.Questionable).toBeCloseTo(0.75, 10);
+    expect(t.Out).toBe(0);
+    // A null designation is not a status and must not appear in the table.
+    expect(t.null).toBeUndefined();
+  });
+
+  it("ignores designations with too few observations to mean anything", () => {
+    expect(empiricalPlayRate([{ status: "Sus", played: false }]).Sus).toBeUndefined();
+  });
+});
+
+describe("pitCoverage", () => {
+  it("reports ~10% below p10 and ~10% above p90 for a correctly-specified model", () => {
+    // Lognormal with mean 10, sigma 0.6; sample its own quantiles evenly.
+    const pairs = [];
+    for (let i = 1; i < 1000; i++) {
+      const q = i / 1000;
+      const mu = Math.log(10) - 0.18;
+      const actual = Math.exp(mu + 0.6 * Math.sqrt(2) * inverseErf(2 * q - 1));
+      pairs.push({ actual, mean: 10, sigma: 0.6 });
+    }
+    const { below10, above90 } = pitCoverage(pairs);
+    expect(below10).toBeGreaterThan(0.07);
+    expect(below10).toBeLessThan(0.13);
+    expect(above90).toBeGreaterThan(0.07);
+    expect(above90).toBeLessThan(0.13);
+  });
+});
+
+/** Tiny inverse error function, test-local — the module under test must not need it. */
+function inverseErf(x: number): number {
+  const a = 0.147;
+  const ln = Math.log(1 - x * x);
+  const t1 = 2 / (Math.PI * a) + ln / 2;
+  return Math.sign(x) * Math.sqrt(Math.sqrt(t1 * t1 - ln / a) - t1);
+}
