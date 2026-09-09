@@ -65,13 +65,26 @@ export function sampleWeek(
 ): Float64Array {
   const a = correlationAmplitudes(p.correlation);
   const aDst = Math.sqrt(p.correlation.dstVsOppTeam);
-  // Residual amplitude for a DST, so its variance still sums to one.
+  // Residual amplitude for a DST, so its variance sums to exactly one.
+  // loadWeeklyModel guarantees game + dstVsOppTeam <= 1, so the max() is
+  // unreachable through the config path and exists only for params objects
+  // built by hand in tests, which bypass that validation. It must never be
+  // the thing that "fixes" a bad config: a clamp here would leave a DST with
+  // a total variance above 1 and no error anywhere.
   const aDstOwn = Math.sqrt(Math.max(0, 1 - p.correlation.game - p.correlation.dstVsOppTeam));
   const shock = makeShocks(rng);
   const out = new Float64Array(players.length);
 
   for (let i = 0; i < players.length; i++) {
     const pl = players[i];
+    // NOTE for callers assembling `players`: a skipped player consumes no
+    // random draws while a playing one consumes at least one, so the stream
+    // every LATER player sees depends on how many earlier ones were skipped.
+    // Two runs with the same seed but a different roster composition — say
+    // after a Questionable flips to Out — diverge for every subsequent player,
+    // not just the changed one. Inherent to shared-stream Monte Carlo (the
+    // draft sim has the same property); it means "same seed" reproduces a run
+    // only for an identical player array.
     if (pl.pPlay <= 0 || pl.meanIfPlays <= 0) continue;
     if (rng() > pl.pPlay) continue; // inactive this iteration: exactly zero
 

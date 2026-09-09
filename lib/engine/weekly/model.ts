@@ -99,6 +99,18 @@ function assertCorrelation(c: CorrelationParams): void {
       `weekly-model correlation nesting violated: expected game (${c.game}) <= team (${c.team}) <= unit (${c.unit})`
     );
   }
+  // A DST's variance decomposes as game + dstVsOppTeam + residual, so the
+  // first two must leave room for a real residual. Each being individually in
+  // [0,1] is not enough: at game 0.6 and dstVsOppTeam 0.6 the residual
+  // amplitude would be the square root of a negative number, and a clamp there
+  // would silently give every defense a total variance of 1.2 instead of 1 —
+  // wider ceilings than the model intends. Validate, don't clamp.
+  if (c.game + c.dstVsOppTeam > 1) {
+    throw new Error(
+      `weekly-model correlation.game (${c.game}) + dstVsOppTeam (${c.dstVsOppTeam}) = ` +
+        `${c.game + c.dstVsOppTeam} exceeds 1, leaving no residual variance for a DST`
+    );
+  }
 }
 
 /** Range check with a message that names the field, so a bad config is diagnosable. */

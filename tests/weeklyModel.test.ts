@@ -39,6 +39,18 @@ describe("weekly model config", () => {
     ).toThrow(/range/i);
   });
 
+  it("rejects a game/DST pair that leaves a defense no residual variance", () => {
+    // Each value is individually legal and the nesting chain holds; only their
+    // SUM is impossible. Without this check the DST residual amplitude clamps
+    // to 0 and every defense silently carries a total variance of 1.2.
+    expect(() =>
+      loadWeeklyModel({
+        ...DEFAULT_WEEKLY_MODEL,
+        correlation: { game: 0.6, team: 0.7, unit: 0.8, dstVsOppTeam: 0.6 },
+      })
+    ).toThrow(/residual variance/i);
+  });
+
   it("validates the SHIPPED config on import, not just on demand", () => {
     // DEFAULT_WEEKLY_MODEL is loadWeeklyModel(json), not a bare cast. Before
     // this, every guard below was dead code in production: the correlation
