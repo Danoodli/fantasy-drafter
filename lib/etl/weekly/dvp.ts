@@ -30,8 +30,8 @@ export function buildDvp(
   opts: { season: number; throughWeek: number; lambda: number }
 ): DvpResult {
   const { season, throughWeek, lambda } = opts;
-  // team → pos → { weightedPts, weight }
-  const acc: Record<string, Partial<Record<Position, { pts: number; w: number }>>> = {};
+  // team → pos → weighted points sum
+  const acc: Record<string, Partial<Record<Position, number>>> = {};
   const weeks: Record<string, Set<number>> = {};
 
   for (const r of rows) {
@@ -46,9 +46,7 @@ export function buildDvp(
     // Recency weight: lambda^(weeks ago). lambda = 1 is a flat mean.
     const w = Math.pow(lambda, throughWeek - 1 - week);
     const byPos = (acc[def] ??= {});
-    const cell = (byPos[pos] ??= { pts: 0, w: 0 });
-    cell.pts += pts * w;
-    cell.w += w;
+    byPos[pos] = (byPos[pos] ?? 0) + pts * w;
     (weeks[def] ??= new Set()).add(week);
   }
 
@@ -57,18 +55,20 @@ export function buildDvp(
   for (const [team, byPos] of Object.entries(acc)) {
     const weekCount = weeks[team]?.size ?? 0;
     gamesByTeam[team] = weekCount;
-    if (weekCount === 0) continue;
     // Total weighted points allowed, spread over the weeks observed: this is
     // per-GAME points allowed to the position group, not per player.
     const totalW = Array.from(weeks[team]).reduce(
       (s, wk) => s + Math.pow(lambda, throughWeek - 1 - wk),
       0
     );
+    // A zero weight sum would make every entry NaN and poison the table
+    // silently. Reachable with lambda 0, or by underflow on a tiny lambda.
+    if (!(totalW > 0)) continue;
     const out: Partial<Record<Position, number>> = {};
     for (const pos of DVP_POS) {
-      const cell = byPos[pos];
-      if (!cell) continue;
-      out[pos] = cell.pts / totalW;
+      const weightedPts = byPos[pos];
+      if (typeof weightedPts !== "number") continue;
+      out[pos] = weightedPts / totalW;
     }
     table[team] = out;
   }

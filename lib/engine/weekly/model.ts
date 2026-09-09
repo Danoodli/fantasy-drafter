@@ -37,6 +37,12 @@ export interface WeeklyModelParams {
     gamma: Partial<Record<Position, number>>;
     shrinkGames: number;
     priorSeasonWeight: number;
+    /**
+     * Recency weight for the rolling defense-vs-position table: a week's
+     * weight is dvpLambda^(weeksAgo). 1 is a flat mean. Must be > 0 — a
+     * lambda of exactly 0 makes the weight sum 0 and every entry NaN.
+     */
+    dvpLambda: number;
   };
   sigma: {
     sigma0: Partial<Record<Position, number>>;

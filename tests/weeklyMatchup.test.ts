@@ -6,7 +6,7 @@ import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/week
 const OFF = DEFAULT_WEEKLY_MODEL;
 const ON: WeeklyModelParams = {
   ...OFF,
-  matchup: { gamma: { RB: 0.5, WR: 0.5 }, shrinkGames: 6, priorSeasonWeight: 0.5 },
+  matchup: { gamma: { RB: 0.5, WR: 0.5 }, shrinkGames: 6, priorSeasonWeight: 0.5, dvpLambda: 0.85 },
 };
 
 function row(o: Partial<Record<string, string>>): Record<string, string> {
@@ -52,6 +52,14 @@ describe("buildDvp", () => {
   it("ignores weeks at or after throughWeek — no leakage into the week being predicted", () => {
     const rows = [row({ week: "5", opponent_team: "CHI", rushing_yards: "100" })];
     expect(buildDvp(rows, { season: 2025, throughWeek: 5, lambda: 1 }).table.CHI).toBeUndefined();
+  });
+
+  it("guards against zero weight sum when lambda is 0", () => {
+    const rows = [row({ week: "1", opponent_team: "CHI", rushing_yards: "100" })];
+    const result = buildDvp(rows, { season: 2025, throughWeek: 3, lambda: 0 });
+    // With lambda = 0, totalW sums to 0 and every entry would be NaN. The guard
+    // prevents that by skipping the defense entirely.
+    expect(result.table.CHI).toBeUndefined();
   });
 });
 

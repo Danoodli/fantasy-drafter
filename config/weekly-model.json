@@ -4,7 +4,7 @@
   "modelWeights": { "market": 1, "usage": 0 },
   "usage": { "lambda": 0.75, "priorGames": 4, "effReliability": 0.15 },
   "environment": { "alpha": {}, "beta": {}, "leagueAvgItp": 22.5 },
-  "matchup": { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5 },
+  "matchup": { "gamma": {}, "shrinkGames": 6, "priorSeasonWeight": 0.5, "dvpLambda": 0.85 },
   "sigma": {
     "sigma0": { "QB": 0.45, "RB": 0.7, "WR": 0.8, "TE": 0.85, "K": 0.55, "DST": 0.75 },
     "v0": { "QB": 32, "RB": 16, "WR": 7, "TE": 5, "K": 2, "DST": 1 },
