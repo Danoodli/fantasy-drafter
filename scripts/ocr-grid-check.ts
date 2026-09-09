@@ -108,6 +108,8 @@ async function main() {
   });
   writeFileSync(join(outDir, "mock-truth.json"), JSON.stringify(truth));
   const grid = page.locator("[data-mock-grid]");
+  // Next's dev overlay badge sits on the bottom-left cell; production has none.
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const raw = await grid.screenshot({ type: "png" });
   writeFileSync(join(outDir, "mock-raw.png"), raw);
 

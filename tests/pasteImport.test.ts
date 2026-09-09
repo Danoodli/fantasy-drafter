@@ -331,3 +331,21 @@ describe("parsePastedPicks on a real board copy: empty cells and tag variants", 
     expect(looksLikeBoard("Puka Nacua / LAR WR\nR1, P2 - Team 7", 1)).toBe(false);
   });
 });
+
+describe("parsePastedPicks on a real browser copy of the board", () => {
+  // tests/fixtures/board-copy-14.txt is what Chrome puts on the clipboard when the
+  // whole board DOM is selected and copied at 14 picks: header position counts,
+  // every cell's label / arrow / overall / blank line, the "On the clock" cell,
+  // and every EMPTY cell's label and overall through 15.12.
+  const text = readFileSync(join(process.cwd(), "tests", "fixtures", "board-copy-14.txt"), "utf8");
+  const truth: { picks: { pickNo: number; name: string }[] } = JSON.parse(
+    readFileSync(join(process.cwd(), "tests", "fixtures", "board-copy-14.truth.json"), "utf8")
+  );
+
+  it("places all 14 picks at their own numbers — labels lead the name even though the paste starts with header junk", () => {
+    const r = parsePastedPicks(text, players, none, { teams: 12, room: { order: "snake", knownCount: 0, placed: new Map() } });
+    const got = r.matches.filter((m) => m.player).map((m) => [m.line.pickNo, m.player!.name]);
+    expect(got).toEqual(truth.picks.map((p) => [p.pickNo, p.name]));
+    expect(r.matches.filter((m) => !m.player)).toEqual([]); // "On the clock" and the counts are not names
+  });
+});

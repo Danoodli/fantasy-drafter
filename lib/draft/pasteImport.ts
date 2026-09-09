@@ -75,7 +75,7 @@ const TEAM_CODES = new Set([
 const POS_CODES = new Set(["qb", "rb", "wr", "te", "k", "pk", "dst", "def", "d", "st", "flex", "bn", "ir"]);
 /** Words that never belong to a player name. */
 const NOISE = new Set([
-  "round", "rd", "pick", "pk", "overall", "team", "drafted", "by", "selected", "selects", "bye", "pts",
+  "round", "rd", "pick", "pk", "overall", "team", "drafted", "by", "selected", "selects", "bye", "pts", "on", "clock",
   "points", "proj", "adp", "rank", "bench", "owner", "manager", "keeper", "auto", "autopick", "autodraft",
   "the", "queue", "queued", "you", "your", "me", "and", "of", "at", "vs", "week", "wk",
 ]);
@@ -177,8 +177,13 @@ function coalesceLines(
   const lines = rawLines.map((l) => l.trim()).filter(Boolean);
   const out: string[] = [];
   const ignored: string[] = [];
-  const first = lines[0];
-  const labelsFirst = first != null && nameWords(first).length === 0 && extractPickNo(first, teams) != null;
+  // Do labels lead their name (Sleeper "1.01", a board's cell label) or trail
+  // it (ESPN "R1, P2 - Team 7")? Whichever comes first in the paste — a label
+  // or a name — decides, skipping header junk (a board copy opens with
+  // position counts).
+  const firstLabel = lines.findIndex((l) => nameWords(l).length === 0 && extractPickNo(l, teams) != null);
+  const firstName = lines.findIndex((l) => defenseByCode(l) || (nameWords(l).length > 0 && namesPlayer(l)));
+  const labelsFirst = firstLabel >= 0 && (firstName < 0 || firstLabel < firstName);
   let pendingPrefix = "";
   for (const line of lines) {
     if (/^(round|rd)\.?\s*\d{1,2}\b[\s·:\-–—]*$/i.test(line)) {
@@ -196,10 +201,10 @@ function coalesceLines(
     const label = labelKind(line, teams);
     const words = nameWords(line);
     if (label === "bare" && labelsFirst) {
-      // A second cell label before any name means the cell above was empty (a
-      // future pick copied along): drop it — a name takes the label nearest it.
-      if (roundPick(line, teams) != null && roundPick(pendingPrefix, teams) != null) {
-        ignored.push(pendingPrefix);
+      // A cell label starts a fresh cell: whatever was pending (an empty cell's
+      // label copied along, header digits) belonged to no name — drop it.
+      if (roundPick(line, teams) != null) {
+        if (pendingPrefix) ignored.push(pendingPrefix);
         pendingPrefix = line;
       } else pendingPrefix = `${pendingPrefix} ${line}`.trim();
     } else if (label != null && out.length > 0) {
