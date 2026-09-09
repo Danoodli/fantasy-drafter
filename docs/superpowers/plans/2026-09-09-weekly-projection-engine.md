@@ -136,7 +136,7 @@ Expected: FAIL — cannot resolve `../lib/engine/weekly/model`.
     "v0": { "QB": 32, "RB": 16, "WR": 7, "TE": 5, "K": 2, "DST": 1 },
     "delta": 0
   },
-  "availability": { "byStatus": {} },
+  "availability": { "healthy": 0.97, "byStatus": {} },
   "correlation": { "game": 0, "team": 0.28, "unit": 0.28, "dstVsOppTeam": 0 }
 }
 ```
@@ -200,7 +200,12 @@ export interface WeeklyModelParams {
     v0: Partial<Record<Position, number>>;
     delta: number;
   };
-  availability: { byStatus: Record<string, number> };
+  availability: {
+    /** P(plays | no designation). Fitted from null-status history. */
+    healthy?: number;
+    /** Fitted status -> P(played). Wins over FALLBACK_PLAY_PROB. */
+    byStatus: Record<string, number>;
+  };
   correlation: CorrelationParams;
 }
 
@@ -295,6 +300,9 @@ export function loadWeeklyModel(raw: unknown): WeeklyModelParams {
   assertRange("matchup.priorSeasonWeight", p.matchup?.priorSeasonWeight, 0, 1);
   assertRange("matchup.dvpLambda", p.matchup?.dvpLambda, 0, 1, true);
   assertRange("sigma.delta", p.sigma?.delta, 0, 5);
+  if (p.availability?.healthy !== undefined) {
+    assertRange("availability.healthy", p.availability.healthy, 0, 1);
+  }
 
   for (const [pos, v] of Object.entries(p.sigma?.sigma0 ?? {})) {
     assertRange(`sigma.sigma0.${pos}`, v, 0, 5, true);
@@ -1976,6 +1984,7 @@ git commit -m "Weekly engine: volume-dependent sigma and lognormal quantiles"
 // tests/weeklyAvailability.test.ts
 import { describe, it, expect } from "vitest";
 import { pPlay, FALLBACK_PLAY_PROB } from "../lib/engine/weekly/availability";
+import { SEASON_LONG } from "../lib/engine/injuryFeed";
 import { DEFAULT_WEEKLY_MODEL, type WeeklyModelParams } from "../lib/engine/weekly/model";
 
 const OFF = DEFAULT_WEEKLY_MODEL;
@@ -1996,7 +2005,26 @@ describe("pPlay", () => {
     expect(pPlay("Questionable", false, OFF)).toBeLessThan(pPlay(null, false, OFF));
     expect(pPlay("Doubtful", false, OFF)).toBeLessThan(pPlay("Questionable", false, OFF));
     expect(pPlay("Out", false, OFF)).toBeLessThan(pPlay("Doubtful", false, OFF));
-    expect(pPlay("IR", false, OFF)).toBe(0);
+  });
+
+  it("zeroes EVERY season-long designation, from the codebase's shared set", () => {
+    // Not a hand-copied list: SEASON_LONG is the same set recommend.ts excludes
+    // on. An earlier draft copied a subset here and dropped COV and DNR, which
+    // silently returned COVID-list and did-not-report players to full strength.
+    for (const status of SEASON_LONG) {
+      expect(pPlay(status, false, OFF)).toBe(0);
+    }
+    expect(SEASON_LONG.has("COV")).toBe(true);
+    expect(SEASON_LONG.has("DNR")).toBe(true);
+  });
+
+  it("takes the healthy rate from config when fitted", () => {
+    const fitted: WeeklyModelParams = {
+      ...OFF,
+      availability: { ...OFF.availability, healthy: 0.93 },
+    };
+    expect(pPlay(null, false, fitted)).toBeCloseTo(0.93, 10);
+    expect(pPlay("Probable", false, fitted)).toBeCloseTo(0.93, 10);
   });
 
   it("prefers a fitted table over the fallback when one exists", () => {
@@ -2033,20 +2061,31 @@ Expected: FAIL — module not found.
 // status → P(played) table and writes it to availability.byStatus. Until it
 // runs, these apply.
 import type { WeeklyModelParams } from "./model";
+import { SEASON_LONG } from "../injuryFeed";
 
-/** Derived from lib/engine/outcomeModel.ts STATUS_MISS_PROB. */
+/**
+ * Graded weekly designations only — a player carrying one of these is expected
+ * to play some of the time. Season-long designations are NOT listed here: they
+ * come from SEASON_LONG in lib/engine/injuryFeed.ts, which is the codebase's
+ * single definition of "done for the year" and is already shared with
+ * recommend.ts's INJURY_EXCLUDE. Copying a subset of it here is how COV and DNR
+ * went missing in an earlier draft, silently returning a COVID-list player to
+ * full strength.
+ *
+ * These three numbers are a documented stopgap, chosen as football judgment —
+ * NOT derived from outcomeModel.ts's STATUS_MISS_PROB, which is a per-game miss
+ * probability added to a fitted healthyMissProb and does not reduce to these
+ * values. scripts/calibrate-weekly.ts measures the real status -> P(played)
+ * table from history and writes it to availability.byStatus, which wins.
+ */
 export const FALLBACK_PLAY_PROB: Record<string, number> = {
   Questionable: 0.75,
   Doubtful: 0.25,
   Out: 0.02,
-  IR: 0,
-  PUP: 0,
-  Sus: 0,
-  NA: 0,
 };
 
-/** A player with no designation still misses the odd week. */
-const HEALTHY_PLAY_PROB = 0.97;
+/** Used when availability.healthy is absent from the config. */
+export const HEALTHY_PLAY_PROB = 0.97;
 
 export function pPlay(
   status: string | null | undefined,
@@ -2054,13 +2093,19 @@ export function pPlay(
   p: WeeklyModelParams
 ): number {
   if (isBye) return 0;
-  if (!status) return HEALTHY_PLAY_PROB;
+  // A player with no designation still misses the odd week. Fitted from
+  // null-status history by the calibration; the constant is the fallback.
+  const healthy = p.availability.healthy ?? HEALTHY_PLAY_PROB;
+  if (!status) return healthy;
   const fitted = p.availability.byStatus[status];
+  // Clamp defensively: tests construct params by hand, bypassing loadWeeklyModel.
   if (typeof fitted === "number") return Math.min(1, Math.max(0, fitted));
+  // Season-long designations are zero, from the shared set — never re-listed.
+  if (SEASON_LONG.has(status)) return 0;
   const fallback = FALLBACK_PLAY_PROB[status];
   // An unknown designation is far more likely to be a label we do not parse
   // than a hidden injury. Treating it as Out would bench healthy starters.
-  return typeof fallback === "number" ? fallback : HEALTHY_PLAY_PROB;
+  return typeof fallback === "number" ? fallback : healthy;
 }
 ```
 
@@ -2517,6 +2562,12 @@ const VOLUME_FIELDS: (keyof StatLine)[] = [
   "fumblesLost", "rushFd", "recFd", "passFd",
 ];
 
+/**
+ * @param mult MUST be >= 0. A negative multiplier would flip the sign of every
+ *   volume field, including the penalty fields (`fumblesLost`, `passInt`), and
+ *   produce a stat line that scores backwards. The sampler always passes a
+ *   lognormal draw, which is strictly positive.
+ */
 export function scaleStatLine(stats: StatLine, mult: number): StatLine {
   const out: StatLine = {};
   for (const f of VOLUME_FIELDS) {
@@ -4191,7 +4242,14 @@ function main() {
   params.availability.byStatus = empiricalPlayRate(
     rows.map((r) => ({ status: r.st, played: r.played }))
   );
-  console.log("availability:", params.availability.byStatus);
+  // The no-designation rate is a lever too, not a constant: measure it from
+  // the rows that carry no status rather than leaving pPlay's fallback in place.
+  const healthyRows = rows.filter((r) => !r.st);
+  if (healthyRows.length >= 200) {
+    params.availability.healthy =
+      round3(healthyRows.filter((r) => r.played).length / healthyRows.length);
+  }
+  console.log("availability:", params.availability.healthy, params.availability.byStatus);
 
   // --- environment: alpha on log(itp / leagueAvgItp) ------------------------
   const avgItp = active.reduce((s, r) => s + r.itpOwn, 0) / active.length;

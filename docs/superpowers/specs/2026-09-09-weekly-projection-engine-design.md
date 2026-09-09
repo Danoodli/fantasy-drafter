@@ -159,6 +159,14 @@ meanIfPlays = (w_m · baseMarket + w_u · baseUsage) · matchMult · envMult · 
 mean        = meanIfPlays · pPlay
 ```
 
+**The off-state baseline is defined on `meanIfPlays`, not on `mean`.** In the off
+state `meanIfPlays` reproduces raw re-scored Sleeper exactly; `pPlay` is a
+separate availability factor that is always on, because "will he play" is not a
+model lever to be switched off — a player on a bye scores zero under any
+configuration. Every gate that compares the model against the baseline
+therefore compares `meanIfPlays`. `mean` is the number to rank by, and it
+deliberately differs from the market's, which quotes a conditional projection.
+
 ## `config/weekly-model.json` and its off state
 
 ```jsonc
