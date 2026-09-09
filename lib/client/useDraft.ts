@@ -19,7 +19,7 @@ import type {
 import { fetchDraftInfo, fetchPicks, type SleeperDraftInfo } from "../draft/sleeper";
 import { picksForSlot, pickOwner, slotOnClock } from "../draft/snake";
 import { computeDrift, type DriftPrior } from "../engine/drift";
-import { placeNumberedPicks, reconcileSequence } from "../draft/sequence";
+import { placeNumberedPicks, reconcileSequence, type ConflictPolicy } from "../draft/sequence";
 import { mergeName } from "../etl/names";
 
 const STORAGE_KEY = "draft-cockpit-picks-v1";
@@ -89,7 +89,18 @@ export interface ImportItem {
   pickNo: number | null;
 }
 
+export interface ImportConflict {
+  pickNo: number;
+  player: BoardPlayer;
+  /** Who the board has at that number (null if unknown to the board index). */
+  existing: BoardPlayer | null;
+}
+
 export interface ImportOutcome {
+  /** Numbered picks that named a different player than the one at that number — left alone unless the caller said "replace". */
+  conflicts: ImportConflict[];
+  /** Conflicts resolved by overwriting (onConflict "replace"). */
+  replaced: number;
   /** Appended at the end (numbered picks past the board, or unnumbered names after the last known one). */
   added: number;
   /** Placeholders filled. */
@@ -180,7 +191,7 @@ export interface DraftApi {
    * Items without one append in order. Returns what happened plus a snapshot
    * that `restoreManual` can roll back to.
    */
-  applyImport: (items: ImportItem[]) => ImportOutcome;
+  applyImport: (items: ImportItem[], opts?: { onConflict?: ConflictPolicy }) => ImportOutcome;
   /**
    * Screen sync: reconcile the ORDERED list of names read off the room's pick
    * history with the picks we know (lib/draft/sequence.ts). New names append
@@ -534,7 +545,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
   }, [commit]);
 
   const applyImport = useCallback(
-    (items: ImportItem[]): ImportOutcome => {
+    (items: ImportItem[], opts: { onConflict?: ConflictPolicy } = {}): ImportOutcome => {
       const snapshot = manualRef.current;
       const apiIds = picksRef.current.filter((p) => p.manualIndex == null).map((p) => (p.playerId ? p.playerId : null));
       const apiCount = apiIds.length;
@@ -547,7 +558,8 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       const numbered = placeNumberedPicks(
         known,
         items.filter((it) => it.pickNo != null).map((it) => ({ id: it.player.id, pickNo: it.pickNo! })),
-        apiCount
+        apiCount,
+        { onConflict: opts.onConflict ?? "skip" }
       );
       known = numbered.next;
       const seq = reconcileSequence(
@@ -567,6 +579,12 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
       });
       const unnumberedSkipped = items.filter((it) => it.pickNo == null).length - seq.inserted.length - seq.filled.length;
       const out: ImportOutcome = {
+        conflicts: numbered.conflicts.map((c) => ({
+          pickNo: c.pickNo,
+          player: byId.get(c.id) ?? items.find((it) => it.player.id === c.id)!.player,
+          existing: byId.get(c.existing) ?? null,
+        })),
+        replaced: numbered.replaced,
         added: numbered.added + seq.inserted.filter((p) => p.pickIndex >= numbered.next.length).length,
         filled: numbered.filled + seq.filled.length,
         padded: numbered.padded,
@@ -575,7 +593,7 @@ export function useDraft(board: Board | null, config: LeagueConfig | null): Draf
         shifted: numbered.shifted + seq.shifted,
         snapshot,
       };
-      if (out.added + out.filled + out.padded + out.inserted > 0) commit(nextManual);
+      if (out.added + out.filled + out.padded + out.inserted + out.replaced > 0) commit(nextManual);
       return out;
     },
     [commit]

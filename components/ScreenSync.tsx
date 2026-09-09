@@ -87,6 +87,8 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
   const lastFrameRef = useRef<HTMLCanvasElement | null>(null);
   const lastReadRef = useRef<Record<string, unknown> | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+  /** Once the frame has shown a labelled board, it is a board: a frame without labels (a modal, a hover card, a scroll past the top) is skipped, never read as a list. */
+  const gridSeenRef = useRef(false);
   const [lastNames, setLastNames] = useState<string[]>([]);
   const [reads, setReads] = useState(0);
   const [marked, setMarked] = useState(0);
@@ -133,6 +135,7 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
         setStatus("Sharing ended.");
       });
       agreementRef.current = new FrameAgreement(latest.current.draftedIds);
+      gridSeenRef.current = false;
       setPhase("sharing");
       setShowLarge(true);
       setStatus("Drag a box around the pick history or the draft board grid, then Watch.");
@@ -221,7 +224,8 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
           lines: lines.map((l) => l.text),
           words,
         };
-        if (grid.anchors >= 2) {
+        if (grid.anchors >= 3 || (gridSeenRef.current && grid.anchors >= 2)) {
+          gridSeenRef.current = true;
           setMode("grid");
           agreement.observe(grid.picks);
           const items: ImportItem[] = grid.picks
@@ -237,7 +241,15 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
               setMarked((n) => n + changed);
               setLastPlaced(fresh.map((it) => `#${it.pickNo} ${it.player.name}`));
             }
+            if (out && out.conflicts.length > 0)
+              setStatus(
+                `Board grid · ${grid.anchors} cells labelled · ${grid.picks.length} names read · ${out.conflicts.length} cell${out.conflicts.length === 1 ? "" : "s"} disagree with the board (left alone) · ${stamp}`
+              );
           }
+          return;
+        }
+        if (gridSeenRef.current) {
+          setStatus(`Board not in view (${grid.anchors} label${grid.anchors === 1 ? "" : "s"} seen) · waiting · ${stamp}`);
           return;
         }
         setMode("list");
@@ -300,7 +312,8 @@ export default function ScreenSync({ players, draftedIds, teams, placed, onFrame
       const r = { x, y, w: Math.min(w, 1 - x), h: Math.min(h, 1 - y) };
       setRegion(r);
       saveRegion(r);
-      agreementRef.current = new FrameAgreement(latest.current.draftedIds); // new panel, fresh agreement
+      agreementRef.current = new FrameAgreement(latest.current.draftedIds);
+      gridSeenRef.current = false; // new panel, fresh agreement
     }
   }
 

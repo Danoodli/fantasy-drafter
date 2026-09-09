@@ -153,6 +153,16 @@ export interface NumberedPick {
   pickNo: number;
 }
 
+/** What to do when a numbered pick names a DIFFERENT player than the one already at that number. */
+export type ConflictPolicy = "skip" | "replace" | "insert";
+
+export interface NumberedConflict {
+  id: string;
+  pickNo: number;
+  /** Who the board has at that number. */
+  existing: string;
+}
+
 export interface NumberedResult {
   next: (string | null)[];
   /** Appended at the end (after any padding). */
@@ -166,19 +176,30 @@ export interface NumberedResult {
   shifted: number;
   /** Already on the board (anywhere). */
   skipped: number;
+  /** A different player sat at that number: left alone ("skip", the default) and reported here. */
+  conflicts: NumberedConflict[];
+  /** Conflicts resolved by overwriting ("replace"). */
+  replaced: number;
 }
 
 /**
  * Place picks that carry their pick NUMBER (a paste with "1.05" / "R1, P2").
- * The number is trusted: a placeholder there is filled, a gap is padded, and
- * a DIFFERENT player sitting at that number means we missed this pick — it is
- * inserted in front and the later picks shift down (which is what really
- * happened in the room). A player already on the board is never moved.
+ * The number is trusted: a placeholder there is filled, a gap is padded. A
+ * DIFFERENT player sitting at that number is a conflict — left alone and
+ * reported unless the caller says "replace" or "insert". A player already on
+ * the board is never moved.
  */
-export function placeNumberedPicks(known: (string | null)[], picks: NumberedPick[], frozen = 0): NumberedResult {
+export function placeNumberedPicks(
+  known: (string | null)[],
+  picks: NumberedPick[],
+  frozen = 0,
+  opts: { onConflict?: ConflictPolicy } = {}
+): NumberedResult {
+  const onConflict = opts.onConflict ?? "skip";
   const next = [...known];
   const have = new Set(next.filter((x): x is string => x != null));
-  let added = 0, filled = 0, padded = 0, inserted = 0, shifted = 0, skipped = 0;
+  const conflicts: NumberedConflict[] = [];
+  let added = 0, filled = 0, padded = 0, inserted = 0, shifted = 0, skipped = 0, replaced = 0;
   for (const { id, pickNo } of [...picks].sort((a, b) => a.pickNo - b.pickNo)) {
     if (!id || pickNo < 1 || have.has(id)) {
       skipped++;
@@ -200,11 +221,26 @@ export function placeNumberedPicks(known: (string | null)[], picks: NumberedPick
       next[idx] = id;
       filled++;
     } else {
-      shifted += next.length - idx;
-      next.splice(idx, 0, id);
-      inserted++;
+      // Someone else is at that number. A misread cell or a mis-numbered
+      // paste must never rewrite the board, so by default the pick is left
+      // alone and reported; "replace" trusts the paste; "insert" treats it as
+      // a pick we missed (the rest shift down).
+      const existing = next[idx]!;
+      if (onConflict === "skip") {
+        conflicts.push({ id, pickNo, existing });
+        continue;
+      }
+      if (onConflict === "replace") {
+        next[idx] = id;
+        have.delete(existing);
+        replaced++;
+      } else {
+        shifted += next.length - idx;
+        next.splice(idx, 0, id);
+        inserted++;
+      }
     }
     have.add(id);
   }
-  return { next, added, filled, padded, inserted, shifted, skipped };
+  return { next, added, filled, padded, inserted, shifted, skipped, conflicts, replaced };
 }

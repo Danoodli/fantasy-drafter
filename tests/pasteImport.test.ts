@@ -349,3 +349,46 @@ describe("parsePastedPicks on a real browser copy of the board", () => {
     expect(r.matches.filter((m) => !m.player)).toEqual([]); // "On the clock" and the counts are not names
   });
 });
+
+describe("parsePastedPicks: header junk and league-size mismatch", () => {
+  it("header team names before the first cell label are junk, even when they contain a player's surname", () => {
+    const text = ["Team Barkley", "Chalk Eaters", "Dan's Team", "QB", "RB", "0", "1", "1.1", "→", "1", "", "J. Gibbs", "RB DET (BYE 6)", "1.2", "→", "2", "", "C. Lamb", "WR DAL (BYE 14)"].join("\n");
+    const r = parsePastedPicks(text, players, none, { teams: 12 });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [1, "Jahmyr Gibbs"],
+      [2, "CeeDee Lamb"],
+    ]);
+  });
+
+  it("ESPN's trailing labels still trail when the paste happens to open with a stray label-like line", () => {
+    const r = parsePastedPicks("Round 1\nPuka Nacua / LAR WR\nR1, P2 - Team 7\n\nJa'Marr Chase / CIN WR\nR1, P3 - Team 10", players, none, { teams: 12 });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([
+      [2, "Puka Nacua"],
+      [3, "Ja'Marr Chase"],
+    ]);
+  });
+
+  it("reports the league size the labels imply, so a 10-team setup pasting a 12-team board can be caught", () => {
+    const r = parsePastedPicks("1.12\n12\nJ. Gibbs\nRB DET (BYE 6)\n2.1\n13\nC. Lamb\nWR DAL (BYE 14)", players, none, { teams: 10 });
+    expect(r.teamsHint).toBe(12);
+    expect(parsePastedPicks("1.05 Bijan Robinson RB - ATL", players, none, { teams: 12 }).teamsHint).toBe(5);
+  });
+});
+
+describe("parsePastedPicks: ties on a numbered line respect the board", () => {
+  const bijan = byName("Bijan Robinson");
+  const brian = byName("Brian Robinson");
+  const room = (placed: Map<string, number>) => ({ order: "snake" as const, knownCount: 14, placed });
+
+  it("a re-paste of the cell that placed Bijan stays Bijan, not the twin who is still available", () => {
+    const r = parsePastedPicks("1.2\n2\nB. Robinson\nRB ATL (BYE 11)", players, new Set([bijan.id]), { teams: 12, room: room(new Map([[bijan.id, 2]])) });
+    expect(r.matches.map((m) => [m.line.pickNo, m.player?.name, m.alreadyDrafted])).toEqual([[2, "Bijan Robinson", true]]);
+  });
+
+  it("a fresh numbered tie settles by ADP like the board reader: 1.2 is Bijan, 9.4 with Bijan placed is Brian", () => {
+    expect(parsePastedPicks("1.2\n2\nB. Robinson", players, none, { teams: 12, room: room(new Map()) }).matches.map((m) => m.player?.name)).toEqual(["Bijan Robinson"]);
+    const late = parsePastedPicks("9.4\n100\nB. Robinson", players, new Set([bijan.id]), { teams: 12, room: room(new Map([[bijan.id, 2]])) });
+    expect(late.matches.map((m) => [m.line.pickNo, m.player?.name])).toEqual([[100, "Brian Robinson"]]);
+    expect(brian.team).toBe(bijan.team); // the hints can't tell them apart on this board
+  });
+});

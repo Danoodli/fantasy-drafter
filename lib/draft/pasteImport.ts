@@ -19,7 +19,7 @@
 import type { BoardPlayer, Position } from "../types";
 import { scorePlayers } from "./fuzzy";
 import { mergeName } from "../etl/names";
-import { buildVocab, findPlayers, lineHints, surnameCounts, teamCodeOf, tokenize, type Vocab } from "./nameMatch";
+import { buildVocab, findPlayers, lineHints, settleByPick, surnameCounts, teamCodeOf, tokenize, type Vocab } from "./nameMatch";
 import { inferPasteLayout, type LayoutInference, type PasteShape, type RoomState } from "./pasteLayout";
 
 export interface ParsedLine {
@@ -49,6 +49,8 @@ export interface PasteResult {
   ignored: string[];
   /** For a paste without pick numbers: how the rows were laid onto the board from what the room already knows. */
   layout?: LayoutInference;
+  /** The largest pick-in-round the paste's labels show ("1.12" → 12): the league size the paste implies, when it has labels. */
+  teamsHint: number | null;
 }
 
 /** Nickname / city → team code, for team defenses ("Seahawks D/ST", "Baltimore Defense"). */
@@ -87,6 +89,12 @@ const NOISE = new Set([
  * a pick.
  */
 function roundPick(text: string, teams: number): number | null {
+  const rp = roundPickParts(text, teams);
+  return rp ? (rp.round - 1) * teams + rp.pick : null;
+}
+
+/** The round and pick-in-round a line carries, if any (see roundPick). */
+function roundPickParts(text: string, teams: number): { round: number; pick: number } | null {
   const patterns: RegExp[] = [
     /(?:^|\s)(\d{1,2})[.\-:](\d{2})(?=\s|$|[),:])/,
     /^\s*(\d{1,2})[.\-:](\d{1,2})(?=\s|$|[),:])/,
@@ -99,7 +107,7 @@ function roundPick(text: string, teams: number): number | null {
     const round = Number(m[1]);
     const pick = Number(m[2]);
     if (round < 1 || round > 40 || pick < 1 || pick > Math.max(teams, 20)) continue;
-    return (round - 1) * teams + pick;
+    return { round, pick };
   }
   return null;
 }
@@ -178,20 +186,27 @@ function coalesceLines(
   const out: string[] = [];
   const ignored: string[] = [];
   // Do labels lead their name (Sleeper "1.01", a board's cell label) or trail
-  // it (ESPN "R1, P2 - Team 7")? Whichever comes first in the paste — a label
-  // or a name — decides, skipping header junk (a board copy opens with
-  // position counts).
-  const firstLabel = lines.findIndex((l) => nameWords(l).length === 0 && extractPickNo(l, teams) != null);
-  const firstName = lines.findIndex((l) => defenseByCode(l) || (nameWords(l).length > 0 && namesPlayer(l)));
-  const labelsFirst = firstLabel >= 0 && (firstName < 0 || firstLabel < firstName);
+  // it (ESPN "R1, P2 - Team 7")? A label carrying an owner tag is ESPN's
+  // trailing kind; a bare "round.pick" line is a cell label and leads. With
+  // neither, whichever comes first — a label or a name — decides. In a
+  // leading paste everything before the first label is header junk (a board
+  // copy opens with team names and position counts) and is dropped.
+  const isBareLabel = (l: string) => nameWords(l).length === 0 && extractPickNo(l, teams) != null;
+  const isName = (l: string) => defenseByCode(l) || (nameWords(l).length > 0 && namesPlayer(l));
+  const firstLabel = lines.findIndex(isBareLabel);
+  const firstName = lines.findIndex(isName);
+  const hasTrailing = lines.some((l) => labelKind(l, teams) === "trailing");
+  const hasCellLabels = lines.some((l) => isBareLabel(l) && roundPickParts(l, teams) != null);
+  const labelsFirst = hasTrailing ? false : hasCellLabels ? true : firstLabel >= 0 && (firstName < 0 || firstLabel < firstName);
   let pendingPrefix = "";
-  for (const line of lines) {
+  const startAt = labelsFirst ? firstLabel : 0;
+  ignored.push(...lines.slice(0, startAt));
+  for (const line of lines.slice(startAt)) {
     if (/^(round|rd)\.?\s*\d{1,2}\b[\s·:\-–—]*$/i.test(line)) {
       ignored.push(line);
       continue;
     }
-    const isName = defenseByCode(line) || (nameWords(line).length > 0 && namesPlayer(line));
-    if (isName) {
+    if (isName(line)) {
       out.push(pendingPrefix ? `${pendingPrefix} ${line}` : line);
       pendingPrefix = "";
       continue;
@@ -262,6 +277,10 @@ export function parsePastedPicks(
   };
   const rawLines = text.replace(/\r/g, "").replace(/\t/g, "  ").split("\n").flatMap(splitCells);
   const { lines, ignored } = coalesceLines(rawLines, teams, namesPlayer);
+  const teamsHint = rawLines.reduce<number | null>((n, l) => {
+    const rp = roundPickParts(l, Math.max(teams, 20));
+    return rp ? Math.max(n ?? 0, rp.pick) : n;
+  }, null);
 
   const matches: PasteMatch[] = [];
   const bareNumbers: (number | null)[] = [];
@@ -304,6 +323,17 @@ export function parsePastedPicks(
         const alt = f.alternatives?.find((a) => !seen.has(a.id));
         if (!alt) continue;
         player = alt;
+      } else if (f.tie && rp != null && opts.room) {
+        // A tie on a numbered line: the twin who already sits at THIS number
+        // is a re-paste of his own cell; otherwise the twins still free for
+        // this number settle by ADP, as the board reader does.
+        const cands = [f.player, ...(f.alternatives ?? [])];
+        const here = cands.find((c) => opts.room!.placed.get(c.id) === rp);
+        if (here) player = here;
+        else {
+          const free = cands.filter((c) => opts.room!.placed.get(c.id) == null);
+          player = (free.length === 1 ? free[0] : settleByPick(free, rp)) ?? player;
+        }
       } else if (f.tie && draftedIds.has(player.id)) {
         // A tie whose best guess is already gone from the room: a paste is
         // mostly new picks, so it is the candidate still on the board.
@@ -369,7 +399,7 @@ export function parsePastedPicks(
   if (hasPickNumbers) {
     matches.sort((a, b) => (a.line.pickNo ?? Infinity) - (b.line.pickNo ?? Infinity));
   }
-  return { matches, hasPickNumbers, ignored, layout };
+  return { matches, hasPickNumbers, ignored, layout, teamsHint };
 }
 
 /** Human-readable normalized name, for tests and previews. */

@@ -3,7 +3,7 @@
 // fallback. The app shell stays stale-while-revalidate so a refresh mid-draft
 // with dead wifi still loads. Live polling is cross-origin and passes through.
 
-const CACHE = "draft-cockpit-v1";
+const CACHE = "draft-cockpit-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
@@ -20,7 +20,9 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      if (url.pathname.startsWith("/data/")) {
+      // Board JSON and page navigations go to the network first: a fresh
+      // deploy must reach the very next load, not the one after.
+      if (url.pathname.startsWith("/data/") || event.request.mode === "navigate") {
         try {
           const res = await fetch(event.request);
           if (res.ok) cache.put(event.request, res.clone());

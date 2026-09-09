@@ -126,9 +126,9 @@ describe("placeNumberedPicks (paste with pick numbers)", () => {
     expect(r.added).toBe(1);
   });
 
-  it("a missed pick: inserts in front of the player we had at that number and shifts the rest down", () => {
+  it("a missed pick, when asked to insert: in front of the player we had at that number, the rest shift down", () => {
     // Screen sync missed pick 2, so pick 3's player sits at pick 2. The paste says B was pick 2.
-    const r = placeNumberedPicks(["a", "c", "d"], [{ id: "b", pickNo: 2 }, { id: "c", pickNo: 3 }, { id: "d", pickNo: 4 }]);
+    const r = placeNumberedPicks(["a", "c", "d"], [{ id: "b", pickNo: 2 }, { id: "c", pickNo: 3 }, { id: "d", pickNo: 4 }], 0, { onConflict: "insert" });
     expect(r.next).toEqual(["a", "b", "c", "d"]);
     expect(r.inserted).toBe(1);
     expect(r.shifted).toBe(2);
@@ -144,5 +144,30 @@ describe("placeNumberedPicks (paste with pick numbers)", () => {
   it("places out-of-order input by ascending pick number", () => {
     const r = placeNumberedPicks([], [{ id: "c", pickNo: 3 }, { id: "a", pickNo: 1 }, { id: "b", pickNo: 2 }]);
     expect(r.next).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("placeNumberedPicks: a different player already at that number", () => {
+  it("is a conflict — left alone and reported, nothing shifts (a misread cell must never rewrite the board)", () => {
+    const r = placeNumberedPicks(["a", "b", "c"], [{ id: "x", pickNo: 2 }, { id: "d", pickNo: 4 }]);
+    expect(r.next).toEqual(["a", "b", "c", "d"]);
+    expect(r.conflicts).toEqual([{ id: "x", pickNo: 2, existing: "b" }]);
+    expect(r.inserted).toBe(0);
+    expect(r.shifted).toBe(0);
+    expect(r.added).toBe(1);
+  });
+
+  it("with onConflict 'replace' the numbered player takes the slot and the other one is dropped", () => {
+    const r = placeNumberedPicks(["a", "b", "c"], [{ id: "x", pickNo: 2 }], 0, { onConflict: "replace" });
+    expect(r.next).toEqual(["a", "x", "c"]);
+    expect(r.replaced).toBe(1);
+    expect(r.conflicts).toEqual([]);
+  });
+
+  it("with onConflict 'insert' the old behaviour is available: insert in front, the rest shift down", () => {
+    const r = placeNumberedPicks(["a", "b", "c"], [{ id: "x", pickNo: 2 }], 0, { onConflict: "insert" });
+    expect(r.next).toEqual(["a", "x", "b", "c"]);
+    expect(r.inserted).toBe(1);
+    expect(r.shifted).toBe(2);
   });
 });

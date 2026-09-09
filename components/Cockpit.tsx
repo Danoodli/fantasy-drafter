@@ -31,6 +31,7 @@ import Shortlist from "./Shortlist";
 import ScreenSync from "./ScreenSync";
 import { parsePastedPicks } from "../lib/draft/pasteImport";
 import type { ImportItem } from "../lib/client/useDraft";
+import type { ConflictPolicy } from "../lib/draft/sequence";
 import { stackPartners } from "../lib/client/stacks";
 import { upsertDraft } from "../lib/client/history";
 import { searchPlayers } from "../lib/draft/fuzzy";
@@ -339,12 +340,13 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   }
 
   /** Commit a batch of picks (paste) with one undo for the lot. */
-  function commitImport(items: ImportItem[], source: string) {
+  function commitImport(items: ImportItem[], source: string, opts: { onConflict?: ConflictPolicy } = {}) {
     if (items.length === 0) return;
-    const out = draft.applyImport(items);
-    const changed = out.added + out.filled + out.padded + out.inserted;
+    const out = draft.applyImport(items, opts);
+    const changed = out.added + out.filled + out.padded + out.inserted + out.replaced;
     const parts = [
-      out.added + out.filled + out.inserted > 0 ? `${out.added + out.filled + out.inserted} marked` : null,
+      out.added + out.filled + out.inserted + out.replaced > 0 ? `${out.added + out.filled + out.inserted + out.replaced} marked` : null,
+      out.conflicts.length > 0 ? `${out.conflicts.length} disagree${out.conflicts.length === 1 ? "s" : ""} with your board — left alone` : null,
       out.inserted > 0 ? `${out.inserted} backfilled, ${out.shifted} moved down` : null,
       out.padded > 0 ? `${out.padded} unknown` : null,
       out.skipped > 0 ? `${out.skipped} already gone` : null,
@@ -421,7 +423,8 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
     const out = draft.applyImport(items);
     const changed = out.added + out.filled + out.padded + out.inserted;
     if (changed === 0) return out;
-    const mine = fresh.filter((it) => it.pickNo != null && pickOwner(it.pickNo, config.teams, draft.tradedPicks, config.draftOrder) === mySlot);
+    const conflicted = new Set(out.conflicts.map((c) => c.player.id));
+    const mine = fresh.filter((it) => !conflicted.has(it.player.id) && it.pickNo != null && pickOwner(it.pickNo, config.teams, draft.tradedPicks, config.draftOrder) === mySlot);
     for (const it of fresh) if (!mine.includes(it)) scoreAgainstShortlist(it.player);
     if (mine.length > 0) {
       setSnipe(null);
@@ -1301,10 +1304,10 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           teams={config.teams}
           currentPick={draft.currentPick}
           room={pasteRoom}
-          onCommit={(items) => {
+          onCommit={(items, opts) => {
             setPasteText(null);
             for (const it of items) scoreAgainstShortlist(it.player);
-            commitImport(items, "Pasted");
+            commitImport(items, "Pasted", opts);
           }}
           onClose={() => setPasteText(null)}
         />

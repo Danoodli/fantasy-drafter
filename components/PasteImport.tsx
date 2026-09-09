@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BoardPlayer } from "../lib/types";
 import { parsePastedPicks, type PasteMatch } from "../lib/draft/pasteImport";
 import type { PasteShape, RoomState } from "../lib/draft/pasteLayout";
+import type { ConflictPolicy } from "../lib/draft/sequence";
 import type { ImportItem } from "../lib/client/useDraft";
 import { POS_COLOR } from "../lib/client/pos";
 
@@ -21,7 +22,7 @@ interface Props {
   currentPick: number;
   /** What the room already knows, so a paste without pick numbers lays itself onto the board. */
   room: Omit<RoomState, "teams">;
-  onCommit: (items: ImportItem[]) => void;
+  onCommit: (items: ImportItem[], opts: { onConflict: ConflictPolicy }) => void;
   onClose: () => void;
 }
 
@@ -42,6 +43,8 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
   /** The pasted pick numbers looked misread and the user asked to lay the names out from the room instead. */
   const [ignoreNumbers, setIgnoreNumbers] = useState(false);
   const [copied, setCopied] = useState(false);
+  /** The user chose to let the paste overwrite picks already on the board at the same numbers. */
+  const [replaceConflicts, setReplaceConflicts] = useState(false);
   const [overrides, setOverrides] = useState<Record<number, BoardPlayer | null>>({});
   const [disabled, setDisabled] = useState<Set<number>>(new Set());
 
@@ -61,6 +64,7 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
   let gaps = 0;
   for (let p = room.knownCount + 1; p <= maxPick; p++) if (!covered.has(p) && !room.placeholders?.has(p)) gaps++;
   const implausible = !result.layout && result.hasPickNumbers && numbered.length > 0 && gaps > Math.max(2, numbered.length);
+
 
   async function copyDebug() {
     const report = {
@@ -105,6 +109,19 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
   const lowConf = rows.filter((r) => r.chosen && r.match.confidence === "low" && !r.match.alreadyDrafted).length;
   // Picks with numbers below the current pick fill unknown placeholders (or are skipped).
   const behind = ready.filter((r) => r.match.line.pickNo != null && r.match.line.pickNo < currentPick).length;
+  // Numbered picks that disagree with the board: someone else already sits at
+  // that number. They are left alone unless the user says the paste is right.
+  const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+  const atPick = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const [id, p] of room.placed) m.set(p, id);
+    return m;
+  }, [room.placed]);
+  const conflicts = ready
+    .filter((r) => r.match.line.pickNo != null && atPick.has(r.match.line.pickNo) && atPick.get(r.match.line.pickNo) !== r.chosen!.id)
+    .map((r) => ({ pickNo: r.match.line.pickNo!, player: r.chosen!, existing: byId.get(atPick.get(r.match.line.pickNo!)!) ?? null }));
+  // Labels like "1.12" on a board mean a 12-team room; importing them into a 10-team setup numbers every pick wrong.
+  const teamsMismatch = result.teamsHint != null && result.teamsHint > teams ? result.teamsHint : null;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -120,7 +137,8 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
     onCommit(
       rows
         .filter((r) => r.chosen && (r.match.alreadyDrafted || r.enabled))
-        .map((r) => ({ player: r.chosen!, pickNo: r.match.line.pickNo }))
+        .map((r) => ({ player: r.chosen!, pickNo: r.match.line.pickNo })),
+      { onConflict: replaceConflicts ? "replace" : "skip" }
     );
   }
 
@@ -155,6 +173,24 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
               <button onClick={copyDebug} className="text-[11px] text-ink-faint hover:text-ink" title="Copies the pasted text and how it was read, to report a paste that came out wrong">
                 {copied ? "copied" : "copy debug report"}
               </button>
+            </div>
+          )}
+          {teamsMismatch && (
+            <div className="mt-2 rounded bg-warn/15 px-3 py-2 text-xs text-warn">
+              This paste shows pick {result.matches.find((m) => m.line.pickNo != null)?.line.raw.match(/\d{1,2}\.\d{1,2}/)?.[0] ?? `x.${teamsMismatch}`} — a {teamsMismatch}-team board — but this league is set to {teams} teams. Every pick number would land wrong; fix the team count in Setup first.
+            </div>
+          )}
+          {conflicts.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-warn/15 px-3 py-2 text-xs text-warn">
+              <span>
+                {conflicts.length} pasted pick{conflicts.length === 1 ? "" : "s"} disagree{conflicts.length === 1 ? "s" : ""} with your board
+                {" "}({conflicts.slice(0, 2).map((c) => `#${c.pickNo}: paste says ${c.player.name}, you have ${c.existing?.name ?? "someone else"}`).join("; ")}
+                {conflicts.length > 2 ? "; …" : ""}). {replaceConflicts ? "The paste will overwrite them." : "They will be left alone."}
+              </span>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={replaceConflicts} onChange={(e) => setReplaceConflicts(e.target.checked)} />
+                the paste is right — replace mine
+              </label>
             </div>
           )}
           {implausible && (
@@ -286,7 +322,7 @@ export default function PasteImport({ initialText, players, draftedIds, teams, c
             </button>
             <button
               onClick={commit}
-              disabled={ready.length === 0}
+              disabled={ready.length === 0 || teamsMismatch != null}
               className="rounded bg-rb px-4 py-2 text-sm font-semibold text-field disabled:opacity-40"
             >
               Mark {ready.length} pick{ready.length === 1 ? "" : "s"}

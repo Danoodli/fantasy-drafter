@@ -327,3 +327,19 @@ export function lineHints(tokens: string[], raw: string): LineHints {
   }
   return { pos, team, posIdx, teamIdx };
 }
+
+/**
+ * Among players who read the same, the one whose ADP sits near this pick —
+ * but only when the runner-up's ADP is decisively farther (twice as far and
+ * at least two rounds), otherwise nobody: a wrong mark costs a correction.
+ */
+export function settleByPick(cands: BoardPlayer[], pickNo: number): BoardPlayer | null {
+  const ranked = cands
+    .filter((p) => Number.isFinite(p.adp))
+    .map((p) => ({ p, d: Math.abs(p.adp - pickNo) }))
+    .sort((x, y) => x.d - y.d);
+  if (ranked.length === 0) return null;
+  if (ranked.length === 1) return ranked.length === cands.length ? ranked[0].p : null;
+  const [best, next] = ranked;
+  return next.d >= best.d * 2 && next.d - best.d >= 24 ? best.p : null;
+}
