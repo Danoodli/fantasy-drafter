@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { parseEspnWeekly } from "../lib/etl/weekly/espnWeekly";
-import { slimNflverseWeekly, NFLVERSE_WEEKLY_COLUMNS } from "../lib/etl/weekly/nflverseWeekly";
+import {
+  slimNflverseWeekly,
+  toTable,
+  fromTable,
+  NFLVERSE_WEEKLY_COLUMNS,
+} from "../lib/etl/weekly/nflverseWeekly";
 
 describe("parseEspnWeekly", () => {
   const payload = {
@@ -50,11 +55,33 @@ describe("slimNflverseWeekly", () => {
     expect(slim[0].passing_epa).toBeUndefined();
   });
 
+  it("drops rows where every measurement is zero", () => {
+    const header = NFLVERSE_WEEKLY_COLUMNS.join(",");
+    const mk = (over: Record<string, string>) =>
+      NFLVERSE_WEEKLY_COLUMNS.map((c) =>
+        over[c] ?? (c === "season_type" ? "REG" : c === "position" ? "WR" : "0")
+      ).join(",");
+    // A defender in the offensive box score: identifiers present, all stats 0.
+    const csv = [header, mk({ position: "LB" }), mk({ targets: "4" })].join("\n");
+    const slim = slimNflverseWeekly(csv);
+    expect(slim).toHaveLength(1);
+    expect(slim[0].targets).toBe("4");
+  });
+
+  it("round-trips through the columnar cache shape without losing a field", () => {
+    const rows: Record<string, string>[] = [
+      { player_id: "00-1", position: "WR", team: "DET", targets: "9", receiving_yards: "120" },
+      { player_id: "00-2", position: "RB", team: "DET", carries: "18" },
+    ];
+    const back = fromTable(toTable(rows, NFLVERSE_WEEKLY_COLUMNS));
+    expect(back).toEqual(rows);
+  });
+
   it("drops non-regular-season rows and rows with no position", () => {
     const header = NFLVERSE_WEEKLY_COLUMNS.join(",");
     const mk = (over: Record<string, string>) =>
       NFLVERSE_WEEKLY_COLUMNS.map((c) => over[c] ?? (c === "season_type" ? "REG" : c === "position" ? "WR" : "0")).join(",");
-    const csv = [header, mk({ season_type: "POST" }), mk({ position: "" }), mk({})].join("\n");
+    const csv = [header, mk({ season_type: "POST" }), mk({ position: "" }), mk({ targets: "1" })].join("\n");
     expect(slimNflverseWeekly(csv)).toHaveLength(1);
   });
 });
