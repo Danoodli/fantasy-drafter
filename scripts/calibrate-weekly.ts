@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { decodeHistory, type HistRow } from "../lib/etl/weekly/history";
-import { olsSlope, fitSigmaByVolume } from "../lib/engine/weekly/fit";
+import { olsFit, MIN_ABS_T, fitSigmaByVolume } from "../lib/engine/weekly/fit";
 import { impliedTeamPoints } from "../lib/engine/weekly/environment";
 import { projectedVolume } from "../lib/engine/weekly/spread";
 import { SCORING_PRESETS, scoreStatLine } from "../lib/scoring";
@@ -123,6 +123,15 @@ function main() {
 
   const params: WeeklyModelParams = JSON.parse(JSON.stringify(DEFAULT_WEEKLY_MODEL));
   params.fittedOn = fitSeasons;
+  // params was deep-copied from DEFAULT_WEEKLY_MODEL, i.e. the config THIS
+  // SCRIPT wrote last run — which may already carry non-zero alpha/beta/gamma
+  // from a prior fit. `keep()` returning null only skips an assignment; it
+  // does not clear a stale value already sitting in the copy. Reset all three
+  // before fitting so a coefficient that is zeroed THIS run is actually
+  // absent from the written config, not silently left over from last time.
+  params.environment.alpha = {};
+  params.environment.beta = {};
+  params.matchup.gamma = {};
 
   // --- availability: DELIBERATELY NOT FITTED --------------------------------
   //
@@ -152,6 +161,35 @@ function main() {
   // After a season of those, availability becomes calibratable from them.
   console.log("availability: NOT fitted (historical status is a live field — see comment)");
 
+  // --- KEEP ONLY WHAT THE DATA CAN DISTINGUISH FROM ZERO -------------------
+  //
+  // Weekly fantasy residuals are enormously noisy: the log-residual standard
+  // deviation is 0.57 to 0.84 by position. A regression over thousands of rows
+  // can therefore produce a confident-looking coefficient that is pure noise,
+  // and shipping it adds variance with no signal.
+  //
+  // Measured on 10,131 fitted player-weeks (2021-24, holding out 2025), EVERY
+  // environment and matchup coefficient came out with |t| < 1.96:
+  //   alpha  QB t=0.66  RB t=1.65  WR t=-0.61  TE t=-1.05
+  //   gamma  QB t=-0.10 RB t=0.70  WR t=-1.62  TE t=-1.06
+  // The negative WR/TE signs that look like "the market over-corrects" are not
+  // a finding — they are noise, and their sign is arbitrary.
+  //
+  // So a coefficient is kept only when |t| >= MIN_ABS_T, and omitted
+  // otherwise, which leaves that lever exactly neutral. Expect most or all of
+  // alpha, beta and gamma to be omitted at this sample size. That is the
+  // honest result, not a failure: it says Sleeper's projection already prices
+  // in the environment and the matchup, and the value this engine adds is in
+  // the DISTRIBUTION (fitted sigma, fitted correlation, availability, exact
+  // byes) rather than in a better mean.
+  const keep = (label: string, f: { slope: number; t: number; n: number }): number | null => {
+    const ok = Math.abs(f.t) >= MIN_ABS_T;
+    console.log(
+      `  ${label}: ${f.slope.toFixed(4)} (t=${f.t.toFixed(2)}, n=${f.n}) ${ok ? "KEPT" : "zeroed — indistinguishable from 0"}`
+    );
+    return ok ? round3(f.slope) : null;
+  };
+
   // --- environment: alpha on log(itp / leagueAvgItp) ------------------------
   const avgItp = active.reduce((s, r) => s + r.itpOwn, 0) / active.length;
   params.environment.leagueAvgItp = Math.round(avgItp * 10) / 10;
@@ -159,8 +197,8 @@ function main() {
     const sub = active.filter((r) => r.pos === pos);
     const xs = sub.map((r) => Math.log(Math.max(0.2, r.itpOwn / avgItp)));
     const ys = sub.map((r) => Math.log(r.actual / r.base));
-    const a = olsSlope(xs, ys);
-    if (Math.abs(a) > 0.01) params.environment.alpha[pos] = round3(a);
+    const a = keep(`alpha.${pos}`, olsFit(xs, ys));
+    if (a !== null) params.environment.alpha[pos] = a;
   }
   // DST reads the OPPONENT's implied total. No DST rows are in the history set
   // (Sleeper's DEF projections carry no yardage), so alpha.DST stays unfitted
@@ -178,8 +216,8 @@ function main() {
     const ys = sub.map(
       (r) => Math.log(r.actual / r.base) - a * Math.log(Math.max(0.2, r.itpOwn / avgItp))
     );
-    const b = olsSlope(xs, ys);
-    if (Math.abs(b) > 0.005) params.environment.beta[pos] = round3(b);
+    const b = keep(`beta.${pos}`, olsFit(xs, ys));
+    if (b !== null) params.environment.beta[pos] = b;
   }
   console.log("environment.beta:", params.environment.beta);
 
@@ -196,12 +234,18 @@ function main() {
         a * Math.log(Math.max(0.2, r.itpOwn / avgItp)) -
         Math.log(Math.max(0.4, 1 + b * (r.spr / 7)))
     );
-    const g = olsSlope(xs, ys);
-    if (Math.abs(g) > 0.01) params.matchup.gamma[pos] = round3(g);
-    console.log(`  ${pos}: gamma ${g.toFixed(3)} over ${sub.length} rows`);
+    const g = keep(`gamma.${pos}`, olsFit(xs, ys));
+    if (g !== null) params.matchup.gamma[pos] = g;
   }
 
   // --- sigma: fitted on the residual AFTER all adjustments -----------------
+  //
+  // NOT subject to the significance filter above, and the distinction is the
+  // point. Alpha/beta/gamma are asking "is there a mean effect here at all",
+  // which the data cannot answer. Sigma asks "how wide is the residual", which
+  // is directly measured and extremely well determined — that spread is the
+  // one thing 10,000 noisy rows tell you precisely. Same for the correlations
+  // below: they are measured co-movement, not a hypothesis test.
   for (const pos of POSITIONS) {
     const sub = active.filter((r) => r.pos === pos);
     const v0 = DEFAULT_WEEKLY_MODEL.sigma.v0[pos] ?? 8;
