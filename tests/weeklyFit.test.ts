@@ -43,17 +43,21 @@ describe("fitSigmaByVolume", () => {
 });
 
 describe("empiricalPlayRate", () => {
+  /** n rows of one status, `played` true for the first `k`. */
+  const rows = (status: string | null, n: number, k: number) =>
+    Array.from({ length: n }, (_, i) => ({ status, played: i < k }));
+
   it("measures P(played | status) per designation", () => {
-    const rows = [
-      { status: "Questionable", played: true },
-      { status: "Questionable", played: true },
-      { status: "Questionable", played: false },
-      { status: "Questionable", played: true },
-      { status: "Out", played: false },
-      { status: "Out", played: false },
-      { status: null, played: true },
-    ];
-    const t = empiricalPlayRate(rows);
+    // Each status needs at least MIN_STATUS_N (20) observations to be reported
+    // at all, so the fixture supplies 40 Questionable at a 0.75 rate and 20 Out
+    // at 0. Do NOT lower the threshold to fit a smaller fixture: at n=2 a
+    // proportion's 95% interval spans essentially [0,1], which is precisely the
+    // case the guard exists to reject.
+    const t = empiricalPlayRate([
+      ...rows("Questionable", 40, 30),
+      ...rows("Out", 20, 0),
+      ...rows(null, 30, 30),
+    ]);
     expect(t.Questionable).toBeCloseTo(0.75, 10);
     expect(t.Out).toBe(0);
     // A null designation is not a status and must not appear in the table.
@@ -61,6 +65,10 @@ describe("empiricalPlayRate", () => {
   });
 
   it("ignores designations with too few observations to mean anything", () => {
+    // 19 is one short of the threshold, so it is omitted even though it has far
+    // more evidence than the single-row case. 20 is reported.
+    expect(empiricalPlayRate(rows("Sus", 19, 10)).Sus).toBeUndefined();
+    expect(empiricalPlayRate(rows("Sus", 20, 10)).Sus).toBeCloseTo(0.5, 10);
     expect(empiricalPlayRate([{ status: "Sus", played: false }]).Sus).toBeUndefined();
   });
 });

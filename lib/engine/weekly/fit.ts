@@ -8,8 +8,14 @@
 
 /** Minimum points before a slope means anything. */
 const MIN_FIT_N = 3;
-/** Minimum observations before a status's play rate is trusted. */
-const MIN_STATUS_N = 2;
+/**
+ * Minimum observations before a status's play rate is trusted. At n=2 a
+ * proportion's 95% interval spans essentially [0,1], so a rate from a handful
+ * of rows carries no information — the caller falling back to
+ * FALLBACK_PLAY_PROB is strictly better than believing 1/1. Do not lower this
+ * to accommodate a small test fixture; enlarge the fixture.
+ */
+const MIN_STATUS_N = 20;
 
 export function stdev(xs: number[]): number {
   if (xs.length < 2) return 0;
