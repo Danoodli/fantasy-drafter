@@ -50,75 +50,48 @@ export function bestLineup(players: LineupPlayer[], config: LeagueConfig): Lineu
     list.sort((a, b) => b.points - a.points || a.id.localeCompare(b.id));
   }
 
+  // Dedicated slots first: they can only be filled by their own position.
+  const used = new Map<Position, number>();
+  const starters: { slot: string; player: LineupPlayer }[] = [];
+  for (const pos of DEDICATED) {
+    const n = config.rosterSlots[pos] ?? 0;
+    const list = byPos.get(pos) ?? [];
+    let taken = 0;
+    for (let i = 0; i < n && i < list.length; i++) {
+      starters.push({ slot: pos, player: list[i] });
+      taken++;
+    }
+    used.set(pos, taken);
+  }
+
   const flexSlots = config.rosterSlots.FLEX ?? 0;
-  const eligible = config.flexEligible;
+  const eligible = config.flexEligible.filter((pos) => (byPos.get(pos) ?? []).length > (used.get(pos) ?? 0));
+  // Fill as many flex slots as there are eligible leftovers: with fewer
+  // leftovers than slots, a composition summing to flexSlots is infeasible and
+  // an exact-sum search would leave EVERY flex slot empty.
+  const leftover = eligible.reduce((s, pos) => s + (byPos.get(pos) ?? []).length - (used.get(pos) ?? 0), 0);
+  const toFill = Math.min(flexSlots, leftover);
 
-  let bestStarters: { slot: string; player: LineupPlayer }[] = [];
-  let bestTotal = -1;
-
-  if (flexSlots > 0 && eligible.length > 0) {
-    // Enumerate allocations: how many flex slots each eligible position contributes.
-    for (const alloc of allocations(eligible.length, flexSlots)) {
-      const starters: { slot: string; player: LineupPlayer }[] = [];
+  let bestFlex: LineupPlayer[] = [];
+  let bestGain = -1;
+  if (toFill > 0) {
+    for (const alloc of allocations(eligible.length, toFill)) {
+      const picked: LineupPlayer[] = [];
       let ok = true;
-      let total = 0;
-
-      // For each position, determine how many total players to use.
-      const flexCandidates: LineupPlayer[] = [];
-      for (const pos of DEDICATED) {
-        const dedicatedSlots = config.rosterSlots[pos] ?? 0;
+      for (let i = 0; i < eligible.length; i++) {
+        const pos = eligible[i];
         const list = byPos.get(pos) ?? [];
-        let flexAlloc = 0;
-        if (eligible.includes(pos)) {
-          flexAlloc = alloc[eligible.indexOf(pos)];
-        }
-        const needed = dedicatedSlots + flexAlloc;
-
-        if (needed > list.length) {
-          ok = false;
-          break;
-        }
-
-        // Fill dedicated slots with best players.
-        for (let i = 0; i < dedicatedSlots; i++) {
-          starters.push({ slot: pos, player: list[i] });
-          total += list[i].points;
-        }
-
-        // Collect flex candidates from this position.
-        for (let i = dedicatedSlots; i < needed; i++) {
-          flexCandidates.push(list[i]);
-          total += list[i].points;
-        }
+        const from = used.get(pos) ?? 0;
+        // Cannot take more than remain at that position.
+        if (from + alloc[i] > list.length) { ok = false; break; }
+        for (let j = 0; j < alloc[i]; j++) picked.push(list[from + j]);
       }
-
       if (!ok) continue;
-
-      // Sort flex candidates and add to starters in the right order.
-      flexCandidates.sort((a, b) => b.points - a.points || a.id.localeCompare(b.id));
-      for (let i = 0; i < Math.min(flexSlots, flexCandidates.length); i++) {
-        starters.push({ slot: "FLEX", player: flexCandidates[i] });
-      }
-
-      if (total > bestTotal) {
-        bestTotal = total;
-        bestStarters = starters;
-      }
+      const gain = picked.reduce((s, x) => s + x.points, 0);
+      if (gain > bestGain) { bestGain = gain; bestFlex = picked; }
     }
   }
-
-  if (bestStarters.length === 0) {
-    // Fallback: fill only dedicated slots.
-    for (const pos of DEDICATED) {
-      const n = config.rosterSlots[pos] ?? 0;
-      const list = byPos.get(pos) ?? [];
-      for (let i = 0; i < n && i < list.length; i++) {
-        bestStarters.push({ slot: pos, player: list[i] });
-      }
-    }
-  }
-
-  const starters = bestStarters;
+  for (const pl of bestFlex) starters.push({ slot: "FLEX", player: pl });
 
   const startedIds = new Set(starters.map((s) => s.player.id));
   const benched = players

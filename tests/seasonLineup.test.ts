@@ -38,9 +38,9 @@ describe("bestLineup", () => {
       cfg({ rosterSlots: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 2, K: 1, DST: 1 } })
     );
     const flex = l.starters.filter((s) => s.slot === "FLEX").map((s) => s.player.id).sort();
-    // Dedicated slots take the best at each position first: WR wr1 14 + wr3 13,
-    // TE te2 12. Leftovers are rb3 10, wr2 11, te1 8 -> the two flex slots take
-    // wr2 and rb3, and te1 is the only bench player.
+    // Dedicated slots take the best at each position first: RB rb1 12 + rb3 10,
+    // WR wr1 14 + wr3 13, TE te2 12. Leftovers are rb2 9, wr2 11, te1 8 -> the
+    // two flex slots take wr2 and rb2, and te1 is the only bench player.
     expect(l.starters.find((s) => s.slot === "TE")?.player.id).toBe("te2");
     expect(flex).toEqual(["rb2", "wr2"]);
     expect(l.benched.map((b) => b.id)).toEqual(["te1"]);
@@ -69,10 +69,35 @@ describe("bestLineup", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("is deterministic on ties", () => {
+  it("is deterministic on ties: the same players start whatever the input order", () => {
     const players = [p("a", "RB", 10), p("b", "RB", 10), p("c", "RB", 10)];
     const one = bestLineup(players, cfg());
     const two = bestLineup([...players].reverse(), cfg());
-    expect(one.total).toBeCloseTo(two.total, 10);
+    // Two RB slots, three equal RBs: the id tiebreak must pick the same two
+    // both times. A first-encountered rule would start a,b then c,b.
+    expect(one.starters.map((s) => s.player.id)).toEqual(two.starters.map((s) => s.player.id));
+    expect(one.benched.map((b) => b.id)).toEqual(two.benched.map((b) => b.id));
+  });
+
+  it("fills as many flex slots as there are eligible leftovers, not none", () => {
+    // Two flex slots, one leftover (rb2): a search over compositions summing
+    // to exactly 2 finds nothing feasible and would leave both empty.
+    const l = bestLineup(
+      [p("rb1", "RB", 10), p("rb2", "RB", 5), p("wr1", "WR", 8)],
+      cfg({ rosterSlots: { QB: 0, RB: 1, WR: 1, TE: 0, FLEX: 2, K: 0, DST: 0 } })
+    );
+    expect(l.starters.filter((s) => s.slot === "FLEX").map((s) => s.player.id)).toEqual(["rb2"]);
+    expect(l.total).toBeCloseTo(23, 6);
+    expect(l.benched).toEqual([]);
+  });
+
+  it("fills the flex even when a non-flex dedicated position (K) has nobody", () => {
+    const l = bestLineup(
+      [p("qb1", "QB", 20), p("rb1", "RB", 12), p("rb2", "RB", 9), p("rb3", "RB", 8), p("wr1", "WR", 14), p("wr2", "WR", 11), p("te1", "TE", 8), p("d1", "DST", 6)],
+      cfg()
+    );
+    expect(l.starters.find((s) => s.slot === "K")).toBeUndefined();
+    expect(l.starters.find((s) => s.slot === "FLEX")?.player.id).toBe("rb3");
+    expect(l.total).toBeCloseTo(20 + 12 + 9 + 14 + 11 + 8 + 6 + 8, 6);
   });
 });
