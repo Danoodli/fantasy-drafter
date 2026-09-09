@@ -921,11 +921,13 @@ describe("startSitAdvice", () => {
   });
 
   it("on a FLEX config, a bench RB may replace the flexed WR but a bench QB may not", () => {
-    // QB1 RB1 WR1 FLEX1 (RB/WR/TE): starters qb, rb, wr1 and flex wr2 (11 > rb2 9).
+    // QB1 RB1 WR1 FLEX1 (RB/WR/TE). The LOCKED lineup is qb, rb, wr1 + flex wr2;
+    // rb2 (30) and qb2 (40) sit on the bench, so both swaps are on offer.
     const flexCfg: LeagueConfig = { ...cfg, rosterSlots: { QB: 1, RB: 1, WR: 1, TE: 0, FLEX: 1, K: 0, DST: 0 } };
     const a = startSitAdvice(input({
       config: flexCfg,
       players: [me("qb", "QB", 18), me("rb", "RB", 12), me("wr1", "WR", 14), me("wr2", "WR", 11), me("rb2", "RB", 30), me("qb2", "QB", 40)],
+      starterIds: ["qb", "rb", "wr1", "wr2"],
       opponent: { kind: "roster", players: [them("oqb", "QB", 18), them("orb", "RB", 12), them("owr", "WR", 14), them("owr2", "WR", 11)] },
     }));
     expect(a.lineup.starters).toHaveLength(4);
