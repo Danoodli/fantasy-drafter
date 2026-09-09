@@ -2684,8 +2684,18 @@ describe("weekSim correlation structure", () => {
   });
 
   it("a DST is negatively correlated with the offense it faces", () => {
-    const draws = simulateWeek(players, CORR, 8000, 7);
-    expect(corr(columns(draws, 5), columns(draws, 3))).toBeLessThan(-0.05); // dst-det vs wr-chi
+    // Asserted as a VALUE, not a threshold. With CORR's amplitudes the
+    // underlying normal correlation is a_game^2 - a_dst*a_team
+    // = 0.15 - sqrt(0.30)*sqrt(0.20) = -0.0949, which for sigma 0.6 maps to a
+    // points correlation of (exp(rho*s^2)-1)/(exp(s^2)-1) = -0.0775.
+    //
+    // 20k draws, not 8k: at 8k the standard error is 0.011, so a bare
+    // "< -0.05" assertion sat only 2.5 SE from its own threshold — tight
+    // enough that a subtly wrong structure could still satisfy it.
+    const draws = simulateWeek(players, CORR, 20000, 7);
+    const observed = corr(columns(draws, 5), columns(draws, 3)); // dst-det vs wr-chi
+    expect(observed).toBeLessThan(0); // sign first: a DST must not track the offense it faces
+    expect(observed).toBeCloseTo(-0.0775, 1); // +/- 0.05, about 7 SE at 20k draws
   });
 
   it("reproduces the season model's behaviour when game and unit are off", () => {
