@@ -3,14 +3,14 @@
     "week": 2,
     "season": "2026",
     "player_id": "6813",
-    "stats": { "pts_ppr": 23.79, "rush_yd": 99.63, "rush_td": 1.05, "rec": 3.95, "rec_yd": 26.15, "rec_td": 0.19, "rec_fd": 2.61, "rush_fd": 9.96, "fum_lost": 0.09 },
+    "stats": { "pts_ppr": 23.92, "rush_yd": 99.63, "rush_td": 1.05, "rec": 3.95, "rec_yd": 26.15, "rec_td": 0.19, "rec_fd": 2.61, "rush_fd": 9.96, "fum_lost": 0.09 },
     "player": { "position": "RB", "team": "DET", "injury_status": null, "first_name": "Jahmyr", "last_name": "Gibbs" }
   },
   {
     "week": 2,
     "season": "2026",
     "player_id": "4034",
-    "stats": { "pts_ppr": 18.12, "pass_yd": 268.0, "pass_td": 1.7, "pass_int": 0.6, "rush_yd": 12.0, "pass_fd": 11.2 },
+    "stats": { "pts_ppr": 14.1, "pass_yd": 268.0, "pass_td": 1.7, "pass_int": 0.6, "rush_yd": 12.0, "pass_fd": 11.2 },
     "player": { "position": "QB", "team": "KC", "injury_status": "Questionable", "first_name": "Patrick", "last_name": "Mahomes" }
   },
   {
