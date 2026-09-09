@@ -900,6 +900,15 @@ describe("environment multipliers", () => {
     for (const spread of [-30, -20, 0, 20, 30]) {
       expect(scriptMult("RB", spread, ON)).toBeGreaterThan(0);
     }
+    // The loop above does NOT reach the clamp: with ON's beta.RB the unclamped
+    // range is only ~0.49-1.51, so it would still pass with Math.max deleted.
+    // A steep coefficient is what actually pins the floor.
+    const steep: WeeklyModelParams = {
+      ...OFF,
+      environment: { ...ON.environment, beta: { RB: -0.5 } },
+    };
+    expect(scriptMult("RB", 30, steep)).toBe(0.4); // unclamped would be -1.14
+    expect(scriptMult("RB", -30, steep)).toBeGreaterThan(1);
   });
 });
 ```
@@ -970,6 +979,7 @@ export function scriptMult(pos: Position, ownSpread: number, p: WeeklyModelParam
   //
   // So with beta.RB < 0 a favorite's backs go UP (favorites run out the clock),
   // and with beta.WR > 0 an underdog's receivers go UP (underdogs throw).
+  // Floor at 0.4: a 30-point spread should move a back's projection, not erase it.
   return Math.max(0.4, 1 + beta * (ownSpread / 7));
 }
 ```
