@@ -38,11 +38,34 @@ async function main() {
 
     // actuals: sleeperId|week → stat line
     const actual = new Map<string, ReturnType<typeof statLineFromNflverse>>();
+    const unmapped = new Set<string>();
+    const seen = new Set<string>();
     for (const r of nfl.data) {
       if (r.season !== String(season) || r.season_type !== "REG") continue;
-      const sid = gsisToSleeper[r.player_id ?? ""];
-      if (!sid) continue;
+      const gsis = r.player_id ?? "";
+      if (gsis) seen.add(gsis);
+      const sid = gsisToSleeper[gsis];
+      // A crosswalk miss is NOT harmless: this player's real played game never
+      // reaches `actual`, so his row later gets act: null and reads as "did not
+      // play". That inflates the measured did-not-play rate and quietly biases
+      // anything fitted from availability. Count it and say so.
+      if (!sid) {
+        if (gsis) unmapped.add(gsis);
+        continue;
+      }
       actual.set(`${sid}|${r.week}`, statLineFromNflverse(r));
+    }
+    const missPct = seen.size ? (100 * unmapped.size) / seen.size : 0;
+    console.log(
+      `${season}: crosswalk mapped ${seen.size - unmapped.size}/${seen.size} gsis ids ` +
+        `(${missPct.toFixed(1)}% unmapped)`
+    );
+    if (missPct > 5) {
+      throw new Error(
+        `${season}: ${missPct.toFixed(1)}% of gsis ids are absent from db_playerids.csv. ` +
+          `Their played games would be recorded as "did not play", inflating the DNP rate. ` +
+          `Refresh the crosswalk (full lane) before trusting this fit set.`
+      );
     }
 
     const rows: HistRow[] = [];

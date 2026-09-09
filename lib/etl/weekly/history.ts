@@ -32,8 +32,17 @@ export interface HistRow {
   spr: number;
 }
 
-/** StatLine keys → one- or two-char codes. Order is frozen: changing it
- *  invalidates every committed snapshot, so append, never reorder. */
+/**
+ * StatLine keys → two-char codes.
+ *
+ * pack/unpack look up BY CODE NAME, not by position, so REORDERING this array
+ * is harmless. The invariant that actually matters is narrower and more
+ * dangerous: **never reuse or reassign a code.** Pointing `ry` at a different
+ * StatLine key would silently reinterpret five committed seasons as a
+ * different stat, with no error and no test failure anywhere else — which is
+ * why tests/weeklyHistory.test.ts decodes a hand-written payload to pin the
+ * mapping. To add a stat, add a new unused code.
+ */
 const CODES: [keyof StatLine, string][] = [
   ["passYds", "py"], ["passTD", "pt"], ["passInt", "pi"], ["pass2pt", "p2"],
   ["rushYds", "ry"], ["rushTD", "rt"], ["rush2pt", "r2"],
