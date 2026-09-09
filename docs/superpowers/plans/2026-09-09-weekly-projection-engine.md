@@ -3749,7 +3749,7 @@ Five seasons of projection-vs-reality, committed. Without this there is nothing 
 **Interfaces:**
 - Consumes: `fetchSleeperWeekly`, `fetchNflverseWeekly`, `parseHistoricalLines`, `statLineFromNflverse`, `scoreStatLine`.
 - Produces:
-  - `interface HistRow { id: string; pos: Position; team: string; wk: number; opp: string; st: string | null; proj: StatLine; act: StatLine | null; tot: number; spr: number }`
+  - `interface HistRow { id: string; pos: Position; team: string; wk: number; opp: string; stNow: string | null; proj: StatLine; act: StatLine | null; tot: number; spr: number }` — `stNow` is Sleeper's status as of FETCH time, not the historical week's; it must not be used to calibrate availability
   - `interface HistSeason { season: number; rows: HistRow[] }`
   - `encodeHistory(rows: HistRow[]): string` / `decodeHistory(json: string): HistRow[]` — round-tripping compact storage
   - `loadHistory(seasons: number[]): HistSeason[]`
@@ -3823,8 +3823,18 @@ export interface HistRow {
   team: string;
   wk: number;
   opp: string;
-  /** Injury designation at projection time, for the availability fit. */
-  st: string | null;
+  /**
+   * Sleeper's injury designation **AS OF WHEN THIS ROW WAS FETCHED**, not as of
+   * the historical week. Sleeper serves historical projections with a LIVE
+   * status field: refetching the same past week 2h45m apart changed 12 of 325
+   * statuses (both directions) while changing 0 stat lines, and players marked
+   * "Out" in the fit set have a 0% did-not-play rate — impossible for a
+   * contemporaneous designation.
+   *
+   * DO NOT calibrate availability from this. See the availability note in
+   * scripts/calibrate-weekly.ts.
+   */
+  stNow: string | null;
   proj: StatLine;
   /** null = did not appear in the box score. Distinct from an all-zero line. */
   act: StatLine | null;
@@ -3867,7 +3877,7 @@ export function encodeHistory(rows: HistRow[]): string {
   return JSON.stringify(
     rows.map((r) => ({
       i: r.id, p: r.pos, t: r.team, w: r.wk, o: r.opp,
-      s: r.st ?? undefined,
+      s: r.stNow ?? undefined,
       j: packStats(r.proj),
       a: r.act === null ? null : packStats(r.act),
       v: r2(r.tot), d: r2(r.spr),
@@ -3884,7 +3894,7 @@ interface Packed {
 export function decodeHistory(json: string): HistRow[] {
   return (JSON.parse(json) as Packed[]).map((r) => ({
     id: r.i, pos: r.p, team: r.t, wk: r.w, opp: r.o,
-    st: r.s ?? null,
+    stNow: r.s ?? null,
     proj: unpackStats(r.j),
     act: r.a === null ? null : unpackStats(r.a),
     tot: r.v, spr: r.d,
@@ -4226,8 +4236,15 @@ export function fitSigmaByVolume(
   return { sigma0: Math.exp(intercept), delta };
 }
 
-/** P(played | designation). Designations seen too rarely are omitted, so the
- *  caller falls back to FALLBACK_PLAY_PROB rather than to a rate of 1/1. */
+/**
+ * P(played | designation). Designations seen too rarely are omitted, so the
+ * caller falls back to FALLBACK_PLAY_PROB rather than to a rate of 1/1.
+ *
+ * NOTE: not currently called by scripts/calibrate-weekly.ts. The only
+ * historical status available is Sleeper's live field rather than the week's,
+ * so there is nothing sound to feed this yet. Kept and tested because the
+ * weekly lane is now accumulating contemporaneous statuses, which will be.
+ */
 export function empiricalPlayRate(
   rows: { status: string | null; played: boolean }[]
 ): Record<string, number> {
@@ -4429,18 +4446,33 @@ function main() {
   const params: WeeklyModelParams = JSON.parse(JSON.stringify(DEFAULT_WEEKLY_MODEL));
   params.fittedOn = fitSeasons;
 
-  // --- availability ---------------------------------------------------------
-  params.availability.byStatus = empiricalPlayRate(
-    rows.map((r) => ({ status: r.st, played: r.played }))
-  );
-  // The no-designation rate is a lever too, not a constant: measure it from
-  // the rows that carry no status rather than leaving pPlay's fallback in place.
-  const healthyRows = rows.filter((r) => !r.st);
-  if (healthyRows.length >= 200) {
-    params.availability.healthy =
-      round3(healthyRows.filter((r) => r.played).length / healthyRows.length);
-  }
-  console.log("availability:", params.availability.healthy, params.availability.byStatus);
+  // --- availability: DELIBERATELY NOT FITTED --------------------------------
+  //
+  // An earlier draft of this plan fitted availability.byStatus and
+  // availability.healthy from the history's status field. That is unsound and
+  // would have been actively dangerous.
+  //
+  // Sleeper serves historical weekly projections with a LIVE injury-status
+  // field, not the week's. Two fetches of the same past week 2h45m apart
+  // changed 12 of 325 statuses in both directions while changing 0 stat lines,
+  // and in the assembled fit set players marked "Out" have a 0% did-not-play
+  // rate — impossible if the designation were contemporaneous.
+  //
+  // Fitting it anyway would have learned "Out implies about a 95% chance of
+  // playing", because Out-labelled rows in the set mostly did play. The engine
+  // would then have told the user to start a player who is ruled out, from a
+  // calibration that looked entirely successful.
+  //
+  // So availability keeps its hand-set FALLBACK_PLAY_PROB and its
+  // availability.healthy default, and stays the one uncalibrated part of the
+  // model. This is a data-source limitation, not a modelling choice, and it is
+  // recorded as such in docs/backtest-gates.md.
+  //
+  // It is fixable going forward: the weekly lane commits
+  // data/raw/weekly/sleeper-week-{season}-{week}.json with the status as of
+  // build time, so from now on the repo accumulates CONTEMPORANEOUS statuses.
+  // After a season of those, availability becomes calibratable from them.
+  console.log("availability: NOT fitted (historical status is a live field — see comment)");
 
   // --- environment: alpha on log(itp / leagueAvgItp) ------------------------
   const avgItp = active.reduce((s, r) => s + r.itpOwn, 0) / active.length;

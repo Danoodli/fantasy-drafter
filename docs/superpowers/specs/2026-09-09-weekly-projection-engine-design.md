@@ -137,13 +137,33 @@ So: **all adjustment coefficients are fitted on the residual**
 the environment and matchup signal the market has *left on the table*. Expect
 small coefficients. Small and real beats large and double-counted.
 
-### 6. Availability
+### 6. Availability — the one part that stays uncalibrated
 
-`pPlay = 0` on a bye. Otherwise fitted from history: the Sleeper weekly
-projection payload carries `player.injury_status`, and nflverse says whether he
-actually played, so `status → P(played)` is a directly measurable table rather
-than the hand-set constants in `STATUS_MISS_PROB`. Fit it; keep the current
-constants as the documented fallback.
+`pPlay = 0` on a bye. Otherwise it uses hand-set constants, and **this is a
+data-source limitation rather than a choice.**
+
+The original intent was to fit `status → P(played)` from history, since the
+Sleeper weekly payload carries `player.injury_status` and nflverse says whether
+the player appeared. Building the fit set proved that unsound: Sleeper serves
+historical projections with a **live** status field. Refetching the same past
+week 2h45m apart changed 12 of 325 statuses in both directions while changing
+**zero** stat lines, and in the assembled set players labelled "Out" have a
+**0% did-not-play rate** — impossible for a contemporaneous designation.
+
+Fitting it would have learned "Out implies roughly a 95% chance of playing",
+and the engine would then have recommended starting players who are ruled out,
+off a calibration that looked entirely successful. So availability keeps its
+documented constants and is excluded from the fit.
+
+It is fixable going forward rather than permanently blocked: the weekly lane
+commits `data/raw/weekly/sleeper-week-{season}-{week}.json` with the status as
+of build time, so the repo now accumulates contemporaneous statuses. After a
+season of those, availability becomes calibratable from them — and that is the
+first follow-up once this leg ships.
+
+Everything else in the model IS fitted from history: the projections
+themselves are stable, which is what makes the environment, matchup and sigma
+coefficients sound.
 
 ### 7. Spread
 
