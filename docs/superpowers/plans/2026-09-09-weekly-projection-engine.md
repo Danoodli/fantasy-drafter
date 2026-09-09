@@ -540,7 +540,7 @@ Two shapes of the same fact: the live ESPN scoreboard for the upcoming week, and
 - Test: `tests/vegas.test.ts`
 
 **Interfaces:**
-- Consumes: `parseCsv` from `lib/etl/csv.ts`, `canonicalTeam` from `lib/etl/nflverse.ts`, `SourceResult`/`FetchOpts` from `lib/etl/fetchers.ts`.
+- Consumes: `parseCsv` from `lib/etl/csv.ts`, `canonicalTeam` from `lib/etl/nflverse.ts`, `SourceResult`/`FetchOpts` from `lib/etl/fetchers.ts`, and **`fetchSlim` from `lib/etl/weekly/cache.ts`** (created in Task 2 — it owns the fixture caching, the `meta.json` staleness bookkeeping and the fallback warning; do not re-implement that block here).
 - Produces: `interface GameLine { week: number; home: string; away: string; total: number; homeSpread: number }`, `parseEspnScoreboard(json: unknown): GameLine[]`, `parseHistoricalLines(csv: string, season: number): GameLine[]`, `fetchVegasWeek(season: number, week: number, opts?: FetchOpts): Promise<SourceResult<GameLine[]>>`, `lineFor(lines: GameLine[], team: string): { total: number; ownSpread: number; opp: string } | null`.
 
 `homeSpread` follows the betting convention: **negative means the home team is favored**. `ownSpread` from `lineFor` is that team's own spread, so negative means this team is favored.
@@ -632,13 +632,10 @@ Expected: FAIL — module not found.
 // Convention: `homeSpread` is negative when the home team is favored (betting
 // convention). nflverse's spread_line is the OPPOSITE sign, so it is flipped
 // on read — getting this backwards silently inverts every favorite in the fit.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { parseCsv } from "../csv";
 import { canonicalTeam } from "../nflverse";
 import type { FetchOpts, SourceResult } from "../fetchers";
-
-const RAW_DIR = join(process.cwd(), "data", "raw", "weekly");
+import { fetchSlim } from "./cache";
 
 export interface GameLine {
   week: number;
@@ -710,38 +707,30 @@ export function lineFor(
   return null;
 }
 
-export async function fetchVegasWeek(
+export function fetchVegasWeek(
   season: number,
   week: number,
   opts: FetchOpts = {}
 ): Promise<SourceResult<GameLine[]>> {
-  const key = `vegas-${season}-${week}.json`;
-  const fixturePath = join(RAW_DIR, key);
-  const readFixture = () => JSON.parse(readFileSync(fixturePath, "utf8")) as GameLine[];
-
-  if (opts.fixtureOnly) {
-    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the weekly lane live first`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
-  try {
-    const url =
-      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
-      `?seasontype=2&week=${week}&dates=${season}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const lines = parseEspnScoreboard(await res.json());
-    if (lines.length < 8) throw new Error(`only ${lines.length} games with odds`);
-    mkdirSync(RAW_DIR, { recursive: true });
-    writeFileSync(fixturePath, JSON.stringify(lines));
-    return { data: lines, fetchedAt: new Date().toISOString(), fromFixture: false };
-  } catch (err) {
-    if (!existsSync(fixturePath)) {
-      console.warn(`⚠️  ${key}: fetch failed (${err}) and no fixture — environment adjustments will be neutral`);
-      return { data: [], fetchedAt: "unknown", fromFixture: true };
-    }
-    console.warn(`\n⚠️  ${key}: live fetch FAILED (${err}). Using committed fixture.\n`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
+  return fetchSlim<GameLine[]>(
+    `vegas-${season}-${week}.json`,
+    async () => {
+      const url =
+        `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
+        `?seasontype=2&week=${week}&dates=${season}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const lines = parseEspnScoreboard(await res.json());
+      // A bye-heavy week still has at least 8 games; fewer means the feed is
+      // partial, which would feed the model a fabricated environment.
+      if (lines.length < 8) throw new Error(`only ${lines.length} games with odds`);
+      return lines;
+    },
+    opts,
+    // The engine runs neutral without lines (envMult and scriptMult fall to 1),
+    // so a missing fixture degrades rather than fails.
+    () => []
+  );
 }
 ```
 
@@ -2616,7 +2605,7 @@ The two sources the ensemble and the usage model still need. Both reduce their p
 - Test: `tests/weeklyFetchers.test.ts`
 
 **Interfaces:**
-- Consumes: `ESPN_POS`, `ESPN_TEAM`, `type EspnPlayerEntry` from `lib/etl/espn.ts`; `statLineFromEspn` from `lib/scoring.ts`; `parseCsv`; `canonicalTeam`; `SourceResult`/`FetchOpts`.
+- Consumes: `ESPN_POS`, `ESPN_TEAM` from `lib/etl/espn.ts`; `statLineFromEspn` from `lib/scoring.ts`; `parseCsv`; `SourceResult`/`FetchOpts`; and **`fetchSlim` from `lib/etl/weekly/cache.ts`** (created in Task 2 — it owns fixture caching, `meta.json` staleness bookkeeping and the fallback warning; do not re-implement that block).
 - Produces:
   - `parseEspnWeekly(json: unknown, week: number): Record<string, { stats: StatLine; name: string; pos: Position; team: string }>` — keyed by **ESPN id**
   - `fetchEspnWeekly(season: number, week: number, opts?: FetchOpts): Promise<SourceResult<...>>`
@@ -2705,14 +2694,11 @@ Expected: FAIL — modules not found.
 //
 // Keyed by ESPN id, so the join to sleeper ids goes through the DynastyProcess
 // crosswalk the same way the season board does it.
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import type { Position, StatLine } from "../../types";
 import { statLineFromEspn } from "../../scoring";
 import { ESPN_POS, ESPN_TEAM } from "../espn";
 import type { FetchOpts, SourceResult } from "../fetchers";
-
-const RAW_DIR = join(process.cwd(), "data", "raw", "weekly");
+import { fetchSlim } from "./cache";
 
 export interface EspnWeeklyPlayer {
   stats: StatLine;
@@ -2766,45 +2752,32 @@ export function parseEspnWeekly(json: unknown, week: number): Record<string, Esp
   return out;
 }
 
-export async function fetchEspnWeekly(
+export function fetchEspnWeekly(
   season: number,
   week: number,
   opts: FetchOpts = {}
 ): Promise<SourceResult<Record<string, EspnWeeklyPlayer>>> {
-  const key = `espn-week-${season}-${week}.json`;
-  const fixturePath = join(RAW_DIR, key);
-  const readFixture = () => JSON.parse(readFileSync(fixturePath, "utf8"));
-
-  if (opts.fixtureOnly) {
-    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the weekly lane live first`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
-  try {
-    const url =
-      `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}` +
-      `/segments/0/leaguedefaults/3?view=kona_player_info&scoringPeriodId=${week}`;
-    const filter = {
-      players: {
-        limit: 1500,
-        sortPercOwned: { sortAsc: false, sortPriority: 1 },
-      },
-    };
-    const res = await fetch(url, { headers: { "x-fantasy-filter": JSON.stringify(filter) } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const parsed = parseEspnWeekly(await res.json(), week);
-    const n = Object.keys(parsed).length;
-    if (n < 100) throw new Error(`only ${n} weekly projections`);
-    mkdirSync(RAW_DIR, { recursive: true });
-    writeFileSync(fixturePath, JSON.stringify(parsed));
-    return { data: parsed, fetchedAt: new Date().toISOString(), fromFixture: false };
-  } catch (err) {
-    if (!existsSync(fixturePath)) {
-      console.warn(`⚠️  ${key}: fetch failed (${err}) and no fixture — ESPN drops out of the ensemble this week`);
-      return { data: {}, fetchedAt: "unknown", fromFixture: true };
-    }
-    console.warn(`\n⚠️  ${key}: live fetch FAILED (${err}). Using committed fixture.\n`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
+  return fetchSlim<Record<string, EspnWeeklyPlayer>>(
+    `espn-week-${season}-${week}.json`,
+    async () => {
+      const url =
+        `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${season}` +
+        `/segments/0/leaguedefaults/3?view=kona_player_info&scoringPeriodId=${week}`;
+      const filter = {
+        players: { limit: 1500, sortPercOwned: { sortAsc: false, sortPriority: 1 } },
+      };
+      const res = await fetch(url, { headers: { "x-fantasy-filter": JSON.stringify(filter) } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const parsed = parseEspnWeekly(await res.json(), week);
+      const n = Object.keys(parsed).length;
+      if (n < 100) throw new Error(`only ${n} weekly projections`);
+      return parsed;
+    },
+    opts,
+    // ESPN is the SECOND ensemble source and ships at weight 0, so dropping it
+    // degrades nothing today; blendMarket renormalizes over the sources present.
+    () => ({})
+  );
 }
 ```
 
@@ -2818,12 +2791,9 @@ export async function fetchEspnWeekly(
 //
 // The raw CSV is ~8.6 MB per season and carries 60+ columns. We keep about
 // twenty and cache slim JSON — same policy as every other fixture here.
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { parseCsv } from "../csv";
 import type { FetchOpts, SourceResult } from "../fetchers";
-
-const RAW_DIR = join(process.cwd(), "data", "raw", "weekly");
+import { fetchSlim } from "./cache";
 
 /** Every column any model in lib/engine/weekly/ reads. Verified against the 2025 file. */
 export const NFLVERSE_WEEKLY_COLUMNS = [
@@ -2851,36 +2821,26 @@ export function slimNflverseWeekly(csv: string): Record<string, string>[] {
   return out;
 }
 
-export async function fetchNflverseWeekly(
+export function fetchNflverseWeekly(
   season: number,
   opts: FetchOpts = {}
 ): Promise<SourceResult<Record<string, string>[]>> {
-  const key = `nflverse-week-${season}.json`;
-  const fixturePath = join(RAW_DIR, key);
-  const readFixture = () => JSON.parse(readFileSync(fixturePath, "utf8"));
-
-  if (opts.fixtureOnly) {
-    if (!existsSync(fixturePath)) throw new Error(`fixture ${key} missing — run the weekly lane live first`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
-  try {
-    const url =
-      `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
-    const res = await fetch(url); // node fetch follows the release redirect
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const slim = slimNflverseWeekly(await res.text());
-    if (slim.length < 100) throw new Error(`only ${slim.length} rows`);
-    mkdirSync(RAW_DIR, { recursive: true });
-    writeFileSync(fixturePath, JSON.stringify(slim));
-    return { data: slim, fetchedAt: new Date().toISOString(), fromFixture: false };
-  } catch (err) {
-    if (!existsSync(fixturePath)) {
-      console.warn(`⚠️  ${key}: fetch failed (${err}) and no fixture — usage and DvP go neutral`);
-      return { data: [], fetchedAt: "unknown", fromFixture: true };
-    }
-    console.warn(`\n⚠️  ${key}: live fetch FAILED (${err}). Using committed fixture.\n`);
-    return { data: readFixture(), fetchedAt: "fixture", fromFixture: true };
-  }
+  return fetchSlim<Record<string, string>[]>(
+    `nflverse-week-${season}.json`,
+    async () => {
+      const url =
+        `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
+      const res = await fetch(url); // node fetch follows the release redirect
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const slim = slimNflverseWeekly(await res.text());
+      if (slim.length < 100) throw new Error(`only ${slim.length} rows`);
+      return slim;
+    },
+    opts,
+    // Without box scores the usage model and the DvP table both go neutral,
+    // which the engine handles (matchMult falls to 1, usage weight is 0).
+    () => []
+  );
 }
 ```
 
