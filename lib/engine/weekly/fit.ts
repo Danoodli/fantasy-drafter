@@ -25,8 +25,32 @@ export function stdev(xs: number[]): number {
 }
 
 export function olsSlope(xs: number[], ys: number[]): number {
+  return olsFit(xs, ys).slope;
+}
+
+export interface OlsFit {
+  slope: number;
+  /** Standard error of the slope. 0 when the slope is not estimable. */
+  se: number;
+  /** slope / se. 0 when not estimable. */
+  t: number;
+  n: number;
+}
+
+/**
+ * OLS slope WITH its standard error, so a caller can ask whether the
+ * coefficient is distinguishable from zero before shipping it.
+ *
+ * This matters more here than it usually would. Weekly fantasy residuals are
+ * enormously noisy — the log-residual standard deviation is 0.57 to 0.84 by
+ * position — so a regression over thousands of rows can still produce a
+ * confident-looking coefficient that is pure noise. Measured on 10,131 fitted
+ * player-weeks, every environment and matchup coefficient came out with
+ * |t| < 1.96. Shipping those would add variance with no signal.
+ */
+export function olsFit(xs: number[], ys: number[]): OlsFit {
   const n = Math.min(xs.length, ys.length);
-  if (n < MIN_FIT_N) return 0;
+  if (n < MIN_FIT_N) return { slope: 0, se: 0, t: 0, n };
   let sx = 0, sy = 0;
   for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; }
   const mx = sx / n, my = sy / n;
@@ -35,8 +59,20 @@ export function olsSlope(xs: number[], ys: number[]): number {
     num += (xs[i] - mx) * (ys[i] - my);
     den += (xs[i] - mx) ** 2;
   }
-  return den > 0 ? num / den : 0;
+  if (!(den > 0)) return { slope: 0, se: 0, t: 0, n };
+  const slope = num / den;
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const yhat = my + slope * (xs[i] - mx);
+    sse += (ys[i] - yhat) ** 2;
+  }
+  // n - 2 residual degrees of freedom: intercept plus slope.
+  const se = Math.sqrt(sse / (n - 2) / den);
+  return { slope, se, t: se > 0 ? slope / se : 0, n };
 }
+
+/** |t| a coefficient must clear to be kept rather than zeroed. */
+export const MIN_ABS_T = 2;
 
 export function pearson(xs: number[], ys: number[]): number {
   const n = Math.min(xs.length, ys.length);
@@ -69,15 +105,21 @@ export function fitSigmaByVolume(
   const per = Math.floor(sorted.length / BUCKETS);
   const xs: number[] = [];
   const ys: number[] = [];
-  const sds: { v: number; sd: number }[] = [];
   for (let b = 0; b < BUCKETS; b++) {
     const slice = sorted.slice(b * per, b === BUCKETS - 1 ? sorted.length : (b + 1) * per);
     const sd = stdev(slice.map((p) => p.logResidual));
     const meanV = slice.reduce((s, p) => s + p.volume, 0) / slice.length;
     if (sd <= 0 || meanV <= 0) continue;
-    sds.push({ v: meanV, sd });
     xs.push(Math.log(v0 / meanV));
     ys.push(Math.log(sd));
+  }
+  // Every bucket filtered out (all-identical volumes, or all-zero spread)
+  // would leave xs/ys empty, making the means 0/0 = NaN and sigma0
+  // exp(NaN) = NaN. loadWeeklyModel would reject that on the next import, but
+  // one step removed from its cause — as a config-load error after a
+  // calibration that reported success. Degrade to the flat sd instead.
+  if (xs.length < MIN_FIT_N) {
+    return { sigma0: stdev(points.map((p) => p.logResidual)), delta: 0 };
   }
   const delta = olsSlope(xs, ys);
   // sigma0 is the fitted sd at v = v0, i.e. where log(v0/v) = 0.

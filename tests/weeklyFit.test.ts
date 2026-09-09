@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { olsSlope, stdev, pearson, fitSigmaByVolume, empiricalPlayRate, pitCoverage } from "../lib/engine/weekly/fit";
+import {
+  olsSlope,
+  olsFit,
+  MIN_ABS_T,
+  stdev,
+  pearson,
+  fitSigmaByVolume,
+  empiricalPlayRate,
+  pitCoverage,
+} from "../lib/engine/weekly/fit";
 
 describe("olsSlope", () => {
   it("recovers a known slope", () => {
@@ -12,6 +21,47 @@ describe("olsSlope", () => {
   });
   it("is zero on fewer than three points — a two-point 'fit' is a line, not evidence", () => {
     expect(olsSlope([1, 2], [1, 4])).toBe(0);
+  });
+});
+
+describe("olsFit significance", () => {
+  it("reports a large t for a clean relationship and a small one for noise", () => {
+    const xs = Array.from({ length: 400 }, (_, i) => i / 400);
+    const clean = olsFit(xs, xs.map((x) => 2 * x));
+    expect(clean.slope).toBeCloseTo(2, 6);
+    expect(Math.abs(clean.t)).toBeGreaterThan(MIN_ABS_T);
+    // Deterministic alternating noise, uncorrelated with x by construction.
+    const noise = olsFit(xs, xs.map((_, i) => (i % 2 ? 1 : -1)));
+    expect(Math.abs(noise.t)).toBeLessThan(MIN_ABS_T);
+  });
+
+  it("is not estimable without variance or enough points", () => {
+    expect(olsFit([2, 2, 2], [1, 5, 9])).toEqual({ slope: 0, se: 0, t: 0, n: 3 });
+    expect(olsFit([1, 2], [1, 4]).t).toBe(0);
+  });
+
+  it("agrees with olsSlope, which now delegates to it", () => {
+    const xs = [1, 2, 3, 4, 5];
+    const ys = xs.map((x) => 3 + 2 * x);
+    expect(olsSlope(xs, ys)).toBeCloseTo(olsFit(xs, ys).slope, 12);
+  });
+});
+
+describe("fitSigmaByVolume degenerate input", () => {
+  it("degrades to a flat sd when there are too few points to bucket", () => {
+    const points = Array.from({ length: 12 }, (_, i) => ({ volume: 8, logResidual: i % 2 ? 0.5 : -0.5 }));
+    const { sigma0, delta } = fitSigmaByVolume(points, 8);
+    expect(delta).toBe(0);
+    expect(sigma0).toBeCloseTo(stdev(points.map((p) => p.logResidual)), 10);
+  });
+
+  it("never returns NaN when every bucket is unusable", () => {
+    // All-identical volumes AND zero spread: every bucket has sd 0 and is
+    // filtered, which previously left the means as 0/0.
+    const points = Array.from({ length: 80 }, () => ({ volume: 8, logResidual: 0 }));
+    const { sigma0, delta } = fitSigmaByVolume(points, 8);
+    expect(Number.isFinite(sigma0)).toBe(true);
+    expect(Number.isFinite(delta)).toBe(true);
   });
 });
 
