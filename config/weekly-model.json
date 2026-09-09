@@ -10,6 +10,6 @@
     "v0": { "QB": 32, "RB": 16, "WR": 7, "TE": 5, "K": 2, "DST": 1 },
     "delta": 0
   },
-  "availability": { "byStatus": {} },
+  "availability": { "byStatus": {}, "healthy": 0.97 },
   "correlation": { "game": 0, "team": 0.28, "unit": 0.28, "dstVsOppTeam": 0 }
 }

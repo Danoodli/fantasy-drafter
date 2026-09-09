@@ -51,7 +51,7 @@ export interface WeeklyModelParams {
     v0: Partial<Record<Position, number>>;
     delta: number;
   };
-  availability: { byStatus: Record<string, number> };
+  availability: { byStatus: Record<string, number>; healthy?: number };
   correlation: CorrelationParams;
 }
 
@@ -155,6 +155,9 @@ export function loadWeeklyModel(raw: unknown): WeeklyModelParams {
   }
   for (const [status, v] of Object.entries(p.availability?.byStatus ?? {})) {
     assertRange(`availability.byStatus.${status}`, v, 0, 1);
+  }
+  if (p.availability?.healthy !== undefined) {
+    assertRange("availability.healthy", p.availability.healthy, 0, 1);
   }
 
   return p;
