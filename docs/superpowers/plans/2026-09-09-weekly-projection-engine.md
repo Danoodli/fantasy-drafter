@@ -2234,6 +2234,18 @@ describe("blendMarket", () => {
   it("returns 0 when no source has an opinion", () => {
     expect(blendMarket({ id: "x", pos: "WR", team: "DET", bye: 8, status: null }, scoring, OFF)).toBe(0);
   });
+
+  it("falls back to a zero-weighted source rather than projecting a real player at 0", () => {
+    // OFF ships espn at weight 0. Without this fallback, a player Sleeper's
+    // weekly feed omits reads as 0.0 — which happened to 34% of the board,
+    // including a top-35 ADP starter.
+    const espnOnly: WeekPlayerInput = {
+      id: "bowers", pos: "TE", team: "LV", bye: 8, status: null,
+      espn: { receptions: 6, recYds: 62, recTD: 0.5 },
+    };
+    expect(OFF.sourceWeights.espn).toBe(0);
+    expect(blendMarket(espnOnly, scoring, OFF)).toBeCloseTo(6 + 6.2 + 3, 6);
+  });
 });
 
 describe("assembly", () => {
@@ -2275,6 +2287,18 @@ describe("assembly", () => {
     const [o] = buildWeekOutlooks({ week: 2, players: [gibbs], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
     const m = scoreStatLine(gibbs.sleeper!, scoring);
     expect(o.meanIfPlays).toBeCloseTo(m * o.drivers.envMult * o.drivers.scriptMult, 8);
+  });
+
+  it("flags a player no source has an opinion on, so 0 is not mistaken for a bye", () => {
+    const ghost: WeekPlayerInput = { id: "ghost", pos: "WR", team: "DET", bye: 8, status: null };
+    const [o] = buildWeekOutlooks({ week: 2, players: [ghost], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
+    expect(o.projected).toBe(false);
+    expect(o.mean).toBe(0);
+    // A real projection must be flagged true even when its mean is 0 for
+    // another reason — here a bye.
+    const [g] = buildWeekOutlooks({ week: 8, players: [gibbs], linesByTeam: lines, dvp: noDvp, scoring, params: ON });
+    expect(g.projected).toBe(true);
+    expect(g.mean).toBe(0);
   });
 
   it("orders the quantiles and reports the opponent", () => {
@@ -2360,6 +2384,13 @@ export interface WeekOutlook {
   p50: number;
   p90: number;
   pPlay: number;
+  /**
+   * False when NO source had an opinion on this player, weighted or not.
+   * Such a player's `mean` is 0, which is otherwise indistinguishable from a
+   * bye or an Out designation — very different things for a start/sit call.
+   * A UI must render this as "no projection", never as 0.0.
+   */
+  projected: boolean;
   stats: StatLine;
   drivers: {
     baseMarket: number;
@@ -2400,8 +2431,26 @@ export function blendMarket(
     parts.push({ w: p.sourceWeights.dk, v: input.dk });
   }
   const wSum = parts.reduce((s, x) => s + x.w, 0);
-  if (wSum <= 0) return 0;
-  return parts.reduce((s, x) => s + x.w * x.v, 0) / wSum;
+  if (wSum > 0) return parts.reduce((s, x) => s + x.w * x.v, 0) / wSum;
+
+  // No WEIGHTED source has an opinion on this player. Fall back to any source
+  // that does, in a fixed order, rather than returning 0 — because a 0 here is
+  // not "we project zero points", it is "we have nothing", and downstream that
+  // reads as "bench him".
+  //
+  // This is not hypothetical. In the shipped off state ESPN sits at weight 0,
+  // and 179 of 526 board players (34%) had no weighted source for 2026 week 1,
+  // including Brock Bowers at ADP 34.5. ESPN had 48 of them, covering every
+  // high-ADP name.
+  //
+  // It does not break the off-state contract either: for a player Sleeper has
+  // no opinion on, "raw re-scored Sleeper" is undefined, so there is nothing to
+  // reproduce. The baseline is Sleeper WHERE SLEEPER HAS AN OPINION.
+  if (input.sleeper) return scoreStatLine(input.sleeper, scoring, isTE);
+  if (typeof input.sleeperPoints === "number") return input.sleeperPoints;
+  if (input.espn) return scoreStatLine(input.espn, scoring, isTE);
+  if (typeof input.dk === "number") return input.dk;
+  return 0;
 }
 
 export function buildWeekOutlooks(args: {
@@ -2449,6 +2498,12 @@ export function buildWeekOutlooks(args: {
 
     const meanIfPlays = base * mEnv * mScript * mMatch;
     const play = pPlay(player.status, isBye, p);
+    const projected =
+      Boolean(player.sleeper) ||
+      typeof player.sleeperPoints === "number" ||
+      Boolean(player.espn) ||
+      typeof player.dk === "number" ||
+      Boolean(player.usage);
     const stats = player.sleeper ?? player.usage ?? player.espn ?? {};
     const sigma = weeklySigma(player.pos, projectedVolume(player.pos, stats), p);
 
@@ -2459,6 +2514,7 @@ export function buildWeekOutlooks(args: {
       meanIfPlays,
       mean: meanIfPlays * play,
       sigma,
+      projected,
       p10: lognormalQuantile(meanIfPlays, sigma, 0.1),
       p50: lognormalQuantile(meanIfPlays, sigma, 0.5),
       p90: lognormalQuantile(meanIfPlays, sigma, 0.9),
@@ -3540,7 +3596,11 @@ async function main() {
       outlooks,
     };
     writeFileSync(join(OUT_DIR, `week-${SEASON}-${week}-${format}.json`), JSON.stringify(board));
-    console.log(`week-${SEASON}-${week}-${format}.json — ${outlooks.length} outlooks`);
+    const unprojected = outlooks.filter((o) => !o.projected).length;
+    console.log(
+      `week-${SEASON}-${week}-${format}.json — ${outlooks.length} outlooks` +
+        (unprojected ? `, ${unprojected} with NO projection from any source` : "")
+    );
   }
 
   if (DEFAULT_WEEKLY_MODEL.fittedOn.length === 0) {
