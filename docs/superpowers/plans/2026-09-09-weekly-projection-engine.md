@@ -2217,7 +2217,7 @@ describe("assembly", () => {
     ...OFF,
     modelWeights: { market: 0.7, usage: 0.3 },
     environment: { leagueAvgItp: 22.5, alpha: { RB: 0.4 }, beta: { RB: -0.12 } },
-    matchup: { gamma: { RB: 0.5 }, shrinkGames: 6, priorSeasonWeight: 0.5 },
+    matchup: { gamma: { RB: 0.5 }, shrinkGames: 6, priorSeasonWeight: 0.5, dvpLambda: 0.85 },
     sigma: { ...OFF.sigma, delta: 0.35 },
   };
 
@@ -2457,7 +2457,7 @@ export function buildWeekOutlooks(args: {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/weeklyOutlook.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Run the whole suite — nothing may have regressed**
 
