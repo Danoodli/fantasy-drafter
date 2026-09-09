@@ -42,8 +42,12 @@ export function parseEspnScoreboard(json: unknown): GameLine[] {
     // No line means no line. Defaulting to a pick'em would feed the model a
     // fabricated environment for exactly the games it knows least about.
     if (!odds) continue;
+    // A game with no resolvable week cannot be joined to anything; week 0
+    // would silently corrupt every per-week lookup downstream.
+    const week = ev.week?.number ?? doc.week?.number;
+    if (!week) continue;
     out.push({
-      week: ev.week?.number ?? doc.week?.number ?? 0,
+      week,
       home,
       away,
       total: odds.overUnder as number,
@@ -57,6 +61,12 @@ export function parseHistoricalLines(csv: string, season: number): GameLine[] {
   const out: GameLine[] = [];
   for (const r of parseCsv(csv)) {
     if (r.season !== String(season) || r.game_type !== "REG") continue;
+    // Blank fields must be rejected BEFORE coercion: Number("") is 0 and
+    // Number.isFinite(0) is true, so a `Number.isFinite` guard alone turns an
+    // unlined game into a fabricated pick'em (total 0, spread 0). The
+    // committed games.csv carries 160 such rows for the in-progress season —
+    // precisely the games the model knows least about.
+    if ((r.total_line ?? "").trim() === "" || (r.spread_line ?? "").trim() === "") continue;
     const total = Number(r.total_line);
     const spread = Number(r.spread_line);
     if (!Number.isFinite(total) || !Number.isFinite(spread)) continue;
