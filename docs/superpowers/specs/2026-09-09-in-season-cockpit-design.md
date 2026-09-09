@@ -2,7 +2,11 @@
 
 Date: 2026-09-09. Status: design approved in chat. Second of three specs.
 **Depends on Leg A** (`WeekOutlook` + `weekSim`); do not start until A's
-gates 1 and 4 have been run.
+gates 1 and 4 have been run. *Amended 2026-09-09:* the owner re-ordered the
+work — Leg B first (a screen to click), then Leg A's gates (Tasks 17–18), then
+Leg C — knowing that gate 1 will tie by construction (no mean signal survives
+the market; only spread and correlation are fitted). Leg B's own replay gates
+(`pnpm backtest:lineup`) measure what Leg B adds on top.
 
 ## Goal
 
@@ -66,19 +70,29 @@ change, so undo, history and the engine all see the same thing.
 Sleeper sync additionally gives the free-agent pool (needed for waivers), the
 league's real scoring settings, your weekly opponent and their starters. Manual
 and OCR paths degrade gracefully: no opponent roster means the opponent's total
-is modeled from a league-average projected score, and the UI says so rather
-than pretending.
+is modeled as a projected total (default: your own lineup's projection, i.e. an
+even matchup; editable) drawn with the same relative spread as your lineup, and
+the UI says so rather than pretending.
 
 ## Engine modules (all pure)
 
 ### `lib/engine/lineup.ts`
 
-- `bestLineup(outlooks, slots)` — a proper assignment solve, **not** greedy.
-  The existing `optimalLineupTotal` in `lib/engine/season.ts:17` is exact for a
-  single flex and silently wrong for superflex or two-flex leagues. Start/sit is
-  exactly where that bites, so this replaces it and `season.ts` is migrated onto
-  the correct version.
-- `winProbability(mine, theirs, sims, seed)` — correlated joint sim per above.
+- `bestLineup(outlooks, slots)` — returns the **assignment** (who sits in
+  which slot, who is benched), computed by an allocation search that is exact
+  by construction.
+  *Amended 2026-09-09 while writing the plan:* the original text here claimed
+  `optimalLineupTotal` in `lib/engine/season.ts` was "silently wrong for
+  superflex or two-flex leagues". It is not: with one FLEX kind and one
+  eligibility set — all `RosterSlots` can express — any k eligible leftovers
+  fill k identical flex slots, so the greedy top-k total is exact. `season.ts`
+  is therefore **not** migrated; `bestLineup` exists for the assignment, which
+  the total cannot give and start/sit needs.
+- `winProbability(mine, theirs, sims, seed)` — correlated joint sim per above,
+  over **fixed** lineups: a lineup is a decision locked before kickoff, and
+  every candidate swap is scored against the *same* draws (a paired
+  comparison). Re-optimising inside each draw would be hindsight and would make
+  every swap a no-op — an earlier plan draft had exactly that defect.
 - `startSitAdvice(team, week)` — for every legal swap, Δ P(win) with Δ expected
   points reported alongside so a counter-intuitive call is legible rather than
   mysterious. Ranked, with the reason line.
@@ -89,9 +103,15 @@ than pretending.
 
 ### `lib/engine/playoffOdds.ts`
 
-Simulate the remaining schedule — every team's weekly totals from Leg A's
-sampler, your league's real matchups — to get playoff odds, seed distribution
-and elimination number. Then **let the odds set the risk dial**: week 13 needing
+Simulate the remaining schedule — every team's weekly totals, your league's
+real matchups — to get playoff odds, seed distribution and elimination number.
+*Amended 2026-09-09:* future weeks have no `WeekOutlook` (Leg A builds one
+week at a time), so remaining weeks are drawn from the season outcome model
+(`lib/engine/outcome.ts`, the same fitted model `simulateRoom` uses); the
+current week's start/sit stays on Leg A's sampler and the two meet through the
+`leverage` number (P(playoffs | win) − P(playoffs | lose)). Weeks whose
+pairings Sleeper has not published are simulated against a random opponent and
+the UI says through which week pairings are known. Then **let the odds set the risk dial**: week 13 needing
 two wins is a different optimization from week 13 locked into the 2-seed. This
 is the natural extension of "weigh the fantasy league matchup," and it reuses
 `simulateRoom` almost directly.
@@ -129,11 +149,20 @@ distribution vs your opponent's, win probability) → **Waivers** →
 **Playoff odds** → **Trades**.
 
 Live signals (inactives, breaking news) flow through the existing
-`useLiveSignals` hook and are graded on via the pure grader in
-`lib/engine/injuryFeed.ts` — no status logic in components, per the standing
+`useLiveSignals` hook and are graded on via a pure grader — `gradeBoard` in
+`lib/engine/injuryFeed.ts` for the board, and its sibling `gradeOutlooks` in
+`lib/engine/weekly/liveGrade.ts` for weekly outlooks (a sibling rather than the
+same file because weekly availability imports `SEASON_LONG` from `injuryFeed`,
+which would make a cycle) — no status logic in components, per the standing
 rule.
 
 ## Gates and budgets
+
+*Amended 2026-09-09:* there is no historical league data (rosters, matchups,
+standings), so the first two gates run as **synthetic-league replays over the
+real historical player-weeks** (`pnpm backtest:lineup`), and the third cannot
+run until Sleeper league snapshots have accumulated. Reported as NOT RUN, not
+skipped.
 
 - Replay gate (shared with Leg A gate 4): across held-out historical weeks, the
   Δ P(win) lineup must beat naive "start the highest projection" in **matchup
