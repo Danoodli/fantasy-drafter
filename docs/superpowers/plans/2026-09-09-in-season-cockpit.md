@@ -1165,12 +1165,18 @@ function reasonFor(swap: { deltaWin: number; deltaPoints: number }, wp: number, 
     // Only reachable with the risk dial on: this week cannot move the season.
     return `+${pts.toFixed(1)} projected points — this week's result cannot change your playoff odds, so points and seeding decide`;
   }
+  // Order matters: the favourite's floor case usually ALSO costs points (the
+  // safe player projects lower), so it must be recognised before the generic
+  // "despite the points" branch or a 96% favourite gets told he is behind.
+  if (wp > 0.7 && inO.sigma < outO.sigma) {
+    const cost = pts < -0.05 ? ` even at ${pts.toFixed(1)} projected points` : "";
+    return `+${pct}% to win: you are ahead, so the safer floor (${inO.p10.toFixed(0)} vs ${outO.p10.toFixed(0)}) protects the lead${cost}`;
+  }
   if (pts < -0.05) {
     // The counter-intuitive case, which is the whole point of the feature.
-    return `+${pct}% to win despite ${pts.toFixed(1)} projected points — you are behind, and his ${inO.p90.toFixed(0)}-point ceiling is the path`;
-  }
-  if (wp > 0.7 && inO.sigma < outO.sigma) {
-    return `+${pct}% to win: you are ahead, so the safer floor (${inO.p10.toFixed(0)} vs ${outO.p10.toFixed(0)}) protects the lead`;
+    return wp < 0.5
+      ? `+${pct}% to win despite ${pts.toFixed(1)} projected points — you are behind, and his ${inO.p90.toFixed(0)}-point ceiling is the path`
+      : `+${pct}% to win despite ${pts.toFixed(1)} projected points — his range fits this matchup better than the points cost`;
   }
   return `+${pct}% to win and +${pts.toFixed(1)} projected points`;
 }
