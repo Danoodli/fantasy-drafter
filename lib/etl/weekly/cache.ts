@@ -26,6 +26,12 @@ export function fixtureAgeDays(fetchedAt: string, nowMs: number): string {
  * @param onMissing when given, a missing fixture yields this value with a
  *                  warning instead of throwing (for sources the engine can
  *                  run neutrally without)
+ * @returns SourceResult<T> where fromFixture: true means "not fresh from the
+ *          network" (could be cached, fixture fallback, or neutral default).
+ *          fetchedAt === "unavailable" specifically means no data was obtained
+ *          (no fixture, no live fetch) and onMissing() synthesized a neutral
+ *          default; the board surfaces this as sources[].fromFixture to warn
+ *          the user of staleness.
  */
 export async function fetchSlim<T>(
   key: string,
@@ -64,7 +70,7 @@ export async function fetchSlim<T>(
     if (!existsSync(fixturePath)) {
       if (onMissing) {
         console.warn(`\n⚠️  ${key}: live fetch FAILED (${err}). No fixture available. Using neutral fallback.\n`);
-        return { data: onMissing(), fetchedAt: "unknown", fromFixture: true };
+        return { data: onMissing(), fetchedAt: "unavailable", fromFixture: true };
       }
       throw new Error(`${key} failed (${err}) and no fixture at ${fixturePath}`);
     }

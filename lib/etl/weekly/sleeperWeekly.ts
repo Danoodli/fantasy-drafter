@@ -1,6 +1,7 @@
 // Sleeper's WEEKLY projections (undocumented, free, no auth). Verified live
-// on 2026-09-09 for seasons 2021–2025 (five seasons of history makes the
-// weekly model fittable rather than asserted).
+// on 2026-09-09 for 2021, 2024, 2025 and 2026. The calibration fit set is
+// 2021–2025 (five seasons of history, making the weekly model fittable rather
+// than asserted).
 //
 // Keyed by sleeper_id, our canonical board id, so the join is exact.
 // Node-only, build time. Reduced immediately; only the slim map is cached.
@@ -81,11 +82,14 @@ export function parseSleeperWeekly(rows: unknown[]): Record<string, WeeklyProjec
       }
       if (points === undefined) continue;
     }
+    const team = canonicalTeam(raw.player?.team);
+    // Free agents have no game, no opponent, no line; drop them.
+    if (team === "") continue;
     out[id] = {
       stats,
       points,
       status: raw.player?.injury_status ?? null,
-      team: canonicalTeam(raw.player?.team),
+      team,
       pos,
     };
   }

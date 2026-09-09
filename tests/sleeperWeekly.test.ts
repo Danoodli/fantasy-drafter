@@ -78,4 +78,14 @@ describe("parseSleeperWeekly", () => {
     const positions = new Set(Object.values(out).map(p => p.pos));
     expect(positions).toEqual(new Set(["QB", "RB", "WR", "TE", "K", "DST"]));
   });
+
+  it("drops free agents with team FA (no game, no opponent, no line)", () => {
+    const fa = [
+      { week: 1, season: "2026", player_id: "FA1", stats: { pass_yd: 10.0 }, player: { position: "QB", team: "FA", injury_status: null } },
+      { week: 1, season: "2026", player_id: "FA2", stats: { pts_ppr: 5.0 }, player: { position: "K", team: "FA", injury_status: null } },
+    ];
+    const out = parseSleeperWeekly(fa);
+    expect(out["FA1"]).toBeUndefined();
+    expect(out["FA2"]).toBeUndefined();
+  });
 });
