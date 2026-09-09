@@ -3,13 +3,13 @@ import { encodeHistory, decodeHistory, type HistRow } from "../lib/etl/weekly/hi
 
 const rows: HistRow[] = [
   {
-    id: "6813", pos: "RB", team: "DET", wk: 3, opp: "CHI", st: null,
+    id: "6813", pos: "RB", team: "DET", wk: 3, opp: "CHI", stNow: null,
     proj: { rushYds: 99.634, rushTD: 1.0512, receptions: 3.95 },
     act: { rushYds: 112, rushTD: 1, receptions: 2 },
     tot: 49.5, spr: -6.5,
   },
   {
-    id: "4034", pos: "QB", team: "KC", wk: 3, opp: "LV", st: "Questionable",
+    id: "4034", pos: "QB", team: "KC", wk: 3, opp: "LV", stNow: "Questionable",
     proj: { passYds: 268 },
     act: null,
     tot: 44, spr: -3,
@@ -22,7 +22,7 @@ describe("history encoding", () => {
     expect(back).toHaveLength(2);
     expect(back[0].act?.rushYds).toBe(112);
     expect(back[1].act).toBeNull();
-    expect(back[1].st).toBe("Questionable");
+    expect(back[1].stNow).toBe("Questionable");
     expect(back[0].spr).toBe(-6.5);
   });
 

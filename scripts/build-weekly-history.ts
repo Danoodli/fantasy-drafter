@@ -55,7 +55,7 @@ async function main() {
         if (!line) continue; // bye, or a team the schedule file does not carry
         rows.push({
           id, pos: p.pos as Position, team: p.team, wk, opp: line.opp,
-          st: p.status,
+          stNow: p.status,
           proj: p.stats,
           act: actual.get(`${id}|${wk}`) ?? null,
           tot: line.total, spr: line.ownSpread,

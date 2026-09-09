@@ -11,8 +11,18 @@ export interface HistRow {
   team: string;
   wk: number;
   opp: string;
-  /** Injury designation at projection time, for the availability fit. */
-  st: string | null;
+  /**
+   * Sleeper's injury designation **AS OF WHEN THIS ROW WAS FETCHED**, not as of
+   * the historical week. Sleeper serves historical projections with a LIVE
+   * status field: refetching the same past week 2h45m apart changed 12 of 325
+   * statuses (both directions) while changing 0 stat lines, and players marked
+   * "Out" in the fit set have a 0% did-not-play rate — impossible for a
+   * contemporaneous designation.
+   *
+   * DO NOT calibrate availability from this. See the availability note in
+   * scripts/calibrate-weekly.ts.
+   */
+  stNow: string | null;
   proj: StatLine;
   /** null = did not appear in the box score. Distinct from an all-zero line. */
   act: StatLine | null;
@@ -55,7 +65,7 @@ export function encodeHistory(rows: HistRow[]): string {
   return JSON.stringify(
     rows.map((r) => ({
       i: r.id, p: r.pos, t: r.team, w: r.wk, o: r.opp,
-      s: r.st ?? undefined,
+      s: r.stNow ?? undefined,
       j: packStats(r.proj),
       a: r.act === null ? null : packStats(r.act),
       v: r2(r.tot), d: r2(r.spr),
@@ -72,7 +82,7 @@ interface Packed {
 export function decodeHistory(json: string): HistRow[] {
   return (JSON.parse(json) as Packed[]).map((r) => ({
     id: r.i, pos: r.p, team: r.t, wk: r.w, opp: r.o,
-    st: r.s ?? null,
+    stNow: r.s ?? null,
     proj: unpackStats(r.j),
     act: r.a === null ? null : unpackStats(r.a),
     tot: r.v, spr: r.d,
