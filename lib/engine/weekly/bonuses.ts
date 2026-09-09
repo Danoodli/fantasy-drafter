@@ -19,6 +19,12 @@ const VOLUME_FIELDS: (keyof StatLine)[] = [
   "fumblesLost", "rushFd", "recFd", "passFd",
 ];
 
+/**
+ * @param mult MUST be >= 0. A negative multiplier would flip the sign of every
+ *   volume field, including the penalty fields (`fumblesLost`, `passInt`), and
+ *   produce a stat line that scores backwards. The sampler always passes a
+ *   lognormal draw, which is strictly positive.
+ */
 export function scaleStatLine(stats: StatLine, mult: number): StatLine {
   const out: StatLine = {};
   for (const f of VOLUME_FIELDS) {
