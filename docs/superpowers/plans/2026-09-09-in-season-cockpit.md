@@ -1507,7 +1507,7 @@ git commit -m "Season: weekly board loader, network-first per format"
 - Create: `components/season/SeasonCockpit.tsx`
 - Create: `components/season/LineupTable.tsx`
 - Create: `components/season/RosterImport.tsx`
-- Modify: `app/page.tsx` (add a link to `/season`)
+- Modify: `components/Setup.tsx` (add a link to `/season` in the Setup header, beside the existing "Newsroom →" link; `app/page.tsx` renders no header of its own)
 
 **Interfaces:**
 - Consumes: `loadTeams`/`saveTeam`/`deleteTeam`/`applyRoster`/`SavedTeam` (Task 1); `fetchWeekBoard`/`indexOutlooks`/`currentNflWeek` (Task 5); `startSitAdvice` (Task 4); `loadConfig` from `lib/client/config.ts`; `Board`, `BoardPlayer` from `lib/types.ts`.
@@ -1683,6 +1683,7 @@ export default function RosterImport({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Add a player by name…"
+        aria-label="Add a player by name"
         className="mt-3 w-full rounded border border-line bg-field px-2 py-1 text-sm"
       />
       {matches.length > 0 && (
@@ -1728,12 +1729,20 @@ The one rule that is not cosmetic: **`projected === false` renders as `—`, nev
 import type { BoardPlayer } from "../../lib/types";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import type { Lineup } from "../../lib/engine/season/lineup";
+import { DEFAULT_SEASON_LEVERS } from "../../lib/engine/season/levers";
 
-/** A projection cell. Never shows 0.0 for "we have no number". */
+/**
+ * A projection cell. Never shows 0.0 for "we have no number". The forced-play
+ * threshold is the engine's lever (config/season.json), not a literal here, so
+ * the Must-fix panel and this cell can never disagree about who is out.
+ */
 function Points({ o }: { o: WeekOutlook | undefined }) {
   if (!o || !o.projected) return <span className="text-ink-faint" title="No source projected this player">—</span>;
   if (o.opp === null) return <span className="text-warn" title="On a bye">BYE</span>;
-  if (o.pPlay <= 0.1) return <span className="text-warn" title={o.drivers.status ?? "Out"}>{o.drivers.status ?? "OUT"}</span>;
+  if (o.pPlay <= DEFAULT_SEASON_LEVERS.forcedPlayThreshold) {
+    const label = o.drivers.status ?? "OUT";
+    return <span className="text-warn" title={label}>{label}</span>;
+  }
   return <span>{o.mean.toFixed(1)}</span>;
 }
 
