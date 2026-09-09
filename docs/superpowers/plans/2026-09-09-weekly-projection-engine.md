@@ -1750,11 +1750,19 @@ const OFF = DEFAULT_WEEKLY_MODEL;
 const ON: WeeklyModelParams = { ...OFF, sigma: { ...OFF.sigma, delta: 0.35 } };
 
 describe("projectedVolume", () => {
-  it("counts the touches that matter for the position", () => {
-    expect(projectedVolume("RB", { rushYds: 80, receptions: 3 })).toBeGreaterThan(0);
-    expect(projectedVolume("QB", { passYds: 250 })).toBeGreaterThan(0);
-    expect(projectedVolume("WR", { receptions: 5, recYds: 70 })).toBeGreaterThan(0);
-    expect(projectedVolume("DST", {})).toBeGreaterThan(0); // never zero — sigma must not divide by it
+  it("counts the touches that matter for the position, on the right scale", () => {
+    // Asserting VALUES, not just > 0: a version where every branch returned
+    // MIN_VOLUME would satisfy a bare positivity check.
+    expect(projectedVolume("RB", { rushYds: 86, receptions: 3 })).toBeCloseTo(86 / 4.3 + 3, 6);
+    expect(projectedVolume("QB", { passYds: 250 })).toBeCloseTo(250 / 7.5, 6);
+    expect(projectedVolume("WR", { receptions: 5, recYds: 70 })).toBeCloseTo(5 / 0.65, 6);
+    expect(projectedVolume("TE", { receptions: 5, recYds: 70 })).toBeCloseTo(5 / 0.65, 6);
+  });
+
+  it("floors at MIN_VOLUME so it can never be a zero denominator", () => {
+    for (const pos of ["QB", "RB", "WR", "TE", "K", "DST"] as const) {
+      expect(projectedVolume(pos, {})).toBeGreaterThanOrEqual(0.5);
+    }
   });
 });
 
@@ -1770,16 +1778,30 @@ describe("weeklySigma", () => {
     expect(bigBack).toBeLessThan(flier);
   });
 
-  it("is finite and positive at zero volume rather than exploding", () => {
-    const s = weeklySigma("WR", 0, ON);
-    expect(Number.isFinite(s)).toBe(true);
-    expect(s).toBeGreaterThan(0);
-    expect(s).toBeLessThan(3);
+  it("floors zero volume at MIN_VOLUME rather than letting the clamp absorb it", () => {
+    // Exact value matters: without the MIN_VOLUME floor, v0/v is Infinity and
+    // the clamp alone would return 2.5 — still finite, positive and < 3, so a
+    // loose assertion could not tell the floor was gone.
+    expect(weeklySigma("WR", 0, ON)).toBeCloseTo(2.0148, 3);
   });
 
-  it("falls back to a sane default for a position with no fitted sigma", () => {
-    const bare: WeeklyModelParams = { ...OFF, sigma: { sigma0: {}, v0: {}, delta: 0 } };
-    expect(weeklySigma("WR", 8, bare)).toBeGreaterThan(0);
+  it("keeps K and DST flat whatever delta is — they have no touch count", () => {
+    // K is the case that catches a v0-coincidence: v0.K is 2 while its volume
+    // is a constant 1, so a v0-dependent path would give ~0.70, not 0.55.
+    for (const delta of [0, 0.35, 1]) {
+      const p: WeeklyModelParams = { ...ON, sigma: { ...ON.sigma, delta } };
+      expect(weeklySigma("K", 1, p)).toBeCloseTo(OFF.sigma.sigma0.K!, 10);
+      expect(weeklySigma("DST", 1, p)).toBeCloseTo(OFF.sigma.sigma0.DST!, 10);
+    }
+  });
+
+  it("falls back for a position with neither a fitted sigma nor a fitted v0", () => {
+    // delta must be NONZERO or the early return fires and V0_FALLBACK is never read.
+    const bare: WeeklyModelParams = { ...OFF, sigma: { sigma0: {}, v0: {}, delta: 0.35 } };
+    // SIGMA_FALLBACK 0.8, V0_FALLBACK 8, volume 8 => ratio 1 => exactly 0.8.
+    expect(weeklySigma("WR", 8, bare)).toBeCloseTo(0.8, 10);
+    // And it still varies with volume, proving V0_FALLBACK is in play.
+    expect(weeklySigma("WR", 2, bare)).toBeGreaterThan(weeklySigma("WR", 32, bare));
   });
 });
 
@@ -1830,7 +1852,17 @@ const V0_FALLBACK = 8;
 /** Volume can never be 0 in the sigma formula — it is a denominator. */
 const MIN_VOLUME = 0.5;
 
-/** Touches (or attempts) the projection implies. */
+/**
+ * Touches (or attempts) the projection implies.
+ *
+ * The per-position divisors below are unit conversions, NOT tuned levers, and
+ * deliberately do not live in config. Sigma depends only on the ratio
+ * `v0 / v`, and `v = raw / divisor`, so sigma depends on `v0 * divisor` —
+ * the divisor and `v0[pos]` are the same degree of freedom. Exposing both
+ * would give the calibration two knobs for one parameter, which is
+ * unidentifiable: divisor 0.65 with v0 7 is indistinguishable from divisor 1
+ * with v0 4.55. `v0` is the knob; these are the units it is expressed in.
+ */
 export function projectedVolume(pos: Position, stats: StatLine): number {
   switch (pos) {
     case "QB":
@@ -1850,15 +1882,34 @@ export function projectedVolume(pos: Position, stats: StatLine): number {
   }
 }
 
+/**
+ * One clamp, applied on every path, so the off state and the on state cannot
+ * enforce different output invariants.
+ * A 0.1-volume player must not get a sigma of 4 and dominate every ceiling
+ * ranking on the strength of arithmetic.
+ */
+function clampSigma(sigma: number): number {
+  return Math.min(2.5, Math.max(0.15, sigma));
+}
+
+/** Positions with no touch count, whose sigma must not vary with volume. */
+const VOLUME_BLIND: ReadonlySet<Position> = new Set<Position>(["K", "DST"]);
+
 export function weeklySigma(pos: Position, volume: number, p: WeeklyModelParams): number {
   const sigma0 = p.sigma.sigma0[pos] ?? SIGMA_FALLBACK;
-  if (!p.sigma.delta) return sigma0;
+  // K and DST have no touch count, so `volume` carries no information about
+  // them and their sigma is flat BY CONSTRUCTION here — not by relying on
+  // v0[pos] happening to equal projectedVolume's constant. That coincidence
+  // holds for DST (v0 1, volume 1) and fails for K (v0 2, volume 1), which
+  // would give 0.70 instead of 0.55 at delta 0.35.
+  if (VOLUME_BLIND.has(pos)) return clampSigma(sigma0);
+  // Short-circuit only: Math.pow(x, 0) is 1, so the general path below already
+  // returns sigma0 when delta is 0. No test can distinguish the two, and none
+  // should claim to.
+  if (!p.sigma.delta) return clampSigma(sigma0);
   const v0 = p.sigma.v0[pos] ?? V0_FALLBACK;
   const v = Math.max(MIN_VOLUME, volume);
-  const scaled = sigma0 * Math.pow(v0 / v, p.sigma.delta);
-  // Clamp: a 0.1-volume player must not get a sigma of 4 and dominate every
-  // ceiling ranking on the strength of arithmetic.
-  return Math.min(2.5, Math.max(0.15, scaled));
+  return clampSigma(sigma0 * Math.pow(v0 / v, p.sigma.delta));
 }
 
 /** Inverse normal CDF, Acklam's rational approximation (|error| < 1.15e-9). */
