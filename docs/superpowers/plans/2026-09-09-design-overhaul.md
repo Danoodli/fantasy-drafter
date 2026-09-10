@@ -676,6 +676,36 @@ export default function LowerThird({
 }
 ```
 
+- [ ] **Step 2b: Pin the CSS mirror to `THEMES`**
+
+`app/globals.css` duplicates the palettes because CSS cannot import TypeScript. Pin them: append to `tests/theme.test.ts`
+
+```ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("globals.css mirrors THEMES", () => {
+  const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
+  const KEYS: [keyof ThemePalette, string][] = [
+    ["field", "field"], ["panel", "panel"], ["panel2", "panel-2"], ["line", "line"], ["ink", "ink"], ["inkDim", "ink-dim"], ["inkFaint", "ink-faint"],
+    ["accent", "accent"], ["accentInk", "accent-ink"], ["good", "good"], ["bad", "bad"], ["warn", "warn"], ["live", "live"],
+    ["qb", "qb"], ["rb", "rb"], ["wr", "wr"], ["te", "te"], ["k", "k"], ["dst", "dst"],
+  ];
+  it.each(THEMES.map((t) => [t.id, t] as const))("%s block matches hex-for-hex", (id, t: ThemePalette) => {
+    const start = css.indexOf(`[data-theme="${id}"]`);
+    expect(start).toBeGreaterThan(-1);
+    const block = css.slice(start, css.indexOf("}", start));
+    for (const [field, cssName] of KEYS) {
+      const m = block.match(new RegExp(`--t-${cssName}:\\s*(#[0-9A-Fa-f]{6})`));
+      expect(m, `--t-${cssName} missing in ${id}`).not.toBeNull();
+      expect(m![1].toUpperCase()).toBe(t[field].toUpperCase());
+    }
+  });
+});
+```
+
+(`ThemePalette` is already imported at the top of the file.) Run `pnpm vitest run tests/theme.test.ts` — 22 tests. A future edit to one file without the other now fails CI.
+
 - [ ] **Step 3: Smoke it on `/season`'s Lineup header only**
 
 In `components/season/SeasonCockpit.tsx`, replace the Lineup section's `<h2 …>Lineup</h2>` + the "99% now → 99%" span with `<LowerThird headline="Lineup" number={`${(advice.winProbability * 100).toFixed(0)}%`} label="to win" />` — one section, to prove the primitive renders in all four themes before Task 4 uses it everywhere.
@@ -771,7 +801,7 @@ Rules:
 **Files:**
 - Modify: whatever the grep finds under `components/` and `app/` except `DraftBoardGrid.tsx`, `MockBoard.tsx`.
 
-- [ ] **Step 1:** `grep -rn "neutral-\|gray-\|slate-\|zinc-\|bg-black\|bg-white\|#[0-9a-fA-F]\{6\}" components app --include=*.tsx | grep -v "DraftBoardGrid\|MockBoard\|ThemeSwitcher"` — must return nothing when done. Fix each hit with a token or a primitive.
+- [ ] **Step 1:** `grep -rn "neutral-\|gray-\|slate-\|zinc-\|bg-black\|bg-white\|#[0-9a-fA-F]\{6\}\|rgba\?(" components app --include=*.tsx | grep -v "DraftBoardGrid\|MockBoard\|ThemeSwitcher"` — must return nothing when done. Fix each hit with a token or a primitive. Known hits from Task 1's report: `components/Walkthrough.tsx:283` (dark scrim `rgba(8,11,15,0.7)` → `color-mix(in srgb, var(--color-field) 70%, transparent)`); `components/ScreenSync.tsx:172,177` canvas colours — a canvas cannot read CSS variables, so read them once via `getComputedStyle(document.documentElement).getPropertyValue("--color-field")` (and `--color-accent`) before painting. Also sweep `app/globals.css` below the token block: `.live-dot`'s `rgb(60 201 167 / 0.55)` becomes `color-mix(in srgb, var(--color-live) 55%, transparent)`, black shadows may stay (shadows are shadows), and the now-redundant granular `@media (prefers-reduced-motion)` blocks are removed in favour of the global rule.
 - [ ] **Step 2:** `grep -rn "rounded-lg border border-line" components app --include=*.tsx | grep -v "DraftBoardGrid\|MockBoard"` — each remaining wrapper becomes a sticker card or loses its border; list every file you changed in the report.
 - [ ] **Step 3:** `pnpm test && pnpm exec tsc --noEmit && pnpm lint`; commit `git add -A components app && git commit -m "Design: sweep — no raw greys or bordered cards remain outside the OCR fixture"`.
 
