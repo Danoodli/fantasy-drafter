@@ -398,11 +398,13 @@ git commit -m "Design: theme layer — four tested palettes behind the existing 
 
 // Four swatches, one per theme. A radio group semantically: arrow keys move,
 // Enter/Space select, the choice persists and applies immediately.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { THEMES, type ThemeId, applyTheme, loadTheme, saveTheme, DEFAULT_THEME_FOR } from "../../lib/client/theme";
 
 export default function ThemeSwitcher() {
   const [theme, setTheme] = useState<ThemeId | null>(null);
+  // Roving tabindex (WAI-ARIA radiogroup): one Tab stop, arrows move focus AND selection.
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Read the applied theme after mount (the layout's inline script set it).
   useEffect(() => {
@@ -412,28 +414,32 @@ export default function ThemeSwitcher() {
     setTheme(loadTheme() ?? applied ?? fallback);
   }, []);
 
-  const choose = (id: ThemeId) => {
+  const choose = (id: ThemeId, focus = false) => {
     setTheme(id);
     saveTheme(id);
     applyTheme(id);
+    if (focus) refs.current[THEMES.findIndex((x) => x.id === id)]?.focus();
   };
 
   return (
     <div role="radiogroup" aria-label="Colour theme" className="flex items-center gap-1">
-      {THEMES.map((t) => {
+      {THEMES.map((t, i) => {
         const on = t.id === theme;
+        // Before hydration nothing is checked; the first swatch is the Tab stop so the group is reachable.
+        const tabbable = theme === null ? i === 0 : on;
         return (
           <button
             key={t.id}
+            ref={(el) => { refs.current[i] = el; }}
             role="radio"
             aria-checked={on}
             aria-label={t.label}
             title={t.label}
+            tabIndex={tabbable ? 0 : -1}
             onClick={() => choose(t.id)}
             onKeyDown={(e) => {
-              const i = THEMES.findIndex((x) => x.id === t.id);
-              if (e.key === "ArrowRight") choose(THEMES[(i + 1) % THEMES.length].id);
-              if (e.key === "ArrowLeft") choose(THEMES[(i - 1 + THEMES.length) % THEMES.length].id);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); choose(THEMES[(i + 1) % THEMES.length].id, true); }
+              if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); choose(THEMES[(i - 1 + THEMES.length) % THEMES.length].id, true); }
             }}
             className={`h-6 w-6 rounded-full border-2 ${on ? "border-ink" : "border-transparent hover:border-ink-dim"}`}
             style={{ background: `linear-gradient(135deg, ${t.field} 50%, ${t.accent} 50%)` }}
@@ -533,6 +539,10 @@ git commit -m "Design: shared app bar with route tabs and theme switcher; ad-hoc
 **Interfaces:**
 - Produces CSS utilities: `sticker` (uses `--sticker` colour variable; 4 px left edge, 6 % tint, 4 px radius on the right), `sticker-chip`, `lower-third` (accent slab), `btn`, `btn-accent`, `btn-outline`, `btn-quiet`, `link`.
 - Produces components: `Sticker({ pos, as?: "row" | "chip" | "card", className?, children, onClick?, title? })`; `LowerThird({ headline, number?, label?, tone?: "accent" | "good" | "bad" | "quiet", children? })`.
+
+- [ ] **Step 0: Roving focus in `ThemeSwitcher` (carried from Task 2's review)**
+
+Task 2 shipped the switcher with arrow keys moving the selection but not focus, and every swatch tabbable. Bring `components/shell/ThemeSwitcher.tsx` to Task 2's Step 1 code as it now reads in this plan: a `refs` array, `tabIndex={tabbable ? 0 : -1}` (first swatch before hydration, the checked one after), `choose(id, focus)` focusing the chosen swatch on arrow keys, and Up/Down as synonyms. Verify with the keyboard: one Tab stop enters the group, arrows move the ring and the focus together and wrap.
 
 - [ ] **Step 1: Utilities**
 
