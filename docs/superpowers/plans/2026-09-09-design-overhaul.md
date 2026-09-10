@@ -814,6 +814,24 @@ Rules:
 
 - [ ] **Step 1:** `grep -rn "neutral-\|gray-\|slate-\|zinc-\|bg-black\|bg-white\|#[0-9a-fA-F]\{6\}\|rgba\?(" components app --include=*.tsx | grep -v "DraftBoardGrid\|MockBoard\|ThemeSwitcher"` — must return nothing when done. Fix each hit with a token or a primitive. Known hits from Task 1's report: `components/Walkthrough.tsx:283` (dark scrim `rgba(8,11,15,0.7)` → `color-mix(in srgb, var(--color-field) 70%, transparent)`); `components/ScreenSync.tsx:172,177` canvas colours — a canvas cannot read CSS variables, so read them once via `getComputedStyle(document.documentElement).getPropertyValue("--color-field")` (and `--color-accent`) before painting. Also sweep `app/globals.css` below the token block: `.live-dot`'s `rgb(60 201 167 / 0.55)` becomes `color-mix(in srgb, var(--color-live) 55%, transparent)`, black shadows may stay (shadows are shadows), and the now-redundant granular `@media (prefers-reduced-motion)` blocks are removed in favour of the global rule.
 - [ ] **Step 2:** `grep -rn "rounded-lg border border-line" components app --include=*.tsx | grep -v "DraftBoardGrid\|MockBoard"` — each remaining wrapper becomes a sticker card or loses its border; list every file you changed in the report.
+- [ ] **Step 2b: Inputs must look editable.** In the light themes a bare `<input>` on a panel has no visible boundary (seen on `/season`'s "Add a player" and the two number inputs). Add to `app/globals.css`:
+
+```css
+/* Text inputs: a field, not a line of text. */
+@utility field {
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-line);
+  border-bottom: 2px solid var(--color-ink-faint);
+  border-radius: 6px 6px 0 0;
+  padding: 0.375rem 0.625rem;
+  color: var(--color-ink);
+}
+.field::placeholder { color: var(--color-ink-faint); }
+.field:focus { border-bottom-color: var(--color-accent); outline: none; }
+```
+
+and apply `field` to every `<input>`, `<select>` and `<textarea>` under `components/` and `app/` (grep `<input`, `<select`, `<textarea`), removing their ad-hoc `rounded border border-line bg-field …` classes. The `:focus-visible` ring still applies to keyboard focus.
+
 - [ ] **Step 3:** `pnpm test && pnpm exec tsc --noEmit && pnpm lint`; commit `git add -A components app && git commit -m "Design: sweep — no raw greys or bordered cards remain outside the OCR fixture"`.
 
 ---
