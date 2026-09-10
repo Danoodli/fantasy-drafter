@@ -6,6 +6,8 @@ import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import { evaluateTrade, type TradeLeagueContext, type TradeVerdict } from "../../lib/engine/season/trade";
 import type { RosContext } from "../../lib/engine/season/rosValue";
 import { POS_COLOR } from "../../lib/client/pos";
+import LowerThird from "../ui/LowerThird";
+import Sticker from "../ui/Sticker";
 
 const VERDICT_CLASS = { up: "text-rb", down: "text-qb", flat: "text-ink-dim" } as const;
 
@@ -45,46 +47,55 @@ export default function TradePanel({
   }
 
   return (
-    <section className="rounded-lg border border-line p-4">
-      <h2 className="text-sm font-semibold">Trade</h2>
-      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+    <section className="space-y-3">
+      <LowerThird headline="Trade" />
+      <div className="grid gap-3 px-1 sm:grid-cols-2">
         <div>
           <p className="text-xs text-ink-faint">You give</p>
-          <ul className="mt-1 space-y-0.5 text-sm">
+          <ul className="mt-1 space-y-1 text-sm">
             {roster.map((p) => (
-              <li key={p.id} className="hover:bg-panel">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={give.has(p.id)} onChange={(e) => setGive((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} />
-                  <span className="font-mono text-[10px]" style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span>{p.name}
-                </label>
+              <li key={p.id}>
+                <Sticker pos={p.pos} as="row">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={give.has(p.id)} onChange={(e) => setGive((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} />
+                    <span className="font-mono text-[10px]" style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span>{p.name}
+                  </label>
+                </Sticker>
               </li>
             ))}
           </ul>
         </div>
         <div>
           <p className="text-xs text-ink-faint">You receive</p>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Add a player by name…" className="mt-1 w-full rounded border border-line bg-field px-2 py-1 text-sm" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Add a player" aria-label="Add a player" className="mt-1 w-full rounded bg-field px-2 py-1 text-sm" />
           {matches.length > 0 && (
-            <ul className="mt-1 rounded border border-line text-sm">
+            <ul className="mt-1 space-y-1 text-sm">
               {matches.map((p) => (
-                <li key={p.id}><button onClick={() => { setReceive((r) => [...r, p]); setQuery(""); }} className="w-full px-2 py-1 text-left hover:bg-panel">{p.name} <span style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span> <span className="text-ink-faint">· {p.team}</span></button></li>
+                <li key={p.id}>
+                  <Sticker pos={p.pos} as="row" onClick={() => { setReceive((r) => [...r, p]); setQuery(""); }}>
+                    {p.name} <span style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span> <span className="text-ink-faint">· {p.team}</span>
+                  </Sticker>
+                </li>
               ))}
             </ul>
           )}
           <ul className="mt-1 flex flex-wrap gap-1">
             {receive.map((p) => (
-              <li key={p.id} className="rounded bg-panel px-2 py-0.5 text-xs">
-                <span style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span> {p.name}
-                <button onClick={() => setReceive((r) => r.filter((x) => x.id !== p.id))} className="ml-1 text-ink-faint hover:text-ink" aria-label={`Remove ${p.name}`}>×</button>
+              <li key={p.id}>
+                <Sticker pos={p.pos} as="chip">
+                  <span style={{ color: POS_COLOR[p.pos] }}>{p.pos}</span> {p.name}
+                  <button onClick={() => setReceive((r) => r.filter((x) => x.id !== p.id))} className="btn btn-quiet" aria-label={`Remove ${p.name}`}>×</button>
+                </Sticker>
               </li>
             ))}
           </ul>
         </div>
       </div>
-      {/* Accent CTAs keep their colour on hover (PasteImport/Setup precedent); a bg-panel hover would read as disabled. */}
-      <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field hover:brightness-110 disabled:opacity-40">Evaluate</button>
+      <div className="px-1">
+        <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="btn btn-accent">Evaluate</button>
+      </div>
       {verdict && (
-        <div className="mt-3 text-sm">
+        <div className="px-1 text-sm">
           <p className="text-xs text-ink-faint">
             {partner ? `Trading with ${partner.name}` : "Free agents — the odds axis assumes no other roster changes."}
           </p>
