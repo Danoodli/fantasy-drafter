@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { THEMES, contrastRatio, tint, loadTheme, saveTheme, DEFAULT_THEME_FOR, type ThemePalette } from "../lib/client/theme";
 
 const POS = ["qb", "rb", "wr", "te", "k", "dst"] as const;
@@ -71,5 +73,24 @@ describe("persistence", () => {
   it("defaults by colour scheme", () => {
     expect(DEFAULT_THEME_FOR("dark")).toBe("night");
     expect(DEFAULT_THEME_FOR("light")).toBe("day");
+  });
+});
+
+describe("globals.css mirrors THEMES", () => {
+  const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
+  const KEYS: [keyof ThemePalette, string][] = [
+    ["field", "field"], ["panel", "panel"], ["panel2", "panel-2"], ["line", "line"], ["ink", "ink"], ["inkDim", "ink-dim"], ["inkFaint", "ink-faint"],
+    ["accent", "accent"], ["accentInk", "accent-ink"], ["good", "good"], ["bad", "bad"], ["warn", "warn"], ["live", "live"],
+    ["qb", "qb"], ["rb", "rb"], ["wr", "wr"], ["te", "te"], ["k", "k"], ["dst", "dst"],
+  ];
+  it.each(THEMES.map((t) => [t.id, t] as const))("%s block matches hex-for-hex", (id, t: ThemePalette) => {
+    const start = css.indexOf(`[data-theme="${id}"]`);
+    expect(start).toBeGreaterThan(-1);
+    const block = css.slice(start, css.indexOf("}", start));
+    for (const [field, cssName] of KEYS) {
+      const m = block.match(new RegExp(`--t-${cssName}:\\s*(#[0-9A-Fa-f]{6})`));
+      expect(m, `--t-${cssName} missing in ${id}`).not.toBeNull();
+      expect(m![1].toUpperCase()).toBe(t[field].toUpperCase());
+    }
   });
 });

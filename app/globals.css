@@ -337,3 +337,61 @@ button:not(:disabled):active {
 @media (prefers-reduced-motion: reduce) {
   .live-dot, .stagger > *, .rise-in, .flame, .btn-shimmer::after { animation: none !important; }
 }
+
+/* ---- Primitives ---------------------------------------------------------- */
+
+/* The draft board's sticker: a solid position-coloured edge and a faint tint
+   of the same colour behind. Set --sticker to a position colour. This is the
+   ONLY way rows, chips and cards are bounded — never a 1px grey border. */
+@utility sticker {
+  --sticker: var(--color-ink-faint);
+  position: relative;
+  border-left: 4px solid var(--sticker);
+  background: color-mix(in srgb, var(--color-panel) 94%, var(--sticker) 6%);
+  border-radius: 0 6px 6px 0;
+}
+@utility sticker-chip {
+  --sticker: var(--color-ink-faint);
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  border-left: 3px solid var(--sticker);
+  background: color-mix(in srgb, var(--color-panel) 92%, var(--sticker) 8%);
+  border-radius: 0 4px 4px 0;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* The broadcast lower-third: headline on a slab, big number, small label. */
+@utility lower-third {
+  display: flex; align-items: stretch; gap: 0;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+
+/* Buttons never look like text. */
+@utility btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  border-radius: 6px; padding: 0.5rem 0.875rem;
+  font-weight: 600; font-size: 0.875rem; line-height: 1.25rem;
+}
+@utility btn-accent {
+  background: var(--color-accent); color: var(--color-accent-ink);
+}
+.btn-accent:hover:not(:disabled) { filter: brightness(1.1); }
+@utility btn-outline {
+  border: 2px solid var(--color-ink-dim); color: var(--color-ink);
+}
+.btn-outline:hover:not(:disabled) { border-color: var(--color-ink); background: var(--color-panel); }
+@utility btn-quiet {
+  color: var(--color-ink-dim);
+}
+.btn-quiet:hover:not(:disabled) { color: var(--color-ink); background: var(--color-panel); }
+.btn:disabled { opacity: 0.4; }
+
+/* Links: ink, accent underline on hover. */
+@utility link {
+  color: var(--color-ink);
+  text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; text-decoration-thickness: 2px;
+}
+.link:hover { text-decoration-color: var(--color-accent); }

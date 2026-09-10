@@ -14,6 +14,7 @@ import { gradeOutlooks } from "../../lib/engine/weekly/liveGrade";
 import { gradeBoard } from "../../lib/engine/injuryFeed";
 import { useLiveSignals } from "../../lib/client/useLiveSignals";
 import { loadTeams, saveTeam, type SavedTeam } from "../../lib/client/teams";
+import LowerThird from "../ui/LowerThird";
 import LineupTable from "./LineupTable";
 import RosterImport from "./RosterImport";
 import MatchupPanel from "./MatchupPanel";
@@ -225,12 +226,11 @@ export default function SeasonCockpit({
           )}
 
           <section className="rounded-lg border border-line p-4">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold">{changed.size > 0 ? "Recommended lineup" : "Lineup"}</h2>
-              <span className="text-xs text-ink-faint">
-                {(advice.winProbability * 100).toFixed(0)}% now → {(advice.recommendedWinProbability * 100).toFixed(0)}% with the swaps below
-              </span>
-            </div>
+            <LowerThird
+              headline={changed.size > 0 ? "Recommended lineup" : "Lineup"}
+              number={`${(advice.winProbability * 100).toFixed(0)}%`}
+              label="to win"
+            />
             <div className="mt-2">
               <LineupTable
                 lineup={advice.recommended}
