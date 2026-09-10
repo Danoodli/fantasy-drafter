@@ -2792,6 +2792,7 @@ describe("slot words", () => {
     expect(leadingSlot("Bench Brock Bowers").slot).toBe("bench");
     expect(leadingSlot("IR Josh Allen").slot).toBe("ir");
     expect(leadingSlot("K Jake Bates").slot).toBe("starter");
+    expect(leadingSlot("RB1 Bijan Robinson")).toEqual({ slot: "starter", rest: "Bijan Robinson" });
     // A trailing position is not a slot, and an initial is a name, not a kicker slot.
     expect(leadingSlot("Josh Allen QB")).toEqual({ slot: null, rest: "Josh Allen QB" });
     expect(leadingSlot("K. Walker RB SEA")).toEqual({ slot: null, rest: "K. Walker RB SEA" });
@@ -2859,6 +2860,13 @@ Brock Bowers`;
     expect(r.ignored).toEqual(expect.arrayContaining(["Total 112.4", "Projected 118.0"]));
   });
 
+  it("does not mistake a team code plus one stray word for a name", () => {
+    // "atl" is a team code, so "Waivers atl" carries only one name-like word and is ignored, as in lib/draft/pasteImport.ts.
+    const r = parseRosterPaste(`Josh Allen\nWaivers atl`, players);
+    expect(r.entries.map((e) => e.player?.name)).toEqual(["Josh Allen"]);
+    expect(r.ignored).toEqual(["Waivers atl"]);
+  });
+
   it("marks a misspelled but recoverable name low-confidence with the match as a suggestion", () => {
     // Verified against the shared matcher: "Bijon Robinsen" scores 0.78 for Bijan Robinson.
     const r = parseRosterPaste(`Josh Allen\nBijon Robinsen`, players);
@@ -2902,7 +2910,7 @@ Expected: FAIL — module not found.
 //   Seahawks D/ST · SEA DEF                  team defenses
 import type { BoardPlayer } from "../types";
 import type { RosterEntry } from "../client/teams";
-import { buildVocab, findPlayers, lineHints, surnameCounts, tokenize, type Vocab } from "../draft/nameMatch";
+import { buildVocab, findPlayers, lineHints, surnameCounts, teamCodeOf, tokenize, type Vocab } from "../draft/nameMatch";
 import { findDefense } from "../draft/pasteImport";
 import { scorePlayers } from "../draft/fuzzy";
 
@@ -2923,7 +2931,8 @@ const NOISE = new Set(["my", "team", "week", "wk", "total", "totals", "projected
  * ("K. Walker") is an initial, not the kicker slot.
  */
 export function leadingSlot(line: string): { slot: RosterSlot | null; rest: string } {
-  const m = line.match(/^\s*([A-Za-z]+(?:\/[A-Za-z]+)*)(\.?)(?=\s|$)\s*/);
+  // An optional trailing digit accepts numbered labels ("RB1", "WR2").
+  const m = line.match(/^\s*([A-Za-z]+(?:\/[A-Za-z]+)*)\d?(\.?)(?=\s|$)\s*/);
   if (!m) return { slot: null, rest: line };
   const word = m[1].replace(/\//g, "").toLowerCase();
   if (m[2] === "." && m[1].length === 1) return { slot: null, rest: line };
@@ -2965,7 +2974,9 @@ export interface RosterPasteResult {
 
 /** Name-like words on a line: letters, not a slot/team/position code, not page noise, not a number. */
 function nameWords(tokens: string[]): string[] {
-  return tokens.filter((t) => t.length >= 3 && /[a-z]/.test(t) && !STARTER_WORDS.has(t) && !BENCH_WORDS.has(t) && !NOISE.has(t));
+  return tokens.filter(
+    (t) => t.length >= 3 && /[a-z]/.test(t) && !STARTER_WORDS.has(t) && !BENCH_WORDS.has(t) && !NOISE.has(t) && teamCodeOf(t) === null
+  );
 }
 
 export function parseRosterPaste(text: string, players: BoardPlayer[]): RosterPasteResult {
@@ -3036,7 +3047,7 @@ export function parseRosterPaste(text: string, players: BoardPlayer[]): RosterPa
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/rosterPaste.test.ts`
-Expected: PASS, 10 tests. Every fixture line above was run through the shared matcher on 2026-09-09 (scores 0.96–1.16, no ties). If the Sleeper-style initials case fails on "A. St. Brown" or "S. LaPorta", print `tokenize(line)` and the `findPlayers` result and report — the shared matcher may need a case, and that belongs in `nameMatch.ts` with its own test, not a special case here.
+Expected: PASS, 11 tests. Every fixture line above was run through the shared matcher on 2026-09-09 (scores 0.96–1.16, no ties). If the Sleeper-style initials case fails on "A. St. Brown" or "S. LaPorta", print `tokenize(line)` and the `findPlayers` result and report — the shared matcher may need a case, and that belongs in `nameMatch.ts` with its own test, not a special case here.
 
 - [ ] **Step 5: Write the Paste tab**
 
