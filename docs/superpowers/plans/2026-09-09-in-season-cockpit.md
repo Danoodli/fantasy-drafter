@@ -2011,7 +2011,7 @@ Sleeper's league API is free and keyless and gives everything the manual paths c
   - `teamNameFor(roster: SleeperRoster, users: SleeperUser[]): string`
   - `parseLeagueId(input: string): string`
   - `teamFromSleeper(args: { league: SleeperLeagueInfo; rosters: SleeperRoster[]; users: SleeperUser[]; myRosterId: number; schedule: Record<number, [number, number][]>; base: LeagueConfig; existing?: SavedTeam; now: string }): SavedTeam`
-  - `fetchLeague(leagueId: string): Promise<{ league: SleeperLeagueInfo; rosters: SleeperRoster[]; users: SleeperUser[] }>`, `fetchMatchups(leagueId: string, week: number): Promise<SleeperMatchup[]>`, `fetchSchedule(leagueId: string, fromWeek: number, toWeek: number): Promise<Record<number, [number, number][]>>`, `fetchNflState(): Promise<{ season: number; week: number; seasonType: string }>`
+  - `fetchLeague(leagueId: string): Promise<{ league: SleeperLeagueInfo; rosters: SleeperRoster[]; users: SleeperUser[] }>`, `fetchMatchups(leagueId: string, week: number): Promise<SleeperMatchup[]>`, `fetchSchedule(leagueId: string, fromWeek: number, toWeek: number): Promise<{ schedule: Record<number, [number, number][]>; failedWeeks: number[] }>` (a week Sleeper answered with no pairings is simply absent; a week whose request FAILED is listed in `failedWeeks` so the UI can say so — the two are different facts), `fetchNflState(): Promise<{ season: number; week: number; seasonType: string }>`
 
 Shapes verified live on 2026-09-09 (league `289646328504385536`): `settings.playoff_teams` 6, `settings.playoff_week_start` 14, `settings.num_teams` 12, `roster_positions` `["QB","RB","RB","WR","WR","TE","FLEX","FLEX","DEF","BN",…]`; a roster has `roster_id`, `owner_id`, `players` (15 ids), `starters` (9, the last being `"CLE"` — **Sleeper's DEF id is the team code, exactly this board's DST id**), `reserve` (null when empty), `settings.{wins,losses,ties,fpts,fpts_decimal}` (7/6/0, 1776 + 6/100); a matchup has `roster_id`, `matchup_id` (null for teams idle in a playoff week), `points`, `starters`, `players`; a user has `user_id`, `display_name`, `metadata.team_name` (may be absent). `GET /v1/state/nfl` returned `{"week":1,"season":"2026","season_type":"regular","display_week":1,…}`.
 
@@ -2073,7 +2073,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseLeague, parseRosters, parseMatchups, parseUsers, rosterSlotsFromPositions, formatFromScoring,
-  opponentOf, pairings, teamNameFor, parseLeagueId, teamFromSleeper,
+  opponentOf, pairings, teamNameFor, parseLeagueId, teamFromSleeper, type SleeperMatchup,
 } from "../lib/season/sleeperLeague";
 import type { LeagueConfig } from "../lib/types";
 
@@ -2178,6 +2178,12 @@ describe("parseMatchups / opponentOf / pairings", () => {
     expect(p).toHaveLength(6);
     for (const [a, b] of p) expect(a).toBeLessThan(b);
     expect(new Set(p.flat()).size).toBe(12);
+  });
+  it("drops a malformed group (one or three rosters on a matchup id) rather than guessing", () => {
+    const m = (rosterId: number, matchupId: number | null): SleeperMatchup => ({ rosterId, matchupId, points: 0, starters: [] });
+    expect(pairings([m(1, 7)])).toEqual([]);
+    expect(pairings([m(1, 7), m(2, 7), m(3, 7), m(4, 8), m(5, 8)])).toEqual([[4, 5]]);
+    expect(pairings([m(9, null), m(2, 3), m(1, 3)])).toEqual([[1, 2]]);
   });
 });
 
@@ -2543,17 +2549,33 @@ export async function fetchMatchups(leagueId: string, week: number): Promise<Sle
   return parseMatchups(await get(`/league/${leagueId}/matchups/${week}`));
 }
 
-/** Pairings for weeks fromWeek..toWeek. A week whose pairings Sleeper does not publish yet is omitted, not invented. */
-export async function fetchSchedule(leagueId: string, fromWeek: number, toWeek: number): Promise<Record<number, [number, number][]>> {
+/**
+ * Pairings for weeks fromWeek..toWeek. Two different absences, kept apart:
+ * a week Sleeper answered with no pairings (not published yet) is simply
+ * omitted from `schedule`; a week whose REQUEST failed (network, 5xx) is
+ * listed in `failedWeeks` so the UI can say the schedule is incomplete
+ * rather than quietly treating a transient error as "unpublished".
+ */
+export async function fetchSchedule(
+  leagueId: string,
+  fromWeek: number,
+  toWeek: number
+): Promise<{ schedule: Record<number, [number, number][]>; failedWeeks: number[] }> {
   const weeks: number[] = [];
   for (let w = fromWeek; w <= toWeek; w++) weeks.push(w);
-  const all = await Promise.all(weeks.map((w) => fetchMatchups(leagueId, w).catch(() => [] as SleeperMatchup[])));
-  const out: Record<number, [number, number][]> = {};
+  const results = await Promise.allSettled(weeks.map((w) => fetchMatchups(leagueId, w)));
+  const schedule: Record<number, [number, number][]> = {};
+  const failedWeeks: number[] = [];
   weeks.forEach((w, i) => {
-    const p = pairings(all[i]);
-    if (p.length > 0) out[w] = p;
+    const r = results[i];
+    if (r.status === "rejected") {
+      failedWeeks.push(w);
+      return;
+    }
+    const p = pairings(r.value);
+    if (p.length > 0) schedule[w] = p;
   });
-  return out;
+  return { schedule, failedWeeks };
 }
 
 export async function fetchNflState(): Promise<{ season: number; week: number; seasonType: string }> {
@@ -2596,7 +2618,7 @@ and add to `tests/teams.test.ts`:
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/sleeperLeague.test.ts tests/teams.test.ts`
-Expected: PASS — 21 in sleeperLeague, 9 in teams.
+Expected: PASS — 22 in sleeperLeague, 9 in teams.
 
 - [ ] **Step 7: Write the Sleeper tab**
 
@@ -2646,8 +2668,9 @@ export default function SleeperSync({
     setError(null);
     setBusy("Loading schedule…");
     try {
-      const schedule = await fetchSchedule(loaded.league.leagueId, week, loaded.league.playoffWeekStart - 1);
+      const { schedule, failedWeeks } = await fetchSchedule(loaded.league.leagueId, week, loaded.league.playoffWeekStart - 1);
       onChange(teamFromSleeper({ ...loaded, myRosterId: rosterId, schedule, base, existing: team.sleeper ? team : undefined, now: new Date().toISOString() }));
+      if (failedWeeks.length) setError(`Synced, but the schedule for week${failedWeeks.length === 1 ? "" : "s"} ${failedWeeks.join(", ")} could not be fetched — re-sync later; playoff odds treat those weeks as unknown pairings.`);
     } catch (e) {
       setError(String(e));
     } finally {
