@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Board, BoardPlayer, LeagueConfig, Position } from "../../lib/types";
+import type { Board, BoardPlayer, LeagueConfig, Position, ScoringFormat } from "../../lib/types";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import { DEFAULT_WEEKLY_MODEL } from "../../lib/engine/weekly/model";
 import { startSitAdvice, type AdvicePlayer, type Opponent } from "../../lib/engine/season/advice";
 import { bestLineup } from "../../lib/engine/season/lineup";
 import { playoffOdds, type PlayoffOdds, type LeagueTeamInput } from "../../lib/engine/season/playoffOdds";
 import type { TradeLeagueContext } from "../../lib/engine/season/trade";
+import { DEFAULT_SEASON_LEVERS } from "../../lib/engine/season/levers";
 import { REG_SEASON_WEEKS } from "../../lib/engine/coverage";
 import { gradeOutlooks } from "../../lib/engine/weekly/liveGrade";
 import { gradeBoard } from "../../lib/engine/injuryFeed";
@@ -24,13 +25,15 @@ import PlayerModal from "../PlayerModal";
 const DEFAULT_REGULAR_SEASON_END = 14;
 
 export default function SeasonCockpit({
-  board, outlooks, week, onWeekChange, config,
+  board, outlooks, week, onWeekChange, config, onFormat,
 }: {
   board: Board;
   outlooks: Map<string, WeekOutlook>;
   week: number;
   onWeekChange: (w: number) => void;
   config: LeagueConfig;
+  /** Reports the active team's scoring format so the caller can refetch the week board in the right format. */
+  onFormat?: (format: ScoringFormat) => void;
 }) {
   const [team, setTeam] = useState<SavedTeam | null>(null);
   const [modalPlayer, setModalPlayer] = useState<BoardPlayer | null>(null);
@@ -54,16 +57,25 @@ export default function SeasonCockpit({
     saveTeam(stamped);
   };
 
+  // The active team's scoring format drives which week board the page fetches
+  // — a manual team, a Sleeper league in standard, etc. must not be stuck
+  // showing PPR projections.
+  const teamScoring = team?.config.scoring;
+  useEffect(() => {
+    if (teamScoring) onFormat?.(teamScoring);
+  }, [teamScoring, onFormat]);
+
   const live = useLiveSignals(board);
   const headlines = useMemo(() => new Map([...live.boardNews].map(([id, n]) => [id, { headline: n.headline }] as const)), [live.boardNews]);
   const graded = useMemo(() => gradeOutlooks(outlooks, live.liveStatus, headlines, DEFAULT_WEEKLY_MODEL), [outlooks, live.liveStatus, headlines]);
   const gradedBoard = useMemo(() => gradeBoard(board, live.liveStatus, headlines), [board, live.liveStatus, headlines]);
 
   const byId = useMemo(() => new Map(gradedBoard.players.map((p) => [p.id, p] as const)), [gradedBoard.players]);
-  // The `·live` marker compares against what the week board BAKED — the
-  // ungraded board's status — never the graded board's, or graded-vs-graded
-  // converges on the same merged value and the marker never fires.
-  const bakedStatus = useMemo(() => new Map(board.players.map((p) => [p.id, p.injury] as const)), [board.players]);
+  // The `·live` marker compares against what the WEEK BOARD baked — the
+  // ungraded `outlooks` prop's `drivers.status` — never the graded board's,
+  // or graded-vs-graded converges on the same merged value and the marker
+  // never fires.
+  const bakedStatus = useMemo(() => new Map([...outlooks].map(([id, o]) => [id, o.drivers.status] as const)), [outlooks]);
 
   const rosterPlayers = useMemo(
     () => (team ? team.roster.map((r) => byId.get(r.playerId)).filter((p): p is BoardPlayer => !!p) : []),
@@ -120,10 +132,12 @@ export default function SeasonCockpit({
   // would re-run 500 season sims on a timer. The current board is read through
   // a ref so a genuine roster/league change still simulates with fresh players.
   const leagueTeamsRef = useRef(leagueTeams);
-  // Intentional "latest ref" write, so the background sim below reads fresh
-  // players without re-running on every live-signals poll.
-  // eslint-disable-next-line react-hooks/refs -- read only from the effect's setTimeout callback, never during render
-  leagueTeamsRef.current = leagueTeams;
+  // "Latest ref" write in its own effect (never at render time), so the
+  // background sim below reads fresh players without re-running on every
+  // live-signals poll.
+  useEffect(() => {
+    leagueTeamsRef.current = leagueTeams;
+  }, [leagueTeams]);
   const teamConfig = team?.config;
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale odds when the league/roster the sim depends on disappears, not a render-time computation
@@ -138,15 +152,24 @@ export default function SeasonCockpit({
     return () => clearTimeout(handle);
   }, [league, myRosterId, week, teamConfig]);
 
+  // Read only when the dial is actually on: with riskFromPlayoffOdds at its
+  // shipped 0, `leverage` is always null regardless of `odds`, so using IT
+  // (not `odds`) as the advice dependency below means the background sim
+  // landing (setOdds) never re-triggers a 2000-sim start/sit recompute while
+  // the dial is off.
+  const leverage = DEFAULT_SEASON_LEVERS.riskFromPlayoffOdds > 0 ? odds?.leverage ?? null : null;
   const advice = useMemo(() => {
     if (!team || advicePlayers.length === 0) return null;
-    return startSitAdvice({ players: advicePlayers, opponent, config: team.config, params: DEFAULT_WEEKLY_MODEL, starterIds: starterIds.length ? starterIds : undefined, leverage: odds?.leverage ?? null });
-  }, [team, advicePlayers, opponent, starterIds, odds]);
+    return startSitAdvice({ players: advicePlayers, opponent, config: team.config, params: DEFAULT_WEEKLY_MODEL, starterIds: starterIds.length ? starterIds : undefined, leverage });
+  }, [team, advicePlayers, opponent, starterIds, leverage]);
 
   const rostered = useMemo(() => new Set(league ? league.rosters.flatMap((r) => r.players) : team?.roster.map((r) => r.playerId) ?? []), [league, team]);
   const available = useMemo(() => board.players.filter((p) => !rostered.has(p.id)), [board.players, rostered]);
+  // No partnerRosterId here: the trade partner is whoever holds the players
+  // you're receiving, not this week's opponent — TradePanel derives it from
+  // `rosters` once `receive` is picked.
   const tradeLeague: TradeLeagueContext | null = league && leagueTeams && myRosterId !== null
-    ? { teams: leagueTeams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, myRosterId, partnerRosterId: oppRosterId ?? undefined }
+    ? { teams: leagueTeams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, myRosterId, rosters: league.rosters }
     : null;
   const changed = useMemo(() => {
     if (!advice) return new Set<string>();
@@ -203,7 +226,7 @@ export default function SeasonCockpit({
 
           <section className="rounded-lg border border-line p-4">
             <div className="flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold">Lineup</h2>
+              <h2 className="text-sm font-semibold">{changed.size > 0 ? "Recommended lineup" : "Lineup"}</h2>
               <span className="text-xs text-ink-faint">
                 {(advice.winProbability * 100).toFixed(0)}% now → {(advice.recommendedWinProbability * 100).toFixed(0)}% with the swaps below
               </span>

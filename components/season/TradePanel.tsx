@@ -29,8 +29,19 @@ export default function TradePanel({
     return board.filter((p) => p.name.toLowerCase().includes(q) && !onRoster.has(p.id) && !receive.some((r) => r.id === p.id)).slice(0, 6);
   }, [query, board, onRoster, receive]);
 
+  // The trade partner is derived, never assumed: the roster that holds EVERY
+  // player being received. Zero or more than one such roster (no players
+  // picked yet, or an ids-collision in a manual league) is "no partner
+  // known", never a guess — this week's opponent is a different roster and
+  // must not stand in for the other side of a trade.
+  const partner = useMemo(() => {
+    if (!league?.rosters || receive.length === 0) return null;
+    const holders = league.rosters.filter((r) => receive.every((p) => r.players.includes(p.id)));
+    return holders.length === 1 ? holders[0] : null;
+  }, [league, receive]);
+
   function evaluate() {
-    setVerdict(evaluateTrade({ ...ctx, roster, give: [...give], receive, league: league ?? undefined }));
+    setVerdict(evaluateTrade({ ...ctx, roster, give: [...give], receive, league: league ? { ...league, partnerRosterId: partner?.rosterId } : undefined }));
   }
 
   return (
@@ -74,6 +85,9 @@ export default function TradePanel({
       <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field hover:brightness-110 disabled:opacity-40">Evaluate</button>
       {verdict && (
         <div className="mt-3 text-sm">
+          <p className="text-xs text-ink-faint">
+            {partner ? `Trading with ${partner.name}` : "Free agents — the odds axis assumes no other roster changes."}
+          </p>
           <p>{verdict.summary}</p>
           <ul className="mt-1 flex flex-wrap gap-x-4 text-xs">
             <li className={VERDICT_CLASS[verdict.points.verdict]}>Points {verdict.points.delta >= 0 ? "+" : ""}{verdict.points.delta.toFixed(0)}</li>

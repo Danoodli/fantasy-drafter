@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { PlayoffOdds } from "../../lib/engine/season/playoffOdds";
 import { DEFAULT_SEASON_LEVERS } from "../../lib/engine/season/levers";
 
@@ -13,6 +14,21 @@ export default function PlayoffPanel({
   onRegularSeasonEnd: (w: number) => void;
   hasLeague: boolean;
 }) {
+  // Same commit-on-blur/Enter pattern as MatchupPanel's opponent-total input:
+  // a number input's onChange fires with "" mid-edit, and Number("") is 0.
+  const [endText, setEndText] = useState(() => String(regularSeasonEnd));
+  // Adjusting state when a prop changes, done during render per React's own
+  // guidance — see MatchupPanel's identical pattern for why not an effect.
+  const [syncedEnd, setSyncedEnd] = useState(regularSeasonEnd);
+  if (regularSeasonEnd !== syncedEnd) {
+    setSyncedEnd(regularSeasonEnd);
+    setEndText(String(regularSeasonEnd));
+  }
+  const commitEnd = () => {
+    const n = Number(endText);
+    if (endText.trim() !== "" && Number.isFinite(n)) onRegularSeasonEnd(n);
+    else setEndText(String(regularSeasonEnd));
+  };
   return (
     <section className="rounded-lg border border-line p-4">
       <h2 className="text-sm font-semibold">Playoff odds</h2>
@@ -21,7 +37,13 @@ export default function PlayoffPanel({
           <p>Playoff odds need every roster in the league — sync a Sleeper league to see them.</p>
           <label className="mt-2 block text-xs">
             Regular season ends after week{" "}
-            <input type="number" min={1} max={18} value={regularSeasonEnd} onChange={(e) => onRegularSeasonEnd(Number(e.target.value))} className="ml-1 w-14 rounded border border-line bg-field px-1 py-0.5 tabular-nums" />
+            <input
+              type="number" min={1} max={18} value={endText}
+              onChange={(e) => setEndText(e.target.value)}
+              onBlur={commitEnd}
+              onKeyDown={(e) => { if (e.key === "Enter") { commitEnd(); e.currentTarget.blur(); } }}
+              className="ml-1 w-14 rounded border border-line bg-field px-1 py-0.5 tabular-nums"
+            />
             <span className="ml-2 text-ink-faint">(sets how many weeks waivers and trades count)</span>
           </label>
         </div>

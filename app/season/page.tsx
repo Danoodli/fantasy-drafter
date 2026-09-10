@@ -5,7 +5,7 @@
 // Both are static JSON — no server on the hot path, same as the draft route.
 
 import { useEffect, useState } from "react";
-import type { Board, LeagueConfig } from "../../lib/types";
+import type { Board, LeagueConfig, ScoringFormat } from "../../lib/types";
 import { loadConfig } from "../../lib/client/config";
 import { fetchWeekBoard, indexOutlooks, currentNflWeek } from "../../lib/client/weekBoard";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
@@ -21,6 +21,10 @@ export default function SeasonPage() {
   const [outlooks, setOutlooks] = useState<Map<string, WeekOutlook> | null>(null);
   const [week, setWeek] = useState(() => currentNflWeek(new Date(), SEASON_START));
   const [error, setError] = useState<string | null>(null);
+  // The saved team's scoring format, reported up by SeasonCockpit — not
+  // `config?.scoring`, which is only Setup's config and misses a team whose
+  // own format differs (a synced Sleeper league, a second manual team).
+  const [format, setFormat] = useState<ScoringFormat>(() => loadConfig()?.scoring ?? "ppr");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage hydration
@@ -28,7 +32,6 @@ export default function SeasonPage() {
   }, []);
 
   useEffect(() => {
-    const format = config?.scoring ?? "ppr";
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears a stale error before refetching on format/week change
     setError(null);
@@ -47,7 +50,7 @@ export default function SeasonPage() {
     return () => {
       cancelled = true;
     };
-  }, [config?.scoring, week]);
+  }, [format, week]);
 
   if (error) {
     return (
@@ -72,6 +75,7 @@ export default function SeasonPage() {
       week={week}
       onWeekChange={setWeek}
       config={config ?? { ...defaultConfig, scoring: "ppr" }}
+      onFormat={setFormat}
     />
   );
 }
