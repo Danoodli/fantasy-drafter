@@ -20,6 +20,7 @@ describe("slot words", () => {
     expect(leadingSlot("Bench Brock Bowers").slot).toBe("bench");
     expect(leadingSlot("IR Josh Allen").slot).toBe("ir");
     expect(leadingSlot("K Jake Bates").slot).toBe("starter");
+    expect(leadingSlot("RB1 Bijan Robinson")).toEqual({ slot: "starter", rest: "Bijan Robinson" });
     // A trailing position is not a slot, and an initial is a name, not a kicker slot.
     expect(leadingSlot("Josh Allen QB")).toEqual({ slot: null, rest: "Josh Allen QB" });
     expect(leadingSlot("K. Walker RB SEA")).toEqual({ slot: null, rest: "K. Walker RB SEA" });
@@ -85,6 +86,13 @@ Brock Bowers`;
     const r = parseRosterPaste(`My Team · Week 3\n\nJosh Allen\nTotal 112.4\nProjected 118.0`, players);
     expect(r.entries.map((e) => e.player?.name)).toEqual(["Josh Allen"]);
     expect(r.ignored).toEqual(expect.arrayContaining(["Total 112.4", "Projected 118.0"]));
+  });
+
+  it("does not mistake a team code plus one stray word for a name", () => {
+    // "atl" is a team code, so "Waivers atl" carries only one name-like word and is ignored, as in lib/draft/pasteImport.ts.
+    const r = parseRosterPaste(`Josh Allen\nWaivers atl`, players);
+    expect(r.entries.map((e) => e.player?.name)).toEqual(["Josh Allen"]);
+    expect(r.ignored).toEqual(["Waivers atl"]);
   });
 
   it("marks a misspelled but recoverable name low-confidence with the match as a suggestion", () => {

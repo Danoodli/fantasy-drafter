@@ -10,7 +10,7 @@
 //   Seahawks D/ST · SEA DEF                  team defenses
 import type { BoardPlayer } from "../types";
 import type { RosterEntry } from "../client/teams";
-import { buildVocab, findPlayers, lineHints, surnameCounts, tokenize, type Vocab } from "../draft/nameMatch";
+import { buildVocab, findPlayers, lineHints, surnameCounts, teamCodeOf, tokenize, type Vocab } from "../draft/nameMatch";
 import { findDefense } from "../draft/pasteImport";
 import { scorePlayers } from "../draft/fuzzy";
 
@@ -31,7 +31,8 @@ const NOISE = new Set(["my", "team", "week", "wk", "total", "totals", "projected
  * ("K. Walker") is an initial, not the kicker slot.
  */
 export function leadingSlot(line: string): { slot: RosterSlot | null; rest: string } {
-  const m = line.match(/^\s*([A-Za-z]+(?:\/[A-Za-z]+)*)(\.?)(?=\s|$)\s*/);
+  // An optional trailing digit accepts numbered labels ("RB1", "WR2").
+  const m = line.match(/^\s*([A-Za-z]+(?:\/[A-Za-z]+)*)\d?(\.?)(?=\s|$)\s*/);
   if (!m) return { slot: null, rest: line };
   const word = m[1].replace(/\//g, "").toLowerCase();
   if (m[2] === "." && m[1].length === 1) return { slot: null, rest: line };
@@ -73,7 +74,9 @@ export interface RosterPasteResult {
 
 /** Name-like words on a line: letters, not a slot/team/position code, not page noise, not a number. */
 function nameWords(tokens: string[]): string[] {
-  return tokens.filter((t) => t.length >= 3 && /[a-z]/.test(t) && !STARTER_WORDS.has(t) && !BENCH_WORDS.has(t) && !NOISE.has(t));
+  return tokens.filter(
+    (t) => t.length >= 3 && /[a-z]/.test(t) && !STARTER_WORDS.has(t) && !BENCH_WORDS.has(t) && !NOISE.has(t) && teamCodeOf(t) === null
+  );
 }
 
 export function parseRosterPaste(text: string, players: BoardPlayer[]): RosterPasteResult {
