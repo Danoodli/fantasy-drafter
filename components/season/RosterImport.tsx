@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Board, LeagueConfig } from "../../lib/types";
 import { applyRoster, type SavedTeam } from "../../lib/client/teams";
 import SleeperSync from "./SleeperSync";
+import RosterPaste from "./RosterPaste";
 
 type Tab = "manual" | "sleeper" | "paste" | "ocr";
 const TABS: { id: Tab; label: string }[] = [
@@ -59,7 +60,7 @@ export default function RosterImport({
       </div>
 
       {tab === "sleeper" && <SleeperSync team={team} week={week} base={config} onChange={onChange} />}
-      {tab === "paste" && <p className="mt-3 text-xs text-ink-faint">Paste arrives in Task 8.</p>}
+      {tab === "paste" && <RosterPaste board={board} team={team} onChange={onChange} />}
       {tab === "ocr" && <p className="mt-3 text-xs text-ink-faint">Screen sync arrives in Task 9.</p>}
 
       {tab === "manual" && (<>
