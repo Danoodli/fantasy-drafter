@@ -6,6 +6,9 @@ import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import { DEFAULT_WEEKLY_MODEL } from "../../lib/engine/weekly/model";
 import { startSitAdvice } from "../../lib/engine/season/advice";
 import { bestLineup } from "../../lib/engine/season/lineup";
+import { gradeOutlooks } from "../../lib/engine/weekly/liveGrade";
+import { gradeBoard } from "../../lib/engine/injuryFeed";
+import { useLiveSignals } from "../../lib/client/useLiveSignals";
 import { loadTeams, saveTeam, type SavedTeam } from "../../lib/client/teams";
 import LineupTable from "./LineupTable";
 import RosterImport from "./RosterImport";
@@ -40,14 +43,19 @@ export default function SeasonCockpit({
     saveTeam(stamped);
   };
 
-  const byId = useMemo(() => new Map(board.players.map((p) => [p.id, p] as const)), [board.players]);
+  const live = useLiveSignals(board);
+  const headlines = useMemo(() => new Map([...live.boardNews].map(([id, n]) => [id, { headline: n.headline }] as const)), [live.boardNews]);
+  const graded = useMemo(() => gradeOutlooks(outlooks, live.liveStatus, headlines, DEFAULT_WEEKLY_MODEL), [outlooks, live.liveStatus, headlines]);
+  const gradedBoard = useMemo(() => gradeBoard(board, live.liveStatus, headlines), [board, live.liveStatus, headlines]);
+
+  const byId = useMemo(() => new Map(gradedBoard.players.map((p) => [p.id, p] as const)), [gradedBoard.players]);
 
   const advice = useMemo(() => {
     if (!team || team.roster.length === 0) return null;
     const players = team.roster
       .map((r) => {
         const p = byId.get(r.playerId);
-        const o = outlooks.get(r.playerId);
+        const o = graded.get(r.playerId);
         return p && o ? { id: p.id, pos: p.pos, team: p.team, name: p.name, outlook: o } : null;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -66,7 +74,7 @@ export default function SeasonCockpit({
       params: DEFAULT_WEEKLY_MODEL,
       starterIds: starterIds.length ? starterIds : undefined,
     });
-  }, [team, byId, outlooks]);
+  }, [team, byId, graded]);
 
   if (!team) return <main className="p-6 text-sm text-ink-dim">Loading…</main>;
 
@@ -74,18 +82,23 @@ export default function SeasonCockpit({
     <main className="mx-auto max-w-4xl space-y-4 p-6">
       <header className="flex items-baseline justify-between">
         <h1 className="text-lg font-semibold">In-season cockpit</h1>
-        <label className="text-xs text-ink-dim">
-          Week{" "}
-          <select
-            value={week}
-            onChange={(e) => onWeekChange(Number(e.target.value))}
-            className="rounded border border-line bg-field px-1 py-0.5"
-          >
-            {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
-          </select>
-        </label>
+        <div className="flex items-baseline gap-3">
+          <span className="text-xs text-ink-faint">
+            {live.lastRefresh ? `live signals ${new Date(live.lastRefresh).toLocaleTimeString()}` : "loading live signals…"}
+          </span>
+          <label className="text-xs text-ink-dim">
+            Week{" "}
+            <select
+              value={week}
+              onChange={(e) => onWeekChange(Number(e.target.value))}
+              className="rounded border border-line bg-field px-1 py-0.5"
+            >
+              {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
 
       <RosterImport board={board} team={team} week={week} config={config} onChange={update} />
@@ -112,7 +125,7 @@ export default function SeasonCockpit({
           <section className="rounded-lg border border-line p-4">
             <h2 className="text-sm font-semibold">Lineup</h2>
             <div className="mt-2">
-              <LineupTable lineup={advice.lineup} players={byId} outlooks={outlooks} />
+              <LineupTable lineup={advice.lineup} players={byId} outlooks={graded} />
             </div>
           </section>
 
