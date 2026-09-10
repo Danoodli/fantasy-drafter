@@ -5089,8 +5089,11 @@ describe("gradeOutlooks", () => {
   });
 
   it("a bye stays a bye whatever the table says", () => {
-    const bye = ol("a", { opp: null, pPlay: 0, mean: 0 });
+    // The status genuinely changes (Questionable -> cleared), so the recompute
+    // branch runs — and pPlay must still be 0 because opp is null.
+    const bye = ol("a", { opp: null, pPlay: 0, mean: 0, drivers: { baseMarket: 12, baseUsage: 0, matchMult: 1, envMult: 1, scriptMult: 1, status: "Questionable" } });
     const out = gradeOutlooks(map(bye), new Map([["a", { status: "Active" as const }]]), new Map(), DEFAULT_WEEKLY_MODEL);
+    expect(out.get("a")!.drivers.status).toBeNull();
     expect(out.get("a")!.pPlay).toBe(0);
     expect(out.get("a")!.mean).toBe(0);
   });
@@ -5175,7 +5178,9 @@ This task was pulled forward to run before Tasks 11–13 (the owner saw a live D
   const graded = useMemo(() => gradeOutlooks(outlooks, live.liveStatus, headlines, DEFAULT_WEEKLY_MODEL), [outlooks, live.liveStatus, headlines]);
 ```
 
-importing `useLiveSignals` from `../../lib/client/useLiveSignals` and `gradeOutlooks` from `../../lib/engine/weekly/liveGrade`. Also grade the board for the badges the lineup shows: `const gradedBoard = useMemo(() => gradeBoard(board, live.liveStatus, headlines), [board, live.liveStatus, headlines]);` and pass `gradedBoard.players` wherever `board.players` fed `byId`. Add to the header a small line: `{live.lastRefresh ? `live signals ${new Date(live.lastRefresh).toLocaleTimeString()}` : "loading live signals…"}` in `text-xs text-ink-faint`. In `LineupTable`, when `o.drivers.status` differs from the board player's baked `injury`, append a `·live` marker in the status cell (`text-live` token) so a Sunday inactive is visibly live rather than baked.
+importing `useLiveSignals` from `../../lib/client/useLiveSignals` and `gradeOutlooks` from `../../lib/engine/weekly/liveGrade`. Also grade the board for the badges the lineup shows: `const gradedBoard = useMemo(() => gradeBoard(board, live.liveStatus, headlines), [board, live.liveStatus, headlines]);` and pass `gradedBoard.players` wherever `board.players` fed `byId`. Add to the header a small line: `{live.lastRefresh ? `live signals ${new Date(live.lastRefresh).toLocaleTimeString()}` : "loading live signals…"}` in `text-xs text-ink-faint`.
+
+The `·live` marker compares against what the WEEK BOARD BAKED, which is the UNGRADED board's status — never the graded board's, or graded-vs-graded converges and the marker never fires. So: `const bakedStatus = useMemo(() => new Map(board.players.map((p) => [p.id, p.injury] as const)), [board.players]);` from the raw `board` prop, passed to `LineupTable` as `bakedStatus`; in `LineupTable`, when `o.drivers.status !== (bakedStatus.get(id) ?? null)`, append a `·live` marker in the status cell (`text-live` token) so a Sunday inactive is visibly live rather than baked.
 
 - [ ] **Step 6: Record the rule in AGENTS.md**
 
