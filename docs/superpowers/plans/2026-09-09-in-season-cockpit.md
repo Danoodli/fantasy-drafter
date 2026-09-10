@@ -4529,7 +4529,8 @@ Everything computed in Tasks 10–12 gets a home on `/season`, in the spec's ord
 - Create: `components/season/TradePanel.tsx`
 - Modify: `components/season/SeasonCockpit.tsx`
 - Modify: `components/season/LineupTable.tsx` (highlight recommended changes, coloured positions, clickable names)
-- Uses: `components/PlayerModal.tsx` (existing, readonly mode), `lib/client/pos.ts` (`POS_COLOR`)
+- Modify: `components/PlayerModal.tsx` (new optional `week` prop — see Step 2b)
+- Uses: `lib/client/pos.ts` (`POS_COLOR`)
 - Modify: `lib/client/teams.ts` (`SavedTeam.regularSeasonEnd?: number`, `SavedTeam.oppProjectedTotal?: number`)
 
 **Interfaces:**
@@ -4543,7 +4544,7 @@ Everything computed in Tasks 10–12 gets a home on `/season`, in the spec's ord
 - **Free agents.** Sleeper: the board minus every rostered player in the snapshot. Manual: the board minus my roster, with a visible note that it assumes everyone else is available.
 - **Playoff odds** run only with a Sleeper snapshot (it needs every roster). Background: `useEffect` → `setTimeout(…, 0)` → `playoffOdds` → state, with a "Simulating…" line while it runs. Its `leverage` feeds `startSitAdvice`; with the shipped `riskFromPlayoffOdds: 0` that changes nothing, and the panel says so.
 - **Never render `projected: false` as 0.0.** `LineupTable` already handles this; the new panels only show players through it or by name.
-- **Owner feedback folded in (2026-09-09, after seeing Task 6 live):** the page had no way back, no colour, nothing looked clickable, and player names did nothing. So, in this task: (1) the header gets a `next/link` back link `← Draft cockpit` to `/`, styled like Setup's "Newsroom →" link; (2) every position tag in `LineupTable`, the swap list, the waiver list and the trade panel is coloured with `POS_COLOR[pos]` (the `style={{ color: POS_COLOR[p.pos] }}` pattern from components/PasteImport.tsx); (3) player names in `LineupTable` are `<button>`s (`onSelect(id)`) that open the existing `components/PlayerModal.tsx` in `readonly` mode — `SeasonCockpit` holds `modalPlayer` state and renders `<PlayerModal player ctx={{ currentPick: 1, nextPick: 1, drift: {}, tierMatesLeft: 0 }} config={team.config} drafted={false} canUnmark={false} readonly wireItem={live.boardNews.get(id) ?? null} myTurn={false} onMark={() => {}} onUnmark={() => {}} onClose={() => setModalPlayer(null)} />` (Task 14 already provides `live`); (3b) the Points cell shows a small status tag beside the number for a day-to-day designation (`Q`/`D` from `drivers.status`, in `text-warn`) so a Doubtful player who still projects 3.8 reads as "3.8 D", not as a healthy 3.8; (4) every clickable element has a visible hover state (`hover:bg-panel` on rows and list items, `hover:text-ink` on links) and a focus ring (`focus-visible:outline outline-2 outline-wr`). A broader design pass (light mode, themes, a non-template look) is a separate leg after this plan; do not start it here.
+- **Owner feedback folded in (2026-09-09, after seeing Task 6 live):** the page had no way back, no colour, nothing looked clickable, and player names did nothing. So, in this task: (1) the header gets a `next/link` back link `← Draft cockpit` to `/`, styled like Setup's "Newsroom →" link; (2) every position tag in `LineupTable`, the swap list, the waiver list and the trade panel is coloured with `POS_COLOR[pos]` (the `style={{ color: POS_COLOR[p.pos] }}` pattern from components/PasteImport.tsx); (3) player names in `LineupTable` are `<button>`s (`onSelect(id)`) that open the existing `components/PlayerModal.tsx` in `readonly` mode — `SeasonCockpit` holds `modalPlayer` state and renders `<PlayerModal player ctx={{ currentPick: 1, nextPick: 1, drift: {}, tierMatesLeft: 0 }} config={team.config} drafted={false} canUnmark={false} readonly week={{ week, outlook: graded.get(modalPlayer.id) }} wireItem={live.boardNews.get(id) ?? null} myTurn={false} onMark={() => {}} onUnmark={() => {}} onClose={() => setModalPlayer(null)} />` (Step 2b adds the `week` prop) (Task 14 already provides `live`); (3b) the Points cell shows a small status tag beside the number for a day-to-day designation (`Q`/`D` from `drivers.status`, in `text-warn`) so a Doubtful player who still projects 3.8 reads as "3.8 D", not as a healthy 3.8; (4) every clickable element has a visible hover state (`hover:bg-panel` on rows and list items, `hover:text-ink` on links) and a focus ring (`focus-visible:outline outline-2 outline-wr`). A broader design pass (light mode, themes, a non-template look) is a separate leg after this plan; do not start it here.
 
 - [ ] **Step 1: Extend `SavedTeam`**
 
@@ -4559,6 +4560,68 @@ In `lib/client/teams.ts` add to `SavedTeam`:
 - [ ] **Step 2: Let `LineupTable` mark changes, colour positions, and make names clickable**
 
 Add optional props `changed?: Set<string>` and `onSelect?: (id: string) => void` to `LineupTable`. A row whose id is in `changed` gets `bg-panel` on the `<tr>` and a small `↑` (in the starters) or `↓` (on the bench) in the Slot cell. The Pos cell renders the position in `POS_COLOR[p.pos]`. When `onSelect` is given, the name cell is `<button onClick={() => onSelect(id)} className="text-left hover:text-wr focus-visible:outline outline-2 outline-wr">` — otherwise plain text. Rows get `hover:bg-panel`.
+
+- [ ] **Step 2b: Give `PlayerModal` an in-season mode**
+
+Opened from `/season` in `readonly` mode, the existing card shows a DRAFT verdict ("HORRIBLE at pick 1") and pick-relative reasons — nonsense in September. Add one optional prop and swap two blocks; nothing else in the modal changes, and the draft cockpit's usage is untouched.
+
+In `components/PlayerModal.tsx`:
+
+```tsx
+import type { WeekOutlook } from "../lib/engine/weekly/outlook";
+// … in Props:
+  /** In-season: this week's outlook replaces the draft verdict and the pick-relative reasons. */
+  week?: { week: number; outlook: WeekOutlook | undefined };
+```
+
+Replace the `data-tour="modal-verdict"` block's first two children (the verdict pill and the risk word) with a conditional — the `trending` and `adpSources` spans stay as they are:
+
+```tsx
+          {week ? (
+            <WeekLine week={week.week} o={week.outlook} color={color} />
+          ) : (
+            <>
+              <span
+                className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field"
+                style={{ background: VERDICT_COLOR[blurb.verdict] }}
+              >
+                {blurb.verdict} at pick {ctx.currentPick}
+              </span>
+              <span className="font-mono text-xs uppercase text-ink-dim">{blurb.risk}</span>
+            </>
+          )}
+```
+
+and hide the pick-relative reasons in week mode: `{!week && (<ul className="space-y-1 text-sm text-ink">{blurb.lines.map(…)}</ul>)}`. Add the small component at the bottom of the file:
+
+```tsx
+/** This week in one line. Never shows 0.0 for "no projection". */
+function WeekLine({ week, o, color }: { week: number; o: WeekOutlook | undefined; color: string }) {
+  return (
+    <>
+      <span className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field" style={{ background: color }}>
+        Week {week}
+      </span>
+      {!o || !o.projected ? (
+        <span className="font-mono text-xs text-ink-dim">no projection from any source</span>
+      ) : o.opp === null ? (
+        <span className="font-mono text-xs text-warn">BYE</span>
+      ) : (
+        <>
+          <span className="font-mono text-xs text-ink">{o.mean.toFixed(1)} proj</span>
+          <span className="font-mono text-xs text-ink-dim">{o.p10.toFixed(0)}–{o.p90.toFixed(0)} floor–ceiling</span>
+          <span className="font-mono text-xs text-ink-dim">vs {o.opp}</span>
+          {o.drivers.status && (
+            <span className="font-mono text-xs text-warn">{o.drivers.status} · {Math.round(o.pPlay * 100)}% to play</span>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+```
+
+`SeasonCockpit` passes `week={{ week, outlook: graded.get(modalPlayer.id) }}` alongside `readonly`.
 
 - [ ] **Step 3: Write `MatchupPanel`**
 
