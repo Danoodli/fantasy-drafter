@@ -4892,7 +4892,8 @@ export default function TradePanel({
           </ul>
         </div>
       </div>
-      <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field disabled:opacity-40">Evaluate</button>
+      {/* Accent CTAs keep their colour on hover (PasteImport/Setup precedent); a bg-panel hover would read as disabled. */}
+      <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field hover:brightness-110 disabled:opacity-40">Evaluate</button>
       {verdict && (
         <div className="mt-3 text-sm">
           <p>{verdict.summary}</p>
@@ -4914,7 +4915,7 @@ Keep Task 6's header (title, week selector) and `RosterImport`; replace everythi
 
 ```tsx
 // components/season/SeasonCockpit.tsx — imports at top
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardPlayer, LeagueConfig, Position } from "../../lib/types";
 import { DEFAULT_WEEKLY_MODEL } from "../../lib/engine/weekly/model";
 import { startSitAdvice, type AdvicePlayer, type Opponent } from "../../lib/engine/season/advice";
@@ -4989,16 +4990,24 @@ Inside the component, after `team`/`update`/`byId` from Task 6:
       players: r.players.map((id) => byId.get(id)).filter((p): p is BoardPlayer => !!p),
     }));
   }, [league, byId]);
+  // The simulation is keyed on the LEAGUE, the week and the config — not on
+  // `byId`, which changes identity on every ten-minute live-signals poll and
+  // would re-run 500 season sims on a timer. The current board is read through
+  // a ref so a genuine roster/league change still simulates with fresh players.
+  const leagueTeamsRef = useRef(leagueTeams);
+  leagueTeamsRef.current = leagueTeams;
+  const teamConfig = team?.config;
   useEffect(() => {
-    if (!league || !leagueTeams || myRosterId === null || !team) { setOdds(null); return; }
+    if (!league || myRosterId === null || !teamConfig) { setOdds(null); return; }
     setOddsRunning(true);
-    const cfg = team.config;
     const handle = setTimeout(() => {
-      setOdds(playoffOdds({ teams: leagueTeams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, config: cfg, myRosterId }));
+      const teams = leagueTeamsRef.current;
+      if (!teams) return;
+      setOdds(playoffOdds({ teams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, config: teamConfig, myRosterId }));
       setOddsRunning(false);
     }, 0);
     return () => clearTimeout(handle);
-  }, [league, leagueTeams, myRosterId, week, team]);
+  }, [league, myRosterId, week, teamConfig]);
 
   const advice = useMemo(() => {
     if (!team || advicePlayers.length === 0) return null;
