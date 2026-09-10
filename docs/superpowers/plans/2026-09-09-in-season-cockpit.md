@@ -4518,7 +4518,8 @@ Everything computed in Tasks 10–12 gets a home on `/season`, in the spec's ord
 - Create: `components/season/PlayoffPanel.tsx`
 - Create: `components/season/TradePanel.tsx`
 - Modify: `components/season/SeasonCockpit.tsx`
-- Modify: `components/season/LineupTable.tsx` (highlight recommended changes)
+- Modify: `components/season/LineupTable.tsx` (highlight recommended changes, coloured positions, clickable names)
+- Uses: `components/PlayerModal.tsx` (existing, readonly mode), `lib/client/pos.ts` (`POS_COLOR`)
 - Modify: `lib/client/teams.ts` (`SavedTeam.regularSeasonEnd?: number`, `SavedTeam.oppProjectedTotal?: number`)
 
 **Interfaces:**
@@ -4532,6 +4533,7 @@ Everything computed in Tasks 10–12 gets a home on `/season`, in the spec's ord
 - **Free agents.** Sleeper: the board minus every rostered player in the snapshot. Manual: the board minus my roster, with a visible note that it assumes everyone else is available.
 - **Playoff odds** run only with a Sleeper snapshot (it needs every roster). Background: `useEffect` → `setTimeout(…, 0)` → `playoffOdds` → state, with a "Simulating…" line while it runs. Its `leverage` feeds `startSitAdvice`; with the shipped `riskFromPlayoffOdds: 0` that changes nothing, and the panel says so.
 - **Never render `projected: false` as 0.0.** `LineupTable` already handles this; the new panels only show players through it or by name.
+- **Owner feedback folded in (2026-09-09, after seeing Task 6 live):** the page had no way back, no colour, nothing looked clickable, and player names did nothing. So, in this task: (1) the header gets a `next/link` back link `← Draft cockpit` to `/`, styled like Setup's "Newsroom →" link; (2) every position tag in `LineupTable`, the swap list, the waiver list and the trade panel is coloured with `POS_COLOR[pos]` (the `style={{ color: POS_COLOR[p.pos] }}` pattern from components/PasteImport.tsx); (3) player names in `LineupTable` are `<button>`s (`onSelect(id)`) that open the existing `components/PlayerModal.tsx` in `readonly` mode — `SeasonCockpit` holds `modalPlayer` state and renders `<PlayerModal player ctx={{ currentPick: 1, nextPick: 1, drift: {}, tierMatesLeft: 0 }} config={team.config} drafted={false} canUnmark={false} readonly wireItem={live.boardNews.get(id) ?? null} myTurn={false} onMark={() => {}} onUnmark={() => {}} onClose={() => setModalPlayer(null)} />` (Task 14 already provides `live`); (4) every clickable element has a visible hover state (`hover:bg-panel` on rows and list items, `hover:text-ink` on links) and a focus ring (`focus-visible:outline outline-2 outline-wr`). A broader design pass (light mode, themes, a non-template look) is a separate leg after this plan; do not start it here.
 
 - [ ] **Step 1: Extend `SavedTeam`**
 
@@ -4544,9 +4546,9 @@ In `lib/client/teams.ts` add to `SavedTeam`:
   oppProjectedTotal?: number;
 ```
 
-- [ ] **Step 2: Let `LineupTable` mark changes**
+- [ ] **Step 2: Let `LineupTable` mark changes, colour positions, and make names clickable**
 
-Add an optional prop `changed?: Set<string>` to `LineupTable`; a row whose id is in it gets `className="… bg-panel"` on the `<tr>` and a small `↑` (in the starters) or `↓` (on the bench) in the Slot cell. No other change.
+Add optional props `changed?: Set<string>` and `onSelect?: (id: string) => void` to `LineupTable`. A row whose id is in `changed` gets `bg-panel` on the `<tr>` and a small `↑` (in the starters) or `↓` (on the bench) in the Slot cell. The Pos cell renders the position in `POS_COLOR[p.pos]`. When `onSelect` is given, the name cell is `<button onClick={() => onSelect(id)} className="text-left hover:text-wr focus-visible:outline outline-2 outline-wr">` — otherwise plain text. Rows get `hover:bg-panel`.
 
 - [ ] **Step 3: Write `MatchupPanel`**
 
