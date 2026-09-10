@@ -15,6 +15,7 @@ import { gradeBoard } from "../../lib/engine/injuryFeed";
 import { useLiveSignals } from "../../lib/client/useLiveSignals";
 import { loadTeams, saveTeam, type SavedTeam } from "../../lib/client/teams";
 import LowerThird from "../ui/LowerThird";
+import Sticker from "../ui/Sticker";
 import LineupTable from "./LineupTable";
 import RosterImport from "./RosterImport";
 import MatchupPanel from "./MatchupPanel";
@@ -246,7 +247,11 @@ export default function SeasonCockpit({
             ) : (
               <ul className="space-y-1 px-1 text-sm">
                 {advice.swaps.slice(0, 6).map((s) => (
-                  <li key={`${s.inId}-${s.outId}`}>Start <strong>{s.inName}</strong> over <strong>{s.outName}</strong><span className="text-ink-dim"> — {s.reason}</span></li>
+                  <li key={`${s.inId}-${s.outId}`}>
+                    <Sticker pos={byId.get(s.inId)?.pos ?? null} as="row">
+                      Start <strong>{s.inName}</strong> over <strong>{s.outName}</strong><span className="text-ink-dim"> — {s.reason}</span>
+                    </Sticker>
+                  </li>
                 ))}
               </ul>
             )}
