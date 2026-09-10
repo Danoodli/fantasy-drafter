@@ -49,6 +49,10 @@ export default function SeasonCockpit({
   const gradedBoard = useMemo(() => gradeBoard(board, live.liveStatus, headlines), [board, live.liveStatus, headlines]);
 
   const byId = useMemo(() => new Map(gradedBoard.players.map((p) => [p.id, p] as const)), [gradedBoard.players]);
+  // The `·live` marker compares against what the week board BAKED — the
+  // ungraded board's status — never the graded board's, or graded-vs-graded
+  // converges on the same merged value and the marker never fires.
+  const bakedStatus = useMemo(() => new Map(board.players.map((p) => [p.id, p.injury] as const)), [board.players]);
 
   const advice = useMemo(() => {
     if (!team || team.roster.length === 0) return null;
@@ -125,7 +129,7 @@ export default function SeasonCockpit({
           <section className="rounded-lg border border-line p-4">
             <h2 className="text-sm font-semibold">Lineup</h2>
             <div className="mt-2">
-              <LineupTable lineup={advice.lineup} players={byId} outlooks={graded} />
+              <LineupTable lineup={advice.lineup} players={byId} outlooks={graded} bakedStatus={bakedStatus} />
             </div>
           </section>
 

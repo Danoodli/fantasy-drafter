@@ -12,12 +12,14 @@ import { DEFAULT_SEASON_LEVERS } from "../../lib/engine/season/levers";
  *
  * `·live` marks a status that came from the live table/headline rather than
  * the board's baked designation — a Sunday inactive should read as live, not
- * as if the ETL had known about it in advance.
+ * as if the ETL had known about it in advance. Compared against the week
+ * board's UNGRADED status: comparing two already-graded statuses converges
+ * on the same merged value and the marker never fires.
  */
-function Points({ o, boardInjury }: { o: WeekOutlook | undefined; boardInjury: string | null | undefined }) {
+function Points({ o, bakedInjury }: { o: WeekOutlook | undefined; bakedInjury: string | null | undefined }) {
   if (!o || !o.projected) return <span className="text-ink-faint" title="No source projected this player">—</span>;
   if (o.opp === null) return <span className="text-warn" title="On a bye">BYE</span>;
-  const live = o.drivers.status !== (boardInjury ?? null);
+  const live = o.drivers.status !== (bakedInjury ?? null);
   const liveMark = live ? <span className="text-live">{" "}·live</span> : null;
   if (o.pPlay <= DEFAULT_SEASON_LEVERS.forcedPlayThreshold) {
     const label = o.drivers.status ?? "OUT";
@@ -30,10 +32,12 @@ export default function LineupTable({
   lineup,
   players,
   outlooks,
+  bakedStatus,
 }: {
   lineup: Lineup;
   players: Map<string, BoardPlayer>;
   outlooks: Map<string, WeekOutlook>;
+  bakedStatus: Map<string, string | null>;
 }) {
   const row = (id: string, slot: string) => {
     const p = players.get(id);
@@ -44,7 +48,7 @@ export default function LineupTable({
         <td className="py-1 pr-2">{p?.name ?? id}</td>
         <td className="py-1 pr-2 text-xs text-ink-faint">{p?.pos} · {p?.team}</td>
         <td className="py-1 pr-2 text-xs text-ink-faint">{o?.opp ?? "—"}</td>
-        <td className="py-1 pr-2 text-right tabular-nums"><Points o={o} boardInjury={p?.injury} /></td>
+        <td className="py-1 pr-2 text-right tabular-nums"><Points o={o} bakedInjury={bakedStatus.get(id)} /></td>
         <td className="py-1 text-right text-xs tabular-nums text-ink-faint">
           {o && o.projected && o.opp !== null ? `${o.p10.toFixed(0)}–${o.p90.toFixed(0)}` : ""}
         </td>

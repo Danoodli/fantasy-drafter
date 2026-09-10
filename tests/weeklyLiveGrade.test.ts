@@ -50,8 +50,11 @@ describe("gradeOutlooks", () => {
   });
 
   it("a bye stays a bye whatever the table says", () => {
-    const bye = ol("a", { opp: null, pPlay: 0, mean: 0 });
+    // The status genuinely changes (Questionable -> cleared), so the recompute
+    // branch runs — and pPlay must still be 0 because opp is null.
+    const bye = ol("a", { opp: null, pPlay: 0, mean: 0, drivers: { baseMarket: 12, baseUsage: 0, matchMult: 1, envMult: 1, scriptMult: 1, status: "Questionable" } });
     const out = gradeOutlooks(map(bye), new Map([["a", { status: "Active" as const }]]), new Map(), DEFAULT_WEEKLY_MODEL);
+    expect(out.get("a")!.drivers.status).toBeNull();
     expect(out.get("a")!.pPlay).toBe(0);
     expect(out.get("a")!.mean).toBe(0);
   });
