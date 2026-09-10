@@ -52,6 +52,11 @@ export interface TradeVerdict {
 const FLAT_POINTS = 2;
 const FLAT_ODDS = 0.01;
 const FLAT_COVER = 0.5;
+/**
+ * Fewer sims than playoffOdds' own default (500): a trade check runs twice
+ * (before/after) on a click, and the two runs share a seed, so the DELTA is far
+ * less noisy than either absolute number.
+ */
 const TRADE_SIMS = 200;
 
 function axis(delta: number, flat: number): TradeAxis {
@@ -65,9 +70,10 @@ function summarize(points: TradeAxis, odds: TradeAxis | null, cover: TradeAxis, 
   else if (points.verdict === "down") parts.push(`costs ${(-points.delta).toFixed(0)} lineup points ${span}`);
   else parts.push(`leaves lineup points about even ${span}`);
   if (odds) {
-    const pp = (odds.delta * 100).toFixed(0);
-    if (odds.verdict === "up") parts.push(`raises playoff odds ${pp} points`);
-    else if (odds.verdict === "down") parts.push(`lowers playoff odds ${-Number(pp)} points`);
+    const pp = Math.abs(Math.round(odds.delta * 100));
+    const unit = pp === 1 ? "point" : "points";
+    if (odds.verdict === "up") parts.push(`raises playoff odds ${pp} ${unit}`);
+    else if (odds.verdict === "down") parts.push(`lowers playoff odds ${pp} ${unit}`);
     else parts.push(`barely moves playoff odds`);
   }
   if (cover.verdict === "down") parts.push(`costs ${(-cover.delta).toFixed(0)} slot-week${cover.delta <= -1.5 ? "s" : ""} of bye/injury cover`);
