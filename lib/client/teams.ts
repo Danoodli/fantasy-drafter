@@ -12,6 +12,33 @@ export interface RosterEntry {
   slot: "starter" | "bench" | "ir";
 }
 
+/** One roster in the league, as of the last sync. Player ids are board ids. */
+export interface LeagueRosterSnapshot {
+  rosterId: number;
+  name: string;
+  players: string[];
+  starters: string[];
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor: number;
+}
+
+/**
+ * The whole league as of the last Sleeper sync: every roster (so the
+ * free-agent pool is the board minus all of them, and playoff odds can
+ * simulate everyone), the playoff format, and the known pairings per
+ * remaining week. Absent for manual/paste/OCR teams.
+ */
+export interface LeagueSnapshot {
+  rosters: LeagueRosterSnapshot[];
+  playoffTeams: number;
+  playoffWeekStart: number;
+  /** week -> [rosterId, rosterId] pairs. A week absent here is unknown. */
+  schedule: Record<number, [number, number][]>;
+  syncedAt: string; // ISO
+}
+
 export interface SavedTeam {
   id: string;
   name: string;
@@ -23,6 +50,7 @@ export interface SavedTeam {
   /** Opponent per week, when the platform tells us. */
   schedule?: Record<number, { oppRosterId?: number; oppName?: string }>;
   record?: { w: number; l: number; t: number };
+  league?: LeagueSnapshot;
   savedAt: string; // ISO
 }
 
@@ -70,7 +98,8 @@ export function deleteTeam(id: string): SavedTeam[] {
 export function applyRoster(
   team: SavedTeam,
   ids: string[],
-  source: SavedTeam["source"]
+  source: SavedTeam["source"],
+  slots?: Record<string, RosterEntry["slot"]>
 ): SavedTeam {
   const previous = new Map(team.roster.map((r) => [r.playerId, r.slot] as const));
   const seen = new Set<string>();
@@ -78,7 +107,7 @@ export function applyRoster(
   for (const id of ids) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    roster.push({ playerId: id, slot: previous.get(id) ?? "bench" });
+    roster.push({ playerId: id, slot: slots?.[id] ?? previous.get(id) ?? "bench" });
   }
   return { ...team, roster, source };
 }

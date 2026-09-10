@@ -81,4 +81,10 @@ describe("teams registry", () => {
     // 9 is no longer on the roster, so it is gone.
     expect(t.roster.find((r) => r.playerId === "9")).toBeUndefined();
   });
+
+  it("applyRoster takes explicit slots from a platform that knows them", () => {
+    const base = team({ roster: [{ playerId: "1", slot: "bench" }] });
+    const t = applyRoster(base, ["1", "2", "3"], "sleeper", { "1": "starter", "3": "ir" });
+    expect(t.roster.map((r) => r.slot)).toEqual(["starter", "bench", "ir"]);
+  });
 });

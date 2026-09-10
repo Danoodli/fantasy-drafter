@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { Board, LeagueConfig } from "../../lib/types";
 import { applyRoster, type SavedTeam } from "../../lib/client/teams";
+import SleeperSync from "./SleeperSync";
 
 type Tab = "manual" | "sleeper" | "paste" | "ocr";
 const TABS: { id: Tab; label: string }[] = [
@@ -29,7 +30,6 @@ export default function RosterImport({
 }) {
   const [tab, setTab] = useState<Tab>(team.source === "sleeper" ? "sleeper" : "manual");
   const [query, setQuery] = useState("");
-  void week; void config; // used by the Sleeper tab from Task 7 on
   const onRoster = useMemo(() => new Set(team.roster.map((r) => r.playerId)), [team.roster]);
 
   const matches = useMemo(() => {
@@ -58,7 +58,7 @@ export default function RosterImport({
         ))}
       </div>
 
-      {tab === "sleeper" && <p className="mt-3 text-xs text-ink-faint">Sleeper sync arrives in Task 7.</p>}
+      {tab === "sleeper" && <SleeperSync team={team} week={week} base={config} onChange={onChange} />}
       {tab === "paste" && <p className="mt-3 text-xs text-ink-faint">Paste arrives in Task 8.</p>}
       {tab === "ocr" && <p className="mt-3 text-xs text-ink-faint">Screen sync arrives in Task 9.</p>}
 
