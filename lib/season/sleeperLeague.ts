@@ -292,17 +292,33 @@ export async function fetchMatchups(leagueId: string, week: number): Promise<Sle
   return parseMatchups(await get(`/league/${leagueId}/matchups/${week}`));
 }
 
-/** Pairings for weeks fromWeek..toWeek. A week whose pairings Sleeper does not publish yet is omitted, not invented. */
-export async function fetchSchedule(leagueId: string, fromWeek: number, toWeek: number): Promise<Record<number, [number, number][]>> {
+/**
+ * Pairings for weeks fromWeek..toWeek. Two different absences, kept apart:
+ * a week Sleeper answered with no pairings (not published yet) is simply
+ * omitted from `schedule`; a week whose REQUEST failed (network, 5xx) is
+ * listed in `failedWeeks` so the UI can say the schedule is incomplete
+ * rather than quietly treating a transient error as "unpublished".
+ */
+export async function fetchSchedule(
+  leagueId: string,
+  fromWeek: number,
+  toWeek: number
+): Promise<{ schedule: Record<number, [number, number][]>; failedWeeks: number[] }> {
   const weeks: number[] = [];
   for (let w = fromWeek; w <= toWeek; w++) weeks.push(w);
-  const all = await Promise.all(weeks.map((w) => fetchMatchups(leagueId, w).catch(() => [] as SleeperMatchup[])));
-  const out: Record<number, [number, number][]> = {};
+  const results = await Promise.allSettled(weeks.map((w) => fetchMatchups(leagueId, w)));
+  const schedule: Record<number, [number, number][]> = {};
+  const failedWeeks: number[] = [];
   weeks.forEach((w, i) => {
-    const p = pairings(all[i]);
-    if (p.length > 0) out[w] = p;
+    const r = results[i];
+    if (r.status === "rejected") {
+      failedWeeks.push(w);
+      return;
+    }
+    const p = pairings(r.value);
+    if (p.length > 0) schedule[w] = p;
   });
-  return out;
+  return { schedule, failedWeeks };
 }
 
 export async function fetchNflState(): Promise<{ season: number; week: number; seasonType: string }> {

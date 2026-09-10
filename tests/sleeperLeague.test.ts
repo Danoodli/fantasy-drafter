@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseLeague, parseRosters, parseMatchups, parseUsers, rosterSlotsFromPositions, formatFromScoring,
-  opponentOf, pairings, teamNameFor, parseLeagueId, teamFromSleeper,
+  opponentOf, pairings, teamNameFor, parseLeagueId, teamFromSleeper, type SleeperMatchup,
 } from "../lib/season/sleeperLeague";
 import type { LeagueConfig } from "../lib/types";
 
@@ -108,6 +108,12 @@ describe("parseMatchups / opponentOf / pairings", () => {
     expect(p).toHaveLength(6);
     for (const [a, b] of p) expect(a).toBeLessThan(b);
     expect(new Set(p.flat()).size).toBe(12);
+  });
+  it("drops a malformed group (one or three rosters on a matchup id) rather than guessing", () => {
+    const m = (rosterId: number, matchupId: number | null): SleeperMatchup => ({ rosterId, matchupId, points: 0, starters: [] });
+    expect(pairings([m(1, 7)])).toEqual([]);
+    expect(pairings([m(1, 7), m(2, 7), m(3, 7), m(4, 8), m(5, 8)])).toEqual([[4, 5]]);
+    expect(pairings([m(9, null), m(2, 3), m(1, 3)])).toEqual([[1, 2]]);
   });
 });
 

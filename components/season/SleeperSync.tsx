@@ -42,8 +42,9 @@ export default function SleeperSync({
     setError(null);
     setBusy("Loading schedule…");
     try {
-      const schedule = await fetchSchedule(loaded.league.leagueId, week, loaded.league.playoffWeekStart - 1);
+      const { schedule, failedWeeks } = await fetchSchedule(loaded.league.leagueId, week, loaded.league.playoffWeekStart - 1);
       onChange(teamFromSleeper({ ...loaded, myRosterId: rosterId, schedule, base, existing: team.sleeper ? team : undefined, now: new Date().toISOString() }));
+      if (failedWeeks.length) setError(`Synced, but the schedule for week${failedWeeks.length === 1 ? "" : "s"} ${failedWeeks.join(", ")} could not be fetched — re-sync later; playoff odds treat those weeks as unknown pairings.`);
     } catch (e) {
       setError(String(e));
     } finally {
