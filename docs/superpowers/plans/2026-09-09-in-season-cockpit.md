@@ -3225,6 +3225,16 @@ describe("readRosterLines", () => {
     expect(rows(shuffled)).toEqual([["Josh Allen", "starter"], ["Puka Nacua", "bench"]]);
   });
 
+  it("applies a label-only line to the name line Tesseract split off at the same height", () => {
+    // One roster row read as two lines: the Slot column and the Name column.
+    const row = (texts: [string, string], y: number): OcrLine[] => texts.map((text) => ({ text, confidence: 80, y }));
+    const r = readRosterLines([...row(["Bench", ""], 0).slice(0, 1), ...row(["QB", "Josh Allen"], 20), ...row(["BN", "Puka Nacua"], 40)], players);
+    expect(r.entries.map((e) => [e.player.name, e.slot])).toEqual([["Josh Allen", "starter"], ["Puka Nacua", "bench"]]);
+    // Input order within a row must not matter.
+    const swapped = readRosterLines([...row(["Bench", ""], 0).slice(0, 1), ...row(["Josh Allen", "QB"], 20)], players);
+    expect(swapped.entries.map((e) => [e.player.name, e.slot])).toEqual([["Josh Allen", "starter"]]);
+  });
+
   it("skips a tie rather than guessing (the draft's OCR rule)", () => {
     // Two synthetic RBs named Robinson on different teams; a bare surname is ambiguous.
     const twin = (id: string, team: string) => ({ ...players.find((p) => p.pos === "RB")!, id, name: `Sam Robinson`, team });
@@ -3265,14 +3275,22 @@ export function readRosterLines(lines: OcrLine[], players: BoardPlayer[]): { ent
   // Section headers by vertical position: a name below a "Bench" header is a
   // bench player unless its own line says otherwise.
   const headers: { y: number; slot: RosterSlot }[] = [];
+  // Tesseract often splits one roster ROW into several "lines" at the same y
+  // (a Slot column, a Name column). A line that is ONLY a slot label lends its
+  // slot to the name lines at that y. Keyed by y on purpose: label-only lines
+  // carry no name, so they cannot collide with a name line here.
+  const rowLabel = new Map<number, RosterSlot>();
   let anyLabel = false;
   for (const l of ordered) {
     const h = headerSlot(normalizeOcr(l.text));
-    if (h) headers.push({ y: l.y, slot: h });
-    else {
-      const { slot, rest } = leadingSlot(l.text);
-      if (slot && normalizeOcr(rest).length > 0) anyLabel = true;
+    if (h) {
+      headers.push({ y: l.y, slot: h });
+      continue;
     }
+    const { slot, rest } = leadingSlot(l.text);
+    if (!slot) continue;
+    anyLabel = true;
+    if (normalizeOcr(rest).length === 0) rowLabel.set(l.y, slot);
   }
   const hasSlots = headers.length > 0 || anyLabel;
   const sectionAt = (y: number): RosterSlot => {
@@ -3280,17 +3298,30 @@ export function readRosterLines(lines: OcrLine[], players: BoardPlayer[]): { ent
     for (const h of headers) if (h.y <= y) slot = h.slot;
     return slot;
   };
-  // Strip slot labels BEFORE matching: "BN D. London" would otherwise
-  // tokenize as ["bnd", "london"] (see leadingSlot). The stripped line keeps
-  // its y so sections still apply.
-  const stripped: OcrLine[] = ordered.map((l) => ({ ...l, text: leadingSlot(l.text).rest }));
-  const labelAt = new Map<number, RosterSlot | null>(ordered.map((l) => [l.y, leadingSlot(l.text).slot] as const));
 
-  const { matches } = matchOcrLines(stripped, players);
-  const entries: OcrRosterEntry[] = matches.map((m) => ({
-    player: m.player, slot: labelAt.get(m.y) ?? sectionAt(m.y), line: m.line, score: m.score, y: m.y,
-  }));
-  entries.sort((a, b) => a.y - b.y);
+  // Match line by line so each line's OWN label travels with its matches —
+  // never keyed by y, where two lines of one row would collide. The label is
+  // stripped BEFORE matching: "BN D. London" would otherwise tokenize as
+  // ["bnd", "london"] (see leadingSlot). A player read on several lines keeps
+  // his best-scoring read, as matchOcrLines does within a frame.
+  const best = new Map<string, OcrRosterEntry>();
+  for (const l of ordered) {
+    if (headerSlot(normalizeOcr(l.text))) continue;
+    const { slot: own, rest } = leadingSlot(l.text);
+    const { matches } = matchOcrLines([{ ...l, text: rest }], players);
+    for (const m of matches) {
+      const entry: OcrRosterEntry = {
+        player: m.player,
+        slot: own ?? rowLabel.get(l.y) ?? sectionAt(l.y),
+        line: m.line,
+        score: m.score,
+        y: l.y,
+      };
+      const prev = best.get(m.player.id);
+      if (!prev || prev.score < entry.score) best.set(m.player.id, entry);
+    }
+  }
+  const entries = [...best.values()].sort((a, b) => a.y - b.y);
   return { entries, hasSlots };
 }
 ```
@@ -3298,7 +3329,7 @@ export function readRosterLines(lines: OcrLine[], players: BoardPlayer[]): { ent
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/rosterOcr.test.ts`
-Expected: PASS, 6 tests. `matchOcrLines` returns each player once at his best-scoring line, sorted by `y`, so "orders by vertical position" is exercised end to end.
+Expected: PASS, 7 tests. Each player is kept once at his best-scoring read and the result is sorted by `y`, so "orders by vertical position" is exercised end to end.
 
 - [ ] **Step 5: Write the Screen sync tab**
 
