@@ -4,7 +4,6 @@
 // typed values are the fallback, not the source of truth.
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import type { DraftOrder, LeagueConfig, Position, ScoringFormat } from "../lib/types";
 import { DRAFT_ORDER_LABEL } from "../lib/draft/snake";
 import { fetchDraftInfo, parseDraftId, fetchLeagueDrafts } from "../lib/draft/sleeper";
@@ -179,20 +178,6 @@ export default function Setup({
           Draft Cockpit
         </h1>
         <p className="mt-1 text-ink-dim">Who to take, right now. Set up once, then draft.</p>
-        <Link
-          href="/newsroom"
-          className="mt-2 inline-block rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-ink-dim hover:text-ink"
-          title="Every player, every update — no draft needed"
-        >
-          Newsroom →
-        </Link>
-        <Link
-          href="/season"
-          className="ml-2 mt-2 inline-block rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-ink-dim hover:text-ink"
-          title="In-season start/sit — lineup and swap advice once your draft is over"
-        >
-          In-season →
-        </Link>
       </header>
 
       {resume && (

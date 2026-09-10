@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Barlow, Barlow_Condensed, IBM_Plex_Mono } from "next/font/google";
 import ServiceWorker from "../components/ServiceWorker";
+import AppBar from "../components/shell/AppBar";
 import "./globals.css";
 
 const barlow = Barlow({
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `(function(){try{var k="draft-cockpit-theme-v1",v=localStorage.getItem(k),ok=["night","day","prime","throwback"];if(ok.indexOf(v)<0){v=window.matchMedia("(prefers-color-scheme: light)").matches?"day":"night"}document.documentElement.dataset.theme=v;document.documentElement.style.colorScheme=(v==="day"||v==="throwback")?"light":"dark"}catch(e){}})();`,
           }}
         />
+        <AppBar />
         {children}
         <ServiceWorker />
       </body>

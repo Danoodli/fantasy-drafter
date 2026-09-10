@@ -590,7 +590,7 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
   }
 
   return (
-    <main data-tour-screen="cockpit" className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-4 pb-4 pt-3 lg:h-dvh">
+    <main data-tour-screen="cockpit" className="mx-auto flex min-h-dvh max-w-[1400px] flex-col px-4 pb-4 pt-3 lg:h-[calc(100dvh-var(--appbar-h))]">
       {/* Status bar */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-2">
         <button

@@ -7,7 +7,6 @@
 // top-story selection) lives in lib/client/newsroomFilters.ts.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { Board, BoardPlayer, LeagueConfig } from "../lib/types";
 import { DEFAULT_CONFIG, loadConfig } from "../lib/client/config";
 import { useLiveSignals } from "../lib/client/useLiveSignals";
@@ -157,9 +156,6 @@ function NewsroomInner({ board, config }: { board: Board; config: LeagueConfig }
     <main className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link href="/" className="font-mono text-xs uppercase tracking-widest text-ink-dim hover:text-ink">
-            ← Cockpit
-          </Link>
           <h1 className="font-display text-6xl font-bold uppercase leading-none tracking-tight">
             News<span className="text-rb">room</span>
           </h1>

@@ -42,6 +42,7 @@
   --t-ink: #EEF2F5; --t-ink-dim: #97A3B0; --t-ink-faint: #6E7A88;
   --t-accent: #3CC9A7; --t-accent-ink: #0E1319; --t-good: #3CC9A7; --t-bad: #F45D6C; --t-warn: #FFB224; --t-live: #3CC9A7;
   --t-qb: #F45D6C; --t-rb: #3CC9A7; --t-wr: #55A9FF; --t-te: #F5A623; --t-k: #B48BF2; --t-dst: #93A3B1;
+  --appbar-h: 3rem;
   color-scheme: dark;
 }
 /* Day game — the default light theme: chalk white and turf, not cream */

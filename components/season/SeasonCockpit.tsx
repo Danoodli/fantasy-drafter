@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { Board, BoardPlayer, LeagueConfig, Position } from "../../lib/types";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import { DEFAULT_WEEKLY_MODEL } from "../../lib/engine/weekly/model";
@@ -163,12 +162,6 @@ export default function SeasonCockpit({
       <header className="flex items-baseline justify-between">
         <div>
           <h1 className="text-lg font-semibold">In-season cockpit</h1>
-          <Link
-            href="/"
-            className="mt-1 inline-block rounded border border-line bg-panel px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-ink-dim hover:text-ink"
-          >
-            ← Draft cockpit
-          </Link>
         </div>
         <div className="flex items-baseline gap-3">
           <span className="text-xs text-ink-faint">
