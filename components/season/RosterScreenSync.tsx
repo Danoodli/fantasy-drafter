@@ -86,11 +86,11 @@ export default function RosterScreenSync({ board, team, onChange }: { board: Boa
       <video ref={videoRef} className="hidden" playsInline />
       <div className="flex gap-2">
         {!sharing ? (
-          <button onClick={share} className="rounded bg-panel px-3 py-1 font-semibold text-ink-dim hover:text-ink">Share screen</button>
+          <button onClick={share} className="btn btn-accent">Share screen</button>
         ) : (
           <>
-            <button onClick={readOnce} className="rounded bg-rb px-3 py-1 font-semibold text-field">Read</button>
-            <button onClick={stop} className="rounded border border-line px-3 py-1 text-ink-dim hover:text-ink">Stop</button>
+            <button onClick={readOnce} className="btn btn-accent">Read</button>
+            <button onClick={stop} className="btn btn-outline">Stop</button>
           </>
         )}
       </div>
@@ -101,7 +101,7 @@ export default function RosterScreenSync({ board, team, onChange }: { board: Boa
           {read.entries.length === 0 ? (
             <p className="text-xs text-ink-dim">No player names recognised. Zoom the page so names are at least 12px tall and read again.</p>
           ) : (
-            <ol className="divide-y divide-line rounded border border-line">
+            <ol className="divide-y divide-line rounded">
               {read.entries.map((e) => (
                 <li key={e.player.id} className="flex items-center gap-2 px-2.5 py-1.5">
                   <input
@@ -120,7 +120,7 @@ export default function RosterScreenSync({ board, team, onChange }: { board: Boa
           )}
           <div className="flex items-center justify-between">
             <p className="text-xs text-ink-faint">{read.hasSlots ? "Starters and bench read from the page." : "No slot labels seen — the engine will pick the lineup."}</p>
-            <button onClick={apply} disabled={read.entries.length === 0} className="rounded bg-rb px-4 py-2 text-sm font-semibold text-field disabled:opacity-40">
+            <button onClick={apply} disabled={read.entries.length === 0} className="btn btn-accent">
               Replace roster with {read.entries.filter((e) => !disabled.has(e.player.id)).length} players
             </button>
           </div>
