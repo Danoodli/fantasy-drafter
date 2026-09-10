@@ -4356,13 +4356,17 @@ describe("evaluateTrade", () => {
     const other = (k: number) => [bp(`q${k}`, "QB", 300), bp(`r${k}a`, "RB", 220), bp(`r${k}b`, "RB", 200), bp(`w${k}a`, "WR", 220), bp(`w${k}b`, "WR", 180), bp(`t${k}`, "TE", 110)];
     const partner = [...other(2), bp("rbStar", "RB", 400)];
     const teams = [mk(1, roster), mk(2, partner), mk(3, other(3)), mk(4, other(4))];
-    const v = evaluateTrade({
-      roster, give: ["rb3"], receive: [bp("rbStar", "RB", 400)], weeks, config: cfg,
-      league: { teams, schedule: {}, currentWeek: 10, playoffWeekStart: 15, playoffTeams: 2, myRosterId: 1, partnerRosterId: 2, sims: 300, seed: 7 },
-    });
+    const rbStar = bp("rbStar", "RB", 400);
+    const league = { teams, schedule: {}, currentWeek: 10, playoffWeekStart: 15, playoffTeams: 2, myRosterId: 1, sims: 300, seed: 7 };
+    const v = evaluateTrade({ roster, give: ["rb3"], receive: [rbStar], weeks, config: cfg, league: { ...league, partnerRosterId: 2 } });
     expect(v.playoffOdds).not.toBeNull();
     expect(v.playoffOdds!.verdict).toBe("up");
     expect(v.playoffOdds!.delta).toBeGreaterThan(0.05);
+    // The partner update is load-bearing: with the partner weakened (they lose
+    // rbStar), my odds rise MORE than if their roster were left untouched.
+    // Deleting the partner branch makes these two deltas identical.
+    const noPartner = evaluateTrade({ roster, give: ["rb3"], receive: [rbStar], weeks, config: cfg, league });
+    expect(v.playoffOdds!.delta).toBeGreaterThan(noPartner.playoffOdds!.delta);
   });
 
   it("is deterministic", () => {
@@ -4436,6 +4440,11 @@ export interface TradeVerdict {
 const FLAT_POINTS = 2;
 const FLAT_ODDS = 0.01;
 const FLAT_COVER = 0.5;
+/**
+ * Fewer sims than playoffOdds' own default (500): a trade check runs twice
+ * (before/after) on a click, and the two runs share a seed, so the DELTA is far
+ * less noisy than either absolute number.
+ */
 const TRADE_SIMS = 200;
 
 function axis(delta: number, flat: number): TradeAxis {
@@ -4449,9 +4458,10 @@ function summarize(points: TradeAxis, odds: TradeAxis | null, cover: TradeAxis, 
   else if (points.verdict === "down") parts.push(`costs ${(-points.delta).toFixed(0)} lineup points ${span}`);
   else parts.push(`leaves lineup points about even ${span}`);
   if (odds) {
-    const pp = (odds.delta * 100).toFixed(0);
-    if (odds.verdict === "up") parts.push(`raises playoff odds ${pp} points`);
-    else if (odds.verdict === "down") parts.push(`lowers playoff odds ${-Number(pp)} points`);
+    const pp = Math.abs(Math.round(odds.delta * 100));
+    const unit = pp === 1 ? "point" : "points";
+    if (odds.verdict === "up") parts.push(`raises playoff odds ${pp} ${unit}`);
+    else if (odds.verdict === "down") parts.push(`lowers playoff odds ${pp} ${unit}`);
     else parts.push(`barely moves playoff odds`);
   }
   if (cover.verdict === "down") parts.push(`costs ${(-cover.delta).toFixed(0)} slot-week${cover.delta <= -1.5 ? "s" : ""} of bye/injury cover`);
