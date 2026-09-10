@@ -101,7 +101,7 @@ Trades are graded on three axes, never collapsed into one number: **points** (Δ
 
 **Manual-league caveats**, all stated in the UI rather than silently assumed: without a synced league, your opponent each week is a single projected total (modelled as a lognormal, not a real roster) rather than a lineup the engine can reason about player-by-player; waivers assume everyone not on your roster is available; and playoff odds don't render at all until a Sleeper league is synced.
 
-Replay gates land next: `pnpm backtest:lineup` replays synthetic leagues over the historical player-weeks the same way `pnpm backtest:season` validates the draft engine — see `docs/backtest-gates.md` once it has been run.
+Replay gates: `pnpm backtest:lineup`. On a 2025 holdout over synthetic leagues, ranking by Δ P(win) and starting the highest projections are statistically indistinguishable in realized matchup win rate (67.1% vs 67.5%, paired z = −1.25 over the 28% of lineups that differed) — the gate as written reads FAIL; 2024 reads the same way. The waiver gate (L2) passes both seasons; playoff-odds calibration (L3) cannot run until league snapshots accumulate. See `docs/backtest-gates.md`.
 
 ## Validating and tuning
 
