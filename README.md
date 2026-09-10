@@ -61,6 +61,7 @@ The engine (`lib/engine/`) is pure functions, no I/O:
 | `pnpm simulate <draft_id> [slot] [scoring] [--sims=500] [--bestball]` | run every roster in a drafted room through hundreds of simulated seasons; report win rates and ceiling percentiles |
 | `pnpm backtest:season <year> [--format=ppr] [--strategy=balanced\|all] [--rooms=12] [--bestball]` | draft a **past** season with that year's draft-day ADP + projections, then score every roster with what really happened — see [Season backtest](#season-backtest) |
 | `pnpm calibrate:survival <draft_id> [...] [--year=2025] [--write]` | score the survival model against real Sleeper drafts and fit the tail lever in `config/survival.json` — see [Survival tail lever](#survival-tail-lever) |
+| `pnpm backtest:lineup` | replay synthetic leagues over the historical player-weeks to validate the in-season engine (start/sit, waivers) — see [In-season cockpit](#in-season-cockpit) |
 
 ## Getting the room's picks in
 
@@ -83,6 +84,24 @@ Click any player name anywhere — tier board, alternates, planner, your roster,
 ## Post-draft recap
 
 When the draft ends (or any time via the **Recap** header button), the recap screen shows every roster in the room ranked by projected value, letter-grades each team, calls out the steal and the biggest reach of the draft, and can simulate 300 full seasons in the browser — win rates and p50/p99 ceilings per roster, with your team highlighted.
+
+## In-season cockpit
+
+`/season` picks up once the draft is over: start/sit, waivers, playoff odds and trades, week by week, for a roster you load once and reuse.
+
+Load a roster four ways (the tabs on `/season`): a **Sleeper league URL** (also pulls your opponent for every remaining week, the free-agent pool, and every other roster in the league, which is what unlocks playoff odds), **paste** (copy your team's roster text in), **screen sync** (share your league site's roster page, same OCR pipeline as draft night), or **manual** (type it in yourself). Whatever the path, the roster lands in the same localStorage registry (`lib/client/teams.ts`) via `applyRoster` — nothing writes a roster directly.
+
+Start/sit ranks players by **Δ P(win this matchup)**, not by projected points — same roster, same week, opposite advice depending on the game state: if you're an underdog, the correct play is the volatile flier whose ceiling is your only path even though he projects lower; if you're a favourite, it's the boring floor. A forced swap (a starter who's out or on bye) always sorts first.
+
+Waivers rank adds by value over **your own lineup** — the points a pickup adds across the rest of the season, not raw projection — plus streaming for single-week matchup edges. Without a synced Sleeper league, waivers assume every player not on your roster is available; the panel says so.
+
+Playoff odds run a rest-of-season simulation on the season outcome model and need a synced Sleeper league (every roster, not just yours) to mean anything — the panel says "sync a Sleeper league to see them" otherwise. The risk dial (`riskFromPlayoffOdds` in `config/season.json`) blends start/sit toward "protect your playoff odds" as the season narrows, and ships **off** (0): at 0, swaps rank purely by this week's Δ P(win), exactly reproducing the dial-free behavior.
+
+Trades are graded on three axes, never collapsed into one number: **points** (Δ rest-of-season lineup points), **playoff odds** (Δ odds, only when the league is synced — the partner's roster changes too, so both sides play in the league the trade actually creates), and **cover** (Δ empty starting slot-weeks from byes and season-long injuries).
+
+**Manual-league caveats**, all stated in the UI rather than silently assumed: without a synced league, your opponent each week is a single projected total (modelled as a lognormal, not a real roster) rather than a lineup the engine can reason about player-by-player; waivers assume everyone not on your roster is available; and playoff odds don't render at all until a Sleeper league is synced.
+
+Replay gates land next: `pnpm backtest:lineup` replays synthetic leagues over the historical player-weeks the same way `pnpm backtest:season` validates the draft engine — see `docs/backtest-gates.md` once it has been run.
 
 ## Validating and tuning
 

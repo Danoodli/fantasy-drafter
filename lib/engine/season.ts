@@ -13,7 +13,18 @@ import type { OutcomeParams } from "./outcomeModel";
 const DEFAULT_OUTCOME = outcomeJson as OutcomeParams;
 
 
-/** Optimal lineup total for one week's scores — greedy is exact for one flex. */
+/**
+ * Optimal lineup total for one week's scores. Greedy — fill dedicated slots
+ * with the best at each position, then the best remaining eligible players
+ * into the FLEX slots — and EXACT for this app's roster model, which has one
+ * kind of FLEX with one eligibility set: any k eligible leftovers can fill k
+ * identical flex slots, so taking the top k is optimal. (The earlier claim
+ * that it was wrong for superflex or two-flex leagues was mistaken; a config
+ * with two DIFFERENT flex kinds would need lib/engine/season/lineup.ts's
+ * allocation search, and RosterSlots cannot express one.) The in-season
+ * engine uses bestLineup from lib/engine/season/lineup.ts when it needs the
+ * assignment (who sits in which slot) rather than just the total.
+ */
 export function optimalLineupTotal(
   players: { pos: Position; score: number }[],
   config: LeagueConfig
