@@ -117,12 +117,6 @@ const DEFAULT_SIMS = 2000;
 const DEFAULT_SEED = 20260909;
 /** Offset for the manual-opponent stream so it never overlaps the player draws. */
 const OPP_STREAM_SALT = 424243;
-/**
- * Relative spread assumed for a manual opponent's total when my own lineup
- * has none to borrow (every starter out). A lineup total's coefficient of
- * variation is typically 0.3-0.45; this only matters in that degenerate case.
- */
-const FALLBACK_TOTAL_CV = 0.35;
 
 function summary(values: Float64Array): TotalSummary {
   const sorted = Float64Array.from(values).sort();
@@ -209,7 +203,7 @@ export function startSitAdvice(input: AdviceInput): Advice {
     // Lognormal with the requested mean and my lineup's relative spread, from
     // its own seeded stream. Mean-preserving: E[exp(sL z - sL^2/2)] = 1.
     const mine = summary(myTotals);
-    let cv = FALLBACK_TOTAL_CV;
+    let cv = levers.fallbackTotalCv;
     if (mine.mean > 0) {
       let ss = 0;
       for (const v of myTotals) ss += (v - mine.mean) ** 2;

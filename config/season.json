@@ -1,7 +1,9 @@
 {
-  "_doc": "In-season cockpit levers (lib/engine/season/levers.ts validates on load). forcedPlayThreshold: a starter whose P(plays) is at or below this is a must-fix, not a suggestion. minDeltaWin: the smallest move in the objective worth showing as a swap. riskFromPlayoffOdds: 0 = OFF, swaps rank purely by this week's delta P(win); 1 = when this week's result cannot move your playoff odds (leverage 0) rank purely by projected points, blending in between by (1 - leverage). pointsScale: projected points that count as much as a 100% swing in P(win) when blending.",
+  "_doc": "In-season cockpit levers (lib/engine/season/levers.ts validates on load). forcedPlayThreshold: a starter whose P(plays) is at or below this is a must-fix, not a suggestion. minDeltaWin: the smallest move in the objective worth showing as a swap. riskFromPlayoffOdds: 0 = OFF, swaps rank purely by this week's delta P(win); 1 = when this week's result cannot move your playoff odds (leverage 0) rank purely by projected points, blending in between by (1 - leverage). pointsScale: projected points that count as much as a 100% swing in P(win) when blending. fallbackTotalCv: relative spread (coefficient of variation) assumed for a manual opponent's projected total when my own lineup has none to borrow (every starter out) — lineup totals typically run 0.3-0.45. minWaiverPoints: smallest rest-of-season lineup-points gain worth surfacing as a waiver claim.",
   "forcedPlayThreshold": 0.1,
   "minDeltaWin": 0.002,
   "riskFromPlayoffOdds": 0,
-  "pointsScale": 100
+  "pointsScale": 100,
+  "fallbackTotalCv": 0.35,
+  "minWaiverPoints": 0.5
 }

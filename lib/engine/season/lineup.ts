@@ -1,8 +1,11 @@
 // The best legal lineup, computed EXACTLY. Pure.
 //
 // lib/engine/season.ts's optimalLineupTotal is greedy: it fills dedicated
-// slots then takes the top leftovers for flex. That is exact for a single flex
-// and silently wrong otherwise, and start/sit is where it would bite.
+// slots then takes the top leftovers for flex. As that module's comment
+// explains, greedy is exact for this app's roster model — one FLEX kind, one
+// eligibility set, so any k eligible leftovers fill k identical flex slots.
+// bestLineup exists for the ASSIGNMENT (who sits in which slot, and the bench
+// list), which start/sit needs and a bare total does not.
 //
 // The exact solution is cheap because of one observation: within a position you
 // always start your highest scorer, so an optimal lineup is fully determined by

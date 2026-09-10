@@ -3,7 +3,8 @@
 // function scoped to one week and one position.
 import type { BoardPlayer, Position } from "../../types";
 import { SEASON_LONG } from "../injuryFeed";
-import { emptySlotWeeks, meansFor, rosLineupValue, type RosContext } from "./rosValue";
+import { emptySlotWeeks, meansFor, rosLineupValue, toRosContext, type RosContext } from "./rosValue";
+import { DEFAULT_SEASON_LEVERS, type SeasonLevers } from "./levers";
 
 export interface WaiverInput extends RosContext {
   roster: BoardPlayer[];
@@ -15,6 +16,7 @@ export interface WaiverInput extends RosContext {
   /** Roster cap; default config.rounds. Below the cap an add needs no drop. */
   rosterMax?: number;
   maxResults?: number;
+  levers?: SeasonLevers;
 }
 
 export interface WaiverAdd {
@@ -29,8 +31,6 @@ export interface WaiverAdd {
 }
 
 const DEFAULT_MAX_RESULTS = 10;
-/** Below this many lineup points a candidate is noise, not a claim. */
-const MIN_DELTA_POINTS = 0.5;
 
 function reasonFor(delta: number, cover: number, weeks: number[]): string {
   const span = weeks.length === 1 ? `week ${weeks[0]}` : `weeks ${weeks[0]}–${weeks[weeks.length - 1]}`;
@@ -42,7 +42,8 @@ function reasonFor(delta: number, cover: number, weeks: number[]): string {
 
 export function waiverAdds(input: WaiverInput): WaiverAdd[] {
   const { roster, available, weeks } = input;
-  const ctx: RosContext = { weeks, config: input.config, params: input.params, outlooks: input.outlooks, currentWeek: input.currentWeek };
+  const levers = input.levers ?? DEFAULT_SEASON_LEVERS;
+  const ctx: RosContext = toRosContext(input);
   const rosterMax = input.rosterMax ?? input.config.rounds;
   const onRoster = new Set(roster.map((p) => p.id));
   const candidates = available.filter(
@@ -61,7 +62,9 @@ export function waiverAdds(input: WaiverInput): WaiverAdd[] {
       const value = rosLineupValue(after, ctx, means) - base;
       options.push({ drop, value, after });
     };
-    if (roster.length < rosterMax && !input.dropPositions) consider(null);
+    // No drop needed below the roster cap — even in streaming mode (dropPositions
+    // set) when there is no incumbent at that position to stream over.
+    if (roster.length < rosterMax && (!input.dropPositions || dropPool.length === 0)) consider(null);
     for (const d of dropPool) consider(d);
 
     // Find best option: higher value, then by tie-break (lower projection drop)
@@ -72,7 +75,7 @@ export function waiverAdds(input: WaiverInput): WaiverAdd[] {
       }
     }
 
-    if (!best || best.value < MIN_DELTA_POINTS) continue;
+    if (!best || best.value < levers.minWaiverPoints) continue;
     const cover = baseEmpty - emptySlotWeeks(best.after, ctx);
     out.push({ add, drop: best.drop, deltaPoints: best.value, deltaCoverWeeks: cover, reason: reasonFor(best.value, cover, weeks) });
   }

@@ -43,6 +43,17 @@ export function meansFor(players: BoardPlayer[], ctx: RosContext): Map<string, F
   return new Map(players.map((p) => [p.id, weeklyMeans(p, ctx)] as const));
 }
 
+/**
+ * Narrows a wider input (waivers.ts's WaiverInput, trade.ts's TradeInput —
+ * both `extends RosContext` with roster/candidate fields of their own) down
+ * to the five RosContext fields, so both callers build the SAME shape
+ * instead of two hand-copied field lists drifting apart.
+ */
+export function toRosContext(input: RosContext): RosContext {
+  const { weeks, config, params, outlooks, currentWeek } = input;
+  return { weeks, config, params, outlooks, currentWeek };
+}
+
 /** Sum over weeks of the optimal lineup's expected points. `means` must cover every roster player. */
 export function rosLineupValue(roster: BoardPlayer[], ctx: RosContext, means: Map<string, Float64Array>): number {
   let total = 0;

@@ -44,7 +44,9 @@ describe("in-season latency budgets", () => {
   it("waiverAdds over the whole board for 8 remaining weeks runs under 500ms", () => {
     const available = board.players.filter((p) => !mine.some((m) => m.id === p.id));
     const weeks = [10, 11, 12, 13, 14, 15, 16, 17];
-    const ms = best(3, () => waiverAdds({ roster: mine, available, weeks, config, outlooks, currentWeek: 10 }));
+    const input = { roster: mine, available, weeks, config, outlooks, currentWeek: 10 };
+    waiverAdds(input); // JIT warmup
+    const ms = best(3, () => waiverAdds(input));
     console.log(`waiverAdds: ${ms.toFixed(1)}ms (${available.length} available, 8 weeks)`);
     expect(ms).toBeLessThan(500);
   });

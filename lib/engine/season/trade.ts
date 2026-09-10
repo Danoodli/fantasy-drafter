@@ -9,7 +9,7 @@
 //
 // The verdict is three words and a sentence, never one number.
 import type { BoardPlayer } from "../../types";
-import { emptySlotWeeks, meansFor, rosLineupValue, type RosContext } from "./rosValue";
+import { emptySlotWeeks, meansFor, rosLineupValue, toRosContext, type RosContext } from "./rosValue";
 import { playoffOdds, type LeagueTeamInput } from "./playoffOdds";
 
 export interface TradeAxis {
@@ -26,6 +26,12 @@ export interface TradeLeagueContext {
   myRosterId: number;
   /** The other side of the deal, when known; their roster is updated too. */
   partnerRosterId?: number;
+  /**
+   * Every roster's ids, so a caller (TradePanel) can figure out which roster
+   * holds the players being received — the engine itself never guesses a
+   * trade partner, it only prices one once told.
+   */
+  rosters?: { rosterId: number; name: string; players: string[] }[];
   sims?: number;
   seed?: number;
 }
@@ -84,7 +90,7 @@ function summarize(points: TradeAxis, odds: TradeAxis | null, cover: TradeAxis, 
 
 export function evaluateTrade(input: TradeInput): TradeVerdict {
   const { roster, give, receive } = input;
-  const ctx: RosContext = { weeks: input.weeks, config: input.config, params: input.params, outlooks: input.outlooks, currentWeek: input.currentWeek };
+  const ctx: RosContext = toRosContext(input);
   const giving = new Set(give);
   const rosterAfter = [...roster.filter((p) => !giving.has(p.id)), ...receive];
   const means = meansFor([...roster, ...receive], ctx);

@@ -12,6 +12,10 @@ export interface SeasonLevers {
   riskFromPlayoffOdds: number;
   /** Projected points equivalent to a 100% swing in P(win) when blending. */
   pointsScale: number;
+  /** Relative spread assumed for a manual opponent's total when my own lineup has none to borrow. */
+  fallbackTotalCv: number;
+  /** Smallest rest-of-season lineup-points gain worth surfacing as a waiver claim. */
+  minWaiverPoints: number;
 }
 
 function num(raw: Record<string, unknown>, key: string, lo: number, hi: number, opts: { openLo?: boolean; openHi?: boolean } = {}): number {
@@ -33,6 +37,8 @@ export function loadSeasonLevers(raw: unknown): SeasonLevers {
     minDeltaWin: num(r, "minDeltaWin", 0, 1, { openHi: true }),
     riskFromPlayoffOdds: num(r, "riskFromPlayoffOdds", 0, 1),
     pointsScale: num(r, "pointsScale", 0, Infinity, { openLo: true }),
+    fallbackTotalCv: num(r, "fallbackTotalCv", 0, 2, { openLo: true }),
+    minWaiverPoints: num(r, "minWaiverPoints", 0, 10),
   };
 }
 

@@ -7,6 +7,7 @@ import type { WeekOutlook } from "../weekly/outlook";
 import type { WeeklyModelParams } from "../weekly/model";
 import { scoreStatLine } from "../../scoring";
 import { lognormalQuantile, projectedVolume, weeklySigma } from "../weekly/spread";
+import { DEFAULT_OUTCOME } from "./rosValue";
 
 /**
  * pPlay is 1 on purpose: HistRow.stNow is the status at FETCH time, not the
@@ -58,13 +59,11 @@ export function sampleRoster(
   return out;
 }
 
-const GAMES = 16;
-
 /** Season-rate proxy so rosValue (which prices BoardPlayers) can value a historical player. */
 export function histRowToBoardPlayer(row: HistRow, scoring: ScoringSettings): BoardPlayer {
   const weekly = Math.max(0, scoreStatLine(row.proj, scoring, row.pos === "TE"));
   return {
-    id: row.id, name: row.id, pos: row.pos, team: row.team, bye: null, projPoints: weekly * GAMES, projImputed: false,
+    id: row.id, name: row.id, pos: row.pos, team: row.team, bye: null, projPoints: weekly * DEFAULT_OUTCOME.gamesPerSeason, projImputed: false,
     adp: 999, adpStdev: 0, adpHigh: 999, adpLow: 999, ecr: null, ecrStdev: null, vorp: 0, vols: 0, tier: 1,
     injury: null, depthOrder: null, sosSeason: null, sosPlayoff: null, ids: {},
   };
