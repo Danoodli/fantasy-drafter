@@ -51,6 +51,10 @@ export interface SavedTeam {
   schedule?: Record<number, { oppRosterId?: number; oppName?: string }>;
   record?: { w: number; l: number; t: number };
   league?: LeagueSnapshot;
+  /** Manual leagues: last regular-season week. Sleeper teams read league.playoffWeekStart instead. */
+  regularSeasonEnd?: number;
+  /** Manual leagues: the opponent's projected total the user typed for this week, if any. */
+  oppProjectedTotal?: number;
   savedAt: string; // ISO
 }
 
