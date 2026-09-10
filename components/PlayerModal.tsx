@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import type { BoardPlayer, LeagueConfig } from "../lib/types";
 import { playerBlurb, type BlurbContext } from "../lib/engine/reasons";
+import type { WeekOutlook } from "../lib/engine/weekly/outlook";
 import { fetchPlayerExtras, type PlayerExtras } from "../lib/client/espnPlayer";
 import type { PlayerNews } from "../lib/client/espnNews";
 import { POS_COLOR } from "../lib/client/pos";
@@ -24,6 +25,8 @@ interface Props {
   trending?: boolean;
   /** Recap / history view: informational only, no draft actions. */
   readonly?: boolean;
+  /** In-season: this week's outlook replaces the draft verdict and the pick-relative reasons. */
+  week?: { week: number; outlook: WeekOutlook | undefined };
   /** The matched breaking item behind this player's 📰 badge (wire or article). */
   wireItem?: PlayerNews | null;
   myTurn: boolean;
@@ -71,7 +74,7 @@ function StatCell({
   );
 }
 
-export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, trending, readonly, wireItem, myTurn, onMark, onUnmark, onClose }: Props) {
+export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark, trending, readonly, week, wireItem, myTurn, onMark, onUnmark, onClose }: Props) {
   const [extras, setExtras] = useState<PlayerExtras | null | "loading">("loading");
   const [agoLabel, setAgoLabel] = useState("");
 
@@ -151,13 +154,19 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
         </div>
 
         <div data-tour="modal-verdict" className="mt-3 flex flex-wrap items-center gap-2">
-          <span
-            className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field"
-            style={{ background: VERDICT_COLOR[blurb.verdict] }}
-          >
-            {blurb.verdict} at pick {ctx.currentPick}
-          </span>
-          <span className="font-mono text-xs uppercase text-ink-dim">{blurb.risk}</span>
+          {week ? (
+            <WeekLine week={week.week} o={week.outlook} color={color} />
+          ) : (
+            <>
+              <span
+                className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field"
+                style={{ background: VERDICT_COLOR[blurb.verdict] }}
+              >
+                {blurb.verdict} at pick {ctx.currentPick}
+              </span>
+              <span className="font-mono text-xs uppercase text-ink-dim">{blurb.risk}</span>
+            </>
+          )}
           {trending && (
             <span
               className="font-mono text-xs text-warn"
@@ -179,11 +188,13 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
             min-w-0 everywhere — nothing may ever exceed the viewport. */}
         <div className="mt-3 grid min-w-0 gap-x-6 gap-y-3 sm:grid-cols-2">
           <div className="min-w-0">
-            <ul className="space-y-1 text-sm text-ink">
-              {blurb.lines.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
+            {!week && (
+              <ul className="space-y-1 text-sm text-ink">
+                {blurb.lines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            )}
 
             <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-ink-dim">
               2026 projection · {Math.round(p.projPoints)} pts · VORP {Math.round(p.vorp)}
@@ -343,5 +354,30 @@ export default function PlayerModal({ player: p, ctx, config, drafted, canUnmark
         </p>
       </div>
     </div>
+  );
+}
+
+/** This week in one line. Never shows 0.0 for "no projection". */
+function WeekLine({ week, o, color }: { week: number; o: WeekOutlook | undefined; color: string }) {
+  return (
+    <>
+      <span className="rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide text-field" style={{ background: color }}>
+        Week {week}
+      </span>
+      {!o || !o.projected ? (
+        <span className="font-mono text-xs text-ink-dim">no projection from any source</span>
+      ) : o.opp === null ? (
+        <span className="font-mono text-xs text-warn">BYE</span>
+      ) : (
+        <>
+          <span className="font-mono text-xs text-ink">{o.mean.toFixed(1)} proj</span>
+          <span className="font-mono text-xs text-ink-dim">{o.p10.toFixed(0)}–{o.p90.toFixed(0)} floor–ceiling</span>
+          <span className="font-mono text-xs text-ink-dim">vs {o.opp}</span>
+          {o.drivers.status && (
+            <span className="font-mono text-xs text-warn">{o.drivers.status} · {Math.round(o.pPlay * 100)}% to play</span>
+          )}
+        </>
+      )}
+    </>
   );
 }

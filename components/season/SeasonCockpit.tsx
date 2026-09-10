@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Board, BoardPlayer, LeagueConfig, Position } from "../../lib/types";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
@@ -116,17 +116,28 @@ export default function SeasonCockpit({
       players: r.players.map((id) => byId.get(id)).filter((p): p is BoardPlayer => !!p),
     }));
   }, [league, byId]);
+  // The simulation is keyed on the LEAGUE, the week and the config — not on
+  // `byId`, which changes identity on every ten-minute live-signals poll and
+  // would re-run 500 season sims on a timer. The current board is read through
+  // a ref so a genuine roster/league change still simulates with fresh players.
+  const leagueTeamsRef = useRef(leagueTeams);
+  // Intentional "latest ref" write, so the background sim below reads fresh
+  // players without re-running on every live-signals poll.
+  // eslint-disable-next-line react-hooks/refs -- read only from the effect's setTimeout callback, never during render
+  leagueTeamsRef.current = leagueTeams;
+  const teamConfig = team?.config;
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale odds when the league/roster the sim depends on disappears, not a render-time computation
-    if (!league || !leagueTeams || myRosterId === null || !team) { setOdds(null); return; }
+    if (!league || myRosterId === null || !teamConfig) { setOdds(null); return; }
     setOddsRunning(true);
-    const cfg = team.config;
     const handle = setTimeout(() => {
-      setOdds(playoffOdds({ teams: leagueTeams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, config: cfg, myRosterId }));
+      const teams = leagueTeamsRef.current;
+      if (!teams) return;
+      setOdds(playoffOdds({ teams, schedule: league.schedule, currentWeek: week, playoffWeekStart: league.playoffWeekStart, playoffTeams: league.playoffTeams, config: teamConfig, myRosterId }));
       setOddsRunning(false);
     }, 0);
     return () => clearTimeout(handle);
-  }, [league, leagueTeams, myRosterId, week, team]);
+  }, [league, myRosterId, week, teamConfig]);
 
   const advice = useMemo(() => {
     if (!team || advicePlayers.length === 0) return null;
@@ -248,6 +259,7 @@ export default function SeasonCockpit({
           drafted={false}
           canUnmark={false}
           readonly
+          week={{ week, outlook: graded.get(modalPlayer.id) }}
           wireItem={live.boardNews.get(modalPlayer.id) ?? null}
           myTurn={false}
           onMark={() => {}}

@@ -70,7 +70,8 @@ export default function TradePanel({
           </ul>
         </div>
       </div>
-      <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field hover:bg-panel disabled:opacity-40">Evaluate</button>
+      {/* Accent CTAs keep their colour on hover (PasteImport/Setup precedent); a bg-panel hover would read as disabled. */}
+      <button onClick={evaluate} disabled={give.size === 0 && receive.length === 0} className="mt-3 rounded bg-rb px-4 py-2 text-sm font-semibold text-field hover:brightness-110 disabled:opacity-40">Evaluate</button>
       {verdict && (
         <div className="mt-3 text-sm">
           <p>{verdict.summary}</p>
