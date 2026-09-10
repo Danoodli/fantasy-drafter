@@ -35,7 +35,7 @@ export default function RosterScreenSync({ board, team, onChange }: { board: Boa
     try {
       const stream = await startCapture(videoRef.current!);
       streamRef.current = stream;
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => { stopCapture(streamRef.current, videoRef.current); streamRef.current = null; setSharing(false); });
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => { stopCapture(streamRef.current, videoRef.current); streamRef.current = null; setSharing(false); setStatus("Sharing ended."); });
       setSharing(true);
       setStatus("Make the roster fill the shared window, then Read.");
       getOcrScheduler((s, p) => setStatus(`Loading OCR engine… ${s} ${Math.round(p * 100)}%`)).then(
@@ -49,7 +49,7 @@ export default function RosterScreenSync({ board, team, onChange }: { board: Boa
 
   async function readOnce() {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video) { setError("No video element — reload the page."); return; }
     setError(null);
     setStatus("Reading…");
     const frame = grabFrame(video, FULL_FRAME);

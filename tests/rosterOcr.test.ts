@@ -44,6 +44,16 @@ describe("readRosterLines", () => {
     expect(rows(shuffled)).toEqual([["Josh Allen", "starter"], ["Puka Nacua", "bench"]]);
   });
 
+  it("applies a label-only line to the name line Tesseract split off at the same height", () => {
+    // One roster row read as two lines: the Slot column and the Name column.
+    const row = (texts: [string, string], y: number): OcrLine[] => texts.map((text) => ({ text, confidence: 80, y }));
+    const r = readRosterLines([...row(["Bench", ""], 0).slice(0, 1), ...row(["QB", "Josh Allen"], 20), ...row(["BN", "Puka Nacua"], 40)], players);
+    expect(r.entries.map((e) => [e.player.name, e.slot])).toEqual([["Josh Allen", "starter"], ["Puka Nacua", "bench"]]);
+    // Input order within a row must not matter.
+    const swapped = readRosterLines([...row(["Bench", ""], 0).slice(0, 1), ...row(["Josh Allen", "QB"], 20)], players);
+    expect(swapped.entries.map((e) => [e.player.name, e.slot])).toEqual([["Josh Allen", "starter"]]);
+  });
+
   it("skips a tie rather than guessing (the draft's OCR rule)", () => {
     // Two synthetic RBs named Robinson on different teams; a bare surname is ambiguous.
     const twin = (id: string, team: string) => ({ ...players.find((p) => p.pos === "RB")!, id, name: `Sam Robinson`, team });
