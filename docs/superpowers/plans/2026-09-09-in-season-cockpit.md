@@ -3547,6 +3547,12 @@ describe("eliminationNumber", () => {
   it("is null when I cannot be eliminated (fewer rivals than spots)", () => {
     expect(eliminationNumber(2, [9], 2, 2)).toBeNull();
   });
+  it("counts ties as half a win, like the standings", () => {
+    // 4-5-1 with 4 left: ceiling 8.5; the last-spot holder has 7 -> needs 2 (7 + 2 = 9 > 8.5).
+    expect(eliminationNumber(4.5, [9, 7, 5], 4, 2)).toBe(2);
+    // Rival at 7.5 (7-2-1) already above my ceiling of 6 -> eliminated.
+    expect(eliminationNumber(4, [7.5, 5], 2, 1)).toBe(0);
+  });
 });
 
 describe("playoffOdds", () => {
@@ -3567,6 +3573,17 @@ describe("playoffOdds", () => {
     expect(r.oddsIfWin).toBeCloseTo(1, 6);
     expect(r.oddsIfLose).toBeCloseTo(0, 6);
     expect(r.leverage).toBeCloseTo(1, 6);
+  });
+
+  it("reports ADDITIONAL expected wins and passes half-wins to the elimination number", () => {
+    // I am 3-1-1 (3.5 win-equivalents), rivals 2-3 with one 3-2; one week left, two spots.
+    const teams = [{ ...team(1, 240, 3, 1), ties: 1 }, team(2, 240, 3, 2), team(3, 240, 2, 3), team(4, 240, 2, 3)];
+    const r = playoffOdds({ teams, schedule: { 10: [[1, 2], [3, 4]] }, currentWeek: 10, playoffWeekStart: 11, playoffTeams: 2, config: cfg, myRosterId: 1, sims: 300, seed: 2 });
+    // Additional wins over one week: between 0 and 1, never the 3.5 already banked.
+    expect(r.mine.expectedWins).toBeGreaterThan(0.2);
+    expect(r.mine.expectedWins).toBeLessThan(0.8);
+    // Ceiling 4.5; the 2nd-best rival without me has 2 wins -> needs floor(4.5 - 2) + 1 = 3, unreachable in one week.
+    expect(r.eliminationNumber).toBe(3);
   });
 
   it("a clinched team has odds 1 and no leverage", () => {
@@ -3692,12 +3709,16 @@ export interface PlayoffOdds {
  * would hold the LAST playoff spot without me (the playoffTeams-th best rival)
  * eliminates me once its wins exceed that ceiling. Null when there are fewer
  * rivals than spots, because then I am in regardless.
+ *
+ * Wins are counted as the standings count them — a tie is half a win — so the
+ * caller passes `wins + ties / 2`. The rival needs the smallest whole number
+ * of wins n with cut + n > ceiling, i.e. floor(ceiling - cut) + 1.
  */
 export function eliminationNumber(myWins: number, othersWins: number[], remainingWeeks: number, playoffTeams: number): number | null {
   const sorted = [...othersWins].sort((a, b) => b - a);
   const cut = sorted[playoffTeams - 1];
   if (cut === undefined) return null;
-  return Math.max(0, myWins + remainingWeeks - cut + 1);
+  return Math.max(0, Math.floor(myWins + remainingWeeks - cut) + 1);
 }
 
 /** Fisher-Yates on a copy, from the seeded stream. */
@@ -3746,7 +3767,15 @@ export function playoffOdds(input: PlayoffInput): PlayoffOdds {
       for (let i = 0; i < T; i++) pts[i] += totals[i];
       let pairs: [number, number][];
       if (schedule[w]?.length) {
-        pairs = schedule[w].map(([a, b]) => [idxOf.get(a)!, idxOf.get(b)!] as [number, number]).filter(([a, b]) => a !== undefined && b !== undefined);
+        // A pairing naming a roster that is not in `teams` is dropped: nothing
+        // honest can be simulated for it, and the caller's snapshot is the
+        // source of truth for who is in the league.
+        pairs = [];
+        for (const [a, b] of schedule[w]) {
+          const ia = idxOf.get(a);
+          const ib = idxOf.get(b);
+          if (ia !== undefined && ib !== undefined) pairs.push([ia, ib]);
+        }
       } else {
         // Unknown pairings: a random opponent this week. Stated in scheduleKnownThrough.
         const order = shuffle(teams.map((_, i) => i), rng);
@@ -3798,7 +3827,12 @@ export function playoffOdds(input: PlayoffInput): PlayoffOdds {
     oddsIfWin,
     oddsIfLose,
     leverage,
-    eliminationNumber: eliminationNumber(teams[me].wins, teams.filter((_, i) => i !== me).map((t) => t.wins), weeks.length, playoffTeams),
+    eliminationNumber: eliminationNumber(
+      teams[me].wins + teams[me].ties / 2,
+      teams.filter((_, i) => i !== me).map((t) => t.wins + t.ties / 2),
+      weeks.length,
+      playoffTeams
+    ),
     scheduleKnownThrough: knownThrough,
     remainingWeeks: weeks.length,
   };
@@ -3808,7 +3842,7 @@ export function playoffOdds(input: PlayoffInput): PlayoffOdds {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/seasonPlayoffOdds.test.ts`
-Expected: PASS, 8 tests. The "equal teams" case expects the conditional odds to be exactly 1 and 0: with one week left and two spots for four teams paired 1–2 and 3–4, winning the week guarantees a spot and losing guarantees missing it (a 1-0 record beats every 0-1 record; ties in points are broken by index but a same-record tie cannot occur across the two games since each has exactly one winner). If a value is close but not exact, the standings sort is wrong, not the test.
+Expected: PASS, 10 tests. The "equal teams" case expects the conditional odds to be exactly 1 and 0: with one week left and two spots for four teams paired 1–2 and 3–4, winning the week guarantees a spot and losing guarantees missing it (a 1-0 record beats every 0-1 record; ties in points are broken by index but a same-record tie cannot occur across the two games since each has exactly one winner). If a value is close but not exact, the standings sort is wrong, not the test.
 
 - [ ] **Step 5: Plausibility check, reported not asserted**
 
