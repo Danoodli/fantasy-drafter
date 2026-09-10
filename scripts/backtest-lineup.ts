@@ -62,7 +62,7 @@ function main() {
   log(`# Leg B replay gates — holdout ${season}, ${rows.length} player-weeks, ${weeks.length} weeks, ${matchups} matchups/week, seed ${seed}\n`);
 
   // ---------------------------------------------------------------- Gate L1
-  let winsA = 0, winsB = 0, differ = 0, bWinsWhenDiffer = 0, aWinsWhenDiffer = 0, ptsA = 0, ptsB = 0, n = 0;
+  let winsA = 0, winsB = 0, differ = 0, bWinsWhenDiffer = 0, aWinsWhenDiffer = 0, dSq = 0, ptsA = 0, ptsB = 0, n = 0;
   for (const wk of weeks) {
     const pool = byWeek.get(wk)!;
     const rng = makeRng((seed * 7919 + wk * 104729) >>> 0);
@@ -85,12 +85,15 @@ function main() {
       const wB = realB > theirReal ? 1 : realB === theirReal ? 0.5 : 0;
       winsA += wA; winsB += wB; ptsA += realA; ptsB += realB; n++;
       const sameSet = a.starters.map((s) => s.player.id).sort().join() === b.starters.map((s) => s.player.id).sort().join();
-      if (!sameSet) { differ++; bWinsWhenDiffer += wB; aWinsWhenDiffer += wA; }
+      if (!sameSet) { differ++; bWinsWhenDiffer += wB; aWinsWhenDiffer += wA; dSq += (wB - wA) ** 2; }
     }
   }
   const rateA = winsA / n, rateB = winsB / n;
-  // Paired sign test on the matchups where the lineups differed: under H0 each arm wins the disagreement half the time.
-  const z = differ > 0 ? (bWinsWhenDiffer - aWinsWhenDiffer) / Math.sqrt(differ) : 0;
+  // Paired z on the matchups where the lineups differed: mean paired
+  // difference over its own standard error, Σd / sqrt(Σd²) — not
+  // Σd / sqrt(count), which assumes every difference has unit variance (wA,
+  // wB ∈ {0, 0.5, 1}, so a tie contributes d² = 0.25 or 0, not 1).
+  const z = dSq > 0 ? (bWinsWhenDiffer - aWinsWhenDiffer) / Math.sqrt(dSq) : 0;
   log(`## Gate L1 — start/sit replay (${n} matchups)`);
   log(`- naive highest-projection lineup: win rate ${(rateA * 100).toFixed(1)}%, ${(ptsA / n).toFixed(1)} pts/wk`);
   log(`- delta P(win) lineup:             win rate ${(rateB * 100).toFixed(1)}%, ${(ptsB / n).toFixed(1)} pts/wk`);
@@ -128,7 +131,7 @@ function main() {
       if (a.add.id === bAdd.id) same++;
     }
   }
-  log(`## Gate L2 — waiver replay (${m2} rosters, next ${HORIZON} weeks, realized lineup points added)`);
+  log(`## Gate L2 — waiver replay (${m2} rosters, next ${HORIZON} weeks, realized lineup points added; lineups set with hindsight on realized points, for both arms)`);
   log(`- value-over-my-lineup claim: +${(addA / m2).toFixed(2)} pts per roster`);
   log(`- generic ROS-rank claim:     +${(addB / m2).toFixed(2)} pts per roster`);
   log(`- same player chosen in ${same} of ${m2}`);
@@ -142,7 +145,19 @@ function main() {
   const start = "<!-- leg-b:start -->", end = "<!-- leg-b:end -->";
   const block = `${start}\n${lines.join("\n")}\n${end}`;
   let doc = existsSync(GATES) ? readFileSync(GATES, "utf8") : "# Backtest gates\n\n";
-  doc = doc.includes(start) ? doc.replace(new RegExp(`${start}[\\s\\S]*${end}`), block) : `${doc.trimEnd()}\n\n${block}\n`;
+  // indexOf slicing rather than a RegExp built from the literal markers: a
+  // regex built by string interpolation is fragile (the markers are plain
+  // text today, but a future marker with a regex metacharacter would silently
+  // change what gets replaced) and `[\s\S]*` is greedy across the WHOLE doc,
+  // so two marker pairs would collapse into one.
+  const startIdx = doc.indexOf(start);
+  if (startIdx === -1) {
+    doc = `${doc.trimEnd()}\n\n${block}\n`;
+  } else {
+    const endIdx = doc.indexOf(end, startIdx + start.length);
+    const after = endIdx === -1 ? startIdx + start.length : endIdx + end.length;
+    doc = doc.slice(0, startIdx) + block + doc.slice(after);
+  }
   writeFileSync(GATES, doc);
   console.log(`\nwrote ${GATES}`);
 }
