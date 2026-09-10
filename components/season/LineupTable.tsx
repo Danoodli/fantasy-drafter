@@ -3,12 +3,20 @@
 import type { BoardPlayer } from "../../lib/types";
 import type { WeekOutlook } from "../../lib/engine/weekly/outlook";
 import type { Lineup } from "../../lib/engine/season/lineup";
+import { DEFAULT_SEASON_LEVERS } from "../../lib/engine/season/levers";
 
-/** A projection cell. Never shows 0.0 for "we have no number". */
+/**
+ * A projection cell. Never shows 0.0 for "we have no number". The forced-play
+ * threshold is the engine's lever (config/season.json), not a literal here, so
+ * the Must-fix panel and this cell can never disagree about who is out.
+ */
 function Points({ o }: { o: WeekOutlook | undefined }) {
   if (!o || !o.projected) return <span className="text-ink-faint" title="No source projected this player">—</span>;
   if (o.opp === null) return <span className="text-warn" title="On a bye">BYE</span>;
-  if (o.pPlay <= 0.1) return <span className="text-warn" title={o.drivers.status ?? "Out"}>{o.drivers.status ?? "OUT"}</span>;
+  if (o.pPlay <= DEFAULT_SEASON_LEVERS.forcedPlayThreshold) {
+    const label = o.drivers.status ?? "OUT";
+    return <span className="text-warn" title={label}>{label}</span>;
+  }
   return <span>{o.mean.toFixed(1)}</span>;
 }
 

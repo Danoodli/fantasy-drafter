@@ -67,6 +67,7 @@ export default function RosterImport({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Add a player by name…"
+        aria-label="Add a player by name"
         className="mt-3 w-full rounded border border-line bg-field px-2 py-1 text-sm"
       />
       {matches.length > 0 && (
