@@ -196,7 +196,7 @@ export default function SeasonCockpit({
             <select
               value={week}
               onChange={(e) => onWeekChange(Number(e.target.value))}
-              className="rounded border border-line bg-field px-1 py-0.5"
+              className="rounded bg-field px-1 py-0.5"
             >
               {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
                 <option key={w} value={w}>{w}</option>
@@ -211,9 +211,9 @@ export default function SeasonCockpit({
       {advice && team && (
         <>
           {advice.forced.length > 0 && (
-            <section className="rounded-lg border border-qb/60 bg-qb/10 p-4">
-              <h2 className="text-sm font-semibold text-qb">Must fix</h2>
-              <ul className="mt-2 space-y-1 text-sm">
+            <section className="space-y-3">
+              <LowerThird headline="Must fix" number={String(advice.forced.length)} label="to fix" tone="bad" />
+              <ul className="space-y-1 px-1 text-sm">
                 {advice.forced.map((f) => (
                   <li key={f.outId}>
                     <strong>{f.outName}</strong>{" "}
@@ -225,13 +225,13 @@ export default function SeasonCockpit({
             </section>
           )}
 
-          <section className="rounded-lg border border-line p-4">
+          <section className="space-y-3">
             <LowerThird
               headline={changed.size > 0 ? "Recommended lineup" : "Lineup"}
               number={`${(advice.winProbability * 100).toFixed(0)}%`}
               label="to win"
             />
-            <div className="mt-2">
+            <div className="px-1">
               <LineupTable
                 lineup={advice.recommended}
                 players={byId}
@@ -242,15 +242,15 @@ export default function SeasonCockpit({
               />
             </div>
             {advice.swaps.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-dim">Your lineup is already the best of what you have.</p>
+              <p className="px-1 text-sm text-ink-dim">Your lineup is already the best of what you have.</p>
             ) : (
-              <ul className="mt-3 space-y-1 text-sm">
+              <ul className="space-y-1 px-1 text-sm">
                 {advice.swaps.slice(0, 6).map((s) => (
                   <li key={`${s.inId}-${s.outId}`}>Start <strong>{s.inName}</strong> over <strong>{s.outName}</strong><span className="text-ink-dim"> — {s.reason}</span></li>
                 ))}
               </ul>
             )}
-            <p className="mt-3 text-xs text-ink-faint">Ranked by how much each swap moves your chance of winning this matchup, not by projected points.</p>
+            <p className="px-1 text-xs text-ink-faint">Ranked by how much each swap moves your chance of winning this matchup, not by projected points.</p>
           </section>
 
           <MatchupPanel
