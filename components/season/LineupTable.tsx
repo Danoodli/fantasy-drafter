@@ -65,7 +65,11 @@ export default function LineupTable({
     const o = outlooks.get(id);
     const isChanged = changed?.has(id) ?? false;
     return (
-      <tr key={`${slot}-${id}`} className={`border-t border-line hover:bg-panel ${isChanged ? "bg-panel" : ""}`}>
+      <tr
+        key={`${slot}-${id}`}
+        style={p ? ({ "--sticker": POS_COLOR[p.pos] } as React.CSSProperties) : undefined}
+        className={`sticker ${isChanged ? "brightness-105" : ""}`}
+      >
         <td className="py-1 pr-2 text-xs text-ink-faint">
           {slot}
           {isChanged && <span className="ml-1 text-live" title="Changes with the recommended swaps">{isStarter ? "↑" : "↓"}</span>}
@@ -74,7 +78,7 @@ export default function LineupTable({
           {onSelect ? (
             <button
               onClick={() => onSelect(id)}
-              className="text-left hover:text-wr"
+              className="link font-display text-base"
             >
               {p?.name ?? id}
             </button>
@@ -109,7 +113,7 @@ export default function LineupTable({
       <tbody>
         {lineup.starters.map((s) => row(s.player.id, s.slot, true))}
         {lineup.benched.length > 0 && (
-          <tr className="border-t border-line">
+          <tr>
             <td colSpan={6} className="pt-2 text-xs uppercase tracking-wide text-ink-faint">Bench</td>
           </tr>
         )}
