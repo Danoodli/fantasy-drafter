@@ -658,7 +658,8 @@ import type { ReactNode } from "react";
 const TONE: Record<"accent" | "good" | "bad" | "quiet", string> = {
   accent: "bg-accent text-accent-ink",
   good: "bg-good text-accent-ink",
-  bad: "bg-bad text-ink",
+  // accent-ink, not ink: ink on the red slab measures 2.5–3.3:1 across the themes; accent-ink 5.2–6.3:1.
+  bad: "bg-bad text-accent-ink",
   quiet: "bg-panel-2 text-ink",
 };
 
