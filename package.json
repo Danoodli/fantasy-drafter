@@ -18,6 +18,7 @@
     "calibrate:survival": "tsx scripts/calibrate-survival.ts",
     "calibrate:weekly": "tsx scripts/calibrate-weekly.ts",
     "backtest:gate": "tsx scripts/backtest-gate.ts",
+    "backtest:lineup": "tsx scripts/backtest-lineup.ts",
     "simulate": "tsx scripts/simulate-season.ts",
     "ocr:check": "tsx scripts/ocr-grid-check.ts",
     "build:weekly-history": "tsx scripts/build-weekly-history.ts"

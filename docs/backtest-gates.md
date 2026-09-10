@@ -20,3 +20,23 @@ Generated 2026-09-05, rooms=12, 12 seats each, waiver-aware redraft scoring.
 - PASS — hold-out 2024 (fit on 2025) within 1σ: 93 vs 99±13
 
 **RESULT: FAIL — do not flip the default.**
+
+<!-- leg-b:start -->
+# Leg B replay gates — holdout 2025, 4178 player-weeks, 18 weeks, 150 matchups/week, seed 1
+
+## Gate L1 — start/sit replay (2700 matchups)
+- naive highest-projection lineup: win rate 67.5%, 94.5 pts/wk
+- delta P(win) lineup:             win rate 67.1%, 94.2 pts/wk
+- lineups differed in 762 of 2700 (28.2%); on those, delta P(win) won 510.0 vs 521.0 (paired z = -0.40)
+- FAIL — delta P(win) loses to naive on realized matchup win rate (difference not distinguishable from noise at 95%)
+
+## Gate L2 — waiver replay (700 rosters, next 4 weeks, realized lineup points added)
+- value-over-my-lineup claim: +48.35 pts per roster
+- generic ROS-rank claim:     +35.20 pts per roster
+- same player chosen in 346 of 700
+- PASS — lineup-aware claims add at least as much realized lineup value
+
+## Gate L3 — playoff odds calibration
+- NOT RUN — needs historical league standings and rosters, which do not exist yet. Every Sleeper sync stores a LeagueSnapshot (lib/client/teams.ts); after a season of them, bucket mid-season odds and check that teams given ~70% made it ~70% of the time.
+
+<!-- leg-b:end -->
