@@ -5,6 +5,7 @@ import type { Board, LeagueConfig } from "../../lib/types";
 import { applyRoster, type SavedTeam } from "../../lib/client/teams";
 import SleeperSync from "./SleeperSync";
 import RosterPaste from "./RosterPaste";
+import RosterScreenSync from "./RosterScreenSync";
 
 type Tab = "manual" | "sleeper" | "paste" | "ocr";
 const TABS: { id: Tab; label: string }[] = [
@@ -61,7 +62,7 @@ export default function RosterImport({
 
       {tab === "sleeper" && <SleeperSync team={team} week={week} base={config} onChange={onChange} />}
       {tab === "paste" && <RosterPaste board={board} team={team} onChange={onChange} />}
-      {tab === "ocr" && <p className="mt-3 text-xs text-ink-faint">Screen sync arrives in Task 9.</p>}
+      {tab === "ocr" && <RosterScreenSync board={board} team={team} onChange={onChange} />}
 
       {tab === "manual" && (<>
       <input
