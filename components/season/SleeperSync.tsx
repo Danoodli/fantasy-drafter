@@ -59,9 +59,9 @@ export default function SleeperSync({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Sleeper league URL or id"
-          className="flex-1 rounded border border-line bg-field px-2 py-1"
+          className="flex-1 rounded bg-field px-2 py-1"
         />
-        <button onClick={load} disabled={!input.trim() || busy !== null} className="rounded bg-panel px-3 py-1 font-semibold text-ink-dim hover:text-ink disabled:opacity-40">
+        <button onClick={load} disabled={!input.trim() || busy !== null} className="btn btn-accent">
           Load
         </button>
       </div>
@@ -78,9 +78,9 @@ export default function SleeperSync({
                 <button
                   onClick={() => sync(r.rosterId)}
                   disabled={busy !== null}
-                  className={`w-full rounded border px-2 py-1 text-left text-xs hover:bg-panel ${team.sleeper?.rosterId === r.rosterId ? "border-rb" : "border-line"}`}
+                  className={`btn w-full text-left text-xs ${team.sleeper?.rosterId === r.rosterId ? "btn-accent" : "btn-quiet"}`}
                 >
-                  {teamNameFor(r, loaded.users)} <span className="text-ink-faint">{r.wins}-{r.losses}{r.ties ? `-${r.ties}` : ""}</span>
+                  {teamNameFor(r, loaded.users)} <span className="opacity-80">{r.wins}-{r.losses}{r.ties ? `-${r.ties}` : ""}</span>
                 </button>
               </li>
             ))}
