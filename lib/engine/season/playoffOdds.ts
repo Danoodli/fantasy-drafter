@@ -73,12 +73,16 @@ export interface PlayoffOdds {
  * would hold the LAST playoff spot without me (the playoffTeams-th best rival)
  * eliminates me once its wins exceed that ceiling. Null when there are fewer
  * rivals than spots, because then I am in regardless.
+ *
+ * Wins are counted as the standings count them — a tie is half a win — so the
+ * caller passes `wins + ties / 2`. The rival needs the smallest whole number
+ * of wins n with cut + n > ceiling, i.e. floor(ceiling - cut) + 1.
  */
 export function eliminationNumber(myWins: number, othersWins: number[], remainingWeeks: number, playoffTeams: number): number | null {
   const sorted = [...othersWins].sort((a, b) => b - a);
   const cut = sorted[playoffTeams - 1];
   if (cut === undefined) return null;
-  return Math.max(0, myWins + remainingWeeks - cut + 1);
+  return Math.max(0, Math.floor(myWins + remainingWeeks - cut) + 1);
 }
 
 /** Fisher-Yates on a copy, from the seeded stream. */
@@ -127,7 +131,15 @@ export function playoffOdds(input: PlayoffInput): PlayoffOdds {
       for (let i = 0; i < T; i++) pts[i] += totals[i];
       let pairs: [number, number][];
       if (schedule[w]?.length) {
-        pairs = schedule[w].map(([a, b]) => [idxOf.get(a)!, idxOf.get(b)!] as [number, number]).filter(([a, b]) => a !== undefined && b !== undefined);
+        // A pairing naming a roster that is not in `teams` is dropped: nothing
+        // honest can be simulated for it, and the caller's snapshot is the
+        // source of truth for who is in the league.
+        pairs = [];
+        for (const [a, b] of schedule[w]) {
+          const ia = idxOf.get(a);
+          const ib = idxOf.get(b);
+          if (ia !== undefined && ib !== undefined) pairs.push([ia, ib]);
+        }
       } else {
         // Unknown pairings: a random opponent this week. Stated in scheduleKnownThrough.
         const order = shuffle(teams.map((_, i) => i), rng);
@@ -179,7 +191,12 @@ export function playoffOdds(input: PlayoffInput): PlayoffOdds {
     oddsIfWin,
     oddsIfLose,
     leverage,
-    eliminationNumber: eliminationNumber(teams[me].wins, teams.filter((_, i) => i !== me).map((t) => t.wins), weeks.length, playoffTeams),
+    eliminationNumber: eliminationNumber(
+      teams[me].wins + teams[me].ties / 2,
+      teams.filter((_, i) => i !== me).map((t) => t.wins + t.ties / 2),
+      weeks.length,
+      playoffTeams
+    ),
     scheduleKnownThrough: knownThrough,
     remainingWeeks: weeks.length,
   };

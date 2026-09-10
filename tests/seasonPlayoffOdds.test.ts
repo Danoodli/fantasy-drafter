@@ -31,6 +31,12 @@ describe("eliminationNumber", () => {
   it("is null when I cannot be eliminated (fewer rivals than spots)", () => {
     expect(eliminationNumber(2, [9], 2, 2)).toBeNull();
   });
+  it("counts ties as half a win, like the standings", () => {
+    // 4-5-1 with 4 left: ceiling 8.5; the last-spot holder has 7 -> needs 2 (7 + 2 = 9 > 8.5).
+    expect(eliminationNumber(4.5, [9, 7, 5], 4, 2)).toBe(2);
+    // Rival at 7.5 (7-2-1) already above my ceiling of 6 -> eliminated.
+    expect(eliminationNumber(4, [7.5, 5], 2, 1)).toBe(0);
+  });
 });
 
 describe("playoffOdds", () => {
@@ -51,6 +57,17 @@ describe("playoffOdds", () => {
     expect(r.oddsIfWin).toBeCloseTo(1, 6);
     expect(r.oddsIfLose).toBeCloseTo(0, 6);
     expect(r.leverage).toBeCloseTo(1, 6);
+  });
+
+  it("reports ADDITIONAL expected wins and passes half-wins to the elimination number", () => {
+    // I am 3-1-1 (3.5 win-equivalents), rivals 2-3 with one 3-2; one week left, two spots.
+    const teams = [{ ...team(1, 240, 3, 1), ties: 1 }, team(2, 240, 3, 2), team(3, 240, 2, 3), team(4, 240, 2, 3)];
+    const r = playoffOdds({ teams, schedule: { 10: [[1, 2], [3, 4]] }, currentWeek: 10, playoffWeekStart: 11, playoffTeams: 2, config: cfg, myRosterId: 1, sims: 300, seed: 2 });
+    // Additional wins over one week: between 0 and 1, never the 3.5 already banked.
+    expect(r.mine.expectedWins).toBeGreaterThan(0.2);
+    expect(r.mine.expectedWins).toBeLessThan(0.8);
+    // Ceiling 4.5; the 2nd-best rival without me has 2 wins -> needs floor(4.5 - 2) + 1 = 3, unreachable in one week.
+    expect(r.eliminationNumber).toBe(3);
   });
 
   it("a clinched team has odds 1 and no leverage", () => {
