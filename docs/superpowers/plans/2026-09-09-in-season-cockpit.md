@@ -5133,7 +5133,7 @@ Expected: PASS, 7 tests. Then `pnpm vitest run tests/injuryFeed.test.ts tests/we
 
 - [ ] **Step 5: Wire it into `SeasonCockpit`**
 
-Replace the Task 13 hook point (`const graded = outlooks;`) with:
+This task was pulled forward to run before Tasks 11–13 (the owner saw a live Doubtful ignored by the swap list). If Task 13 has not run yet, `SeasonCockpit` still reads `outlooks` directly: introduce `graded` right after `byId` and use it wherever `outlooks` fed the advice call and `LineupTable`. If Task 13 has run, replace its hook point (`const graded = outlooks;`). Either way:
 
 ```tsx
   const live = useLiveSignals(board);
