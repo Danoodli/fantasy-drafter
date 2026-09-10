@@ -1,25 +1,31 @@
 @import "tailwindcss";
 
+/* Tailwind tokens resolve to per-theme variables, so every bg-panel /
+   text-ink-dim / text-rb class in the app follows [data-theme] on <html>.
+   Values live in lib/client/theme.ts (tested for contrast); this file
+   mirrors them. Keep the two in sync — tests/theme.test.ts guards the maths,
+   scripts/ui-shots.ts shows the result. */
 @theme {
-  /* Field */
-  --color-field: #10151b;
-  --color-panel: #1a212a;
-  --color-panel-2: #222b36;
-  --color-line: #2c3641;
-  --color-ink: #edf1f4;
-  --color-ink-dim: #8b98a5;
-  --color-ink-faint: #5c6875;
-
+  --color-field: var(--t-field);
+  --color-panel: var(--t-panel);
+  --color-panel-2: var(--t-panel-2);
+  --color-line: var(--t-line);
+  --color-ink: var(--t-ink);
+  --color-ink-dim: var(--t-ink-dim);
+  --color-ink-faint: var(--t-ink-faint);
+  --color-accent: var(--t-accent);
+  --color-accent-ink: var(--t-accent-ink);
+  --color-good: var(--t-good);
+  --color-bad: var(--t-bad);
+  --color-warn: var(--t-warn);
+  --color-live: var(--t-live);
   /* Position system — the palette IS the information */
-  --color-qb: #f45d6c;
-  --color-rb: #3cc9a7;
-  --color-wr: #55a9ff;
-  --color-te: #f5a623;
-  --color-k: #b48bf2;
-  --color-dst: #93a3b1;
-
-  --color-warn: #ffb224;
-  --color-live: #3cc9a7;
+  --color-qb: var(--t-qb);
+  --color-rb: var(--t-rb);
+  --color-wr: var(--t-wr);
+  --color-te: var(--t-te);
+  --color-k: var(--t-k);
+  --color-dst: var(--t-dst);
 }
 
 /* Font tokens must be inline: next/font defines its variables on <body>,
@@ -28,6 +34,44 @@
   --font-display: var(--font-barlow-condensed);
   --font-body: var(--font-barlow);
   --font-mono: var(--font-plex-mono);
+}
+
+/* Night game — the default dark theme */
+:root, [data-theme="night"] {
+  --t-field: #0E1319; --t-panel: #171E27; --t-panel-2: #202A36; --t-line: #2C3641;
+  --t-ink: #EEF2F5; --t-ink-dim: #97A3B0; --t-ink-faint: #6E7A88;
+  --t-accent: #3CC9A7; --t-accent-ink: #0E1319; --t-good: #3CC9A7; --t-bad: #F45D6C; --t-warn: #FFB224; --t-live: #3CC9A7;
+  --t-qb: #F45D6C; --t-rb: #3CC9A7; --t-wr: #55A9FF; --t-te: #F5A623; --t-k: #B48BF2; --t-dst: #93A3B1;
+  color-scheme: dark;
+}
+/* Day game — the default light theme: chalk white and turf, not cream */
+[data-theme="day"] {
+  --t-field: #F4F7F5; --t-panel: #FFFFFF; --t-panel-2: #E9EFEC; --t-line: #CFD8D3;
+  --t-ink: #14202B; --t-ink-dim: #4C5A66; --t-ink-faint: #7A8791;
+  --t-accent: #167A5F; --t-accent-ink: #FFFFFF; --t-good: #1F9E7A; --t-bad: #C8323F; --t-warn: #B26A00; --t-live: #1F9E7A;
+  --t-qb: #C8323F; --t-rb: #1F9E7A; --t-wr: #1F6FD1; --t-te: #C97A0A; --t-k: #7C4DD6; --t-dst: #5B6B7A;
+  color-scheme: light;
+}
+/* Prime time — navy and gold broadcast */
+[data-theme="prime"] {
+  --t-field: #0B1220; --t-panel: #131C2E; --t-panel-2: #1B2740; --t-line: #2A3853;
+  --t-ink: #F3EEDF; --t-ink-dim: #A9B0C2; --t-ink-faint: #6E778C;
+  --t-accent: #E8B33F; --t-accent-ink: #1A1405; --t-good: #4FD1A5; --t-bad: #F26D7A; --t-warn: #F0B25B; --t-live: #4FD1A5;
+  --t-qb: #F26D7A; --t-rb: #4FD1A5; --t-wr: #6FB3FF; --t-te: #F0B25B; --t-k: #C39BFF; --t-dst: #A6B4C6;
+  color-scheme: dark;
+}
+/* Throwback — the 90s paper board */
+[data-theme="throwback"] {
+  --t-field: #EFEDE6; --t-panel: #FFFDF7; --t-panel-2: #F6F3EA; --t-line: #D9D4C7;
+  --t-ink: #1B1B1B; --t-ink-dim: #5A5A57; --t-ink-faint: #83827C;
+  --t-accent: #C4381F; --t-accent-ink: #FFFDF7; --t-good: #1E8E5A; --t-bad: #C8323F; --t-warn: #9A5B00; --t-live: #1E8E5A;
+  --t-qb: #C8323F; --t-rb: #1E8E5A; --t-wr: #1F5FBF; --t-te: #C46A00; --t-k: #6B3FC4; --t-dst: #4E5B66;
+  color-scheme: light;
+}
+
+/* Motion is a courtesy, not a requirement. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
 html {
@@ -42,7 +86,7 @@ body {
 
 /* Visible keyboard focus, everywhere */
 :focus-visible {
-  outline: 2px solid var(--color-wr);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
