@@ -17,6 +17,7 @@ import {
   type CustomStrategyParams,
 } from "../lib/client/config";
 import TierBoard from "./TierBoard";
+import LowerThird from "./ui/LowerThird";
 import DraftBoardGrid from "./DraftBoardGrid";
 import SearchBox, { type SearchBoxHandle } from "./SearchBox";
 import InjuryBadge from "./InjuryBadge";
@@ -898,11 +899,11 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
           ) : top ? (
             <div
               data-tour="answer"
-              className={`rounded-lg border-l-4 bg-panel p-5 ${myTurn ? "on-the-clock" : ""}`}
-              style={{ borderLeftColor: posColor, ["--pulse-color" as string]: posColor }}
+              className={`space-y-3 rounded-lg ${myTurn ? "on-the-clock p-3 -m-3" : ""}`}
+              style={{ ["--pulse-color" as string]: posColor }}
             >
               {snipe && (
-                <div className="shake-in mb-3 flex items-start justify-between gap-2 rounded bg-warn/15 px-3 py-2 text-sm text-warn">
+                <div className="shake-in flex items-start justify-between gap-2 rounded bg-warn/15 px-3 py-2 text-sm text-warn">
                   <span>
                     Sniped — <strong>{snipe}</strong> is gone. New pick below.
                   </span>
@@ -935,20 +936,9 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
                   ? `You're on the clock — pick ${planningPick}`
                   : `Plan for your pick ${planningPick} · ${picksUntilMe === 1 ? "you're next" : `${picksUntilMe} picks away`}`}
               </p>
-              <h2 className="mt-1 font-display text-6xl font-bold uppercase leading-[0.95] tracking-tight sm:text-7xl">
-                <button
-                  onClick={() => setModalPlayer(top.player)}
-                  title={`${top.player.name} — stats, news, verdict`}
-                  className="name-in text-left uppercase decoration-2 underline-offset-8 hover:underline"
-                  key={top.player.id}
-                  style={{ color: posColor }}
-                >
-                  {top.player.name}
-                </button>
-              </h2>
-              <p className="mt-2 flex flex-wrap items-center gap-1.5 font-mono text-sm text-ink-dim">
+              <p className="flex flex-wrap items-center gap-1.5 font-mono text-sm text-ink-dim">
                 <span style={{ color: posColor }}>{top.player.pos}</span> · {top.player.team} · bye{" "}
-                {top.player.bye ?? "—"} · {Math.round(top.player.projPoints)} proj
+                {top.player.bye ?? "—"}
                 <InjuryBadge injury={top.player.injury} />
                 {stackPartners(top.player, draft.myRoster).map((s) => (
                   <span key={s.id} className="rounded bg-warn/15 px-1.5 font-mono text-[10px] text-warn" title={`Same-team stack with ${s.name}`}>
@@ -956,19 +946,32 @@ export default function Cockpit({ board, config, strategies, onHome }: Props) {
                   </span>
                 ))}
               </p>
-              <p className="mt-3 text-[15px] leading-snug text-ink">{top.reason}</p>
+              <button
+                type="button"
+                onClick={() => setModalPlayer(top.player)}
+                title={`${top.player.name} — stats, news, verdict`}
+                className="rise-in block w-full text-left"
+                key={`ans-${top.player.id}`}
+              >
+                <LowerThird
+                  headline={top.player.name}
+                  number={String(Math.round(top.player.projPoints))}
+                  label="proj"
+                >
+                  {top.reason}
+                </LowerThird>
+              </button>
               <div className="relative">
                 <button
                   onClick={() => mark(top.player, myTurn)}
-                  className="btn-shimmer mt-4 w-full rounded-lg py-4 font-display text-3xl font-bold uppercase tracking-wide text-field"
-                  style={{ background: posColor }}
+                  className="btn btn-accent btn-shimmer w-full py-4 font-display text-3xl font-bold uppercase tracking-wide"
                 >
                   {myTurn ? `Draft ${top.player.name.split(" ").slice(-1)[0]}` : "Mark him gone"}
                 </button>
                 <Confetti burst={burst} />
               </div>
               {output && (
-                <p className="mt-2 text-right font-mono text-[10px] text-ink-faint">
+                <p className="text-right font-mono text-[10px] text-ink-faint">
                   {output.computeMs.toFixed(0)}ms
                 </p>
               )}
