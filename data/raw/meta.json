@@ -1,15 +1,15 @@
 {
   "db_fpecr_latest.csv": {
-    "fetchedAt": "2026-10-26T16:11:37.149Z"
+    "fetchedAt": "2026-10-27T15:25:20.876Z"
   },
   "db_playerids.csv": {
-    "fetchedAt": "2026-10-26T16:11:37.192Z"
+    "fetchedAt": "2026-10-27T15:25:20.940Z"
   },
   "espn-kona.json": {
-    "fetchedAt": "2026-10-26T16:11:38.306Z"
+    "fetchedAt": "2026-10-27T15:25:22.094Z"
   },
   "ffc-standard.json": {
-    "fetchedAt": "2026-10-26T16:12:14.724Z"
+    "fetchedAt": "2026-10-27T15:25:58.558Z"
   },
   "ffc-half-ppr.json": {
     "fetchedAt": "2026-09-13T13:50:48.206Z"
@@ -18,42 +18,42 @@
     "fetchedAt": "2026-09-16T14:15:08.264Z"
   },
   "ffc-2qb.json": {
-    "fetchedAt": "2026-10-26T16:12:15.272Z"
+    "fetchedAt": "2026-10-27T15:25:59.059Z"
   },
   "sleeper-players-slim.json": {
-    "fetchedAt": "2026-10-26T16:11:37.929Z"
+    "fetchedAt": "2026-10-27T15:25:21.788Z"
   },
   "sleeper-projections.json": {
-    "fetchedAt": "2026-10-26T16:11:37.809Z"
+    "fetchedAt": "2026-10-27T15:25:21.666Z"
   },
   "rss-cbs.xml": {
-    "fetchedAt": "2026-10-26T16:11:36.862Z"
+    "fetchedAt": "2026-10-27T15:25:20.778Z"
   },
   "rss-espn.xml": {
     "fetchedAt": "2026-09-07T21:40:23.808Z"
   },
   "espn-injuries.json": {
-    "fetchedAt": "2026-10-26T16:11:37.089Z"
+    "fetchedAt": "2026-10-27T15:25:21.006Z"
   },
   "rss-athletic.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.169Z"
+    "fetchedAt": "2026-10-27T15:25:21.154Z"
   },
   "rss-pft.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.295Z"
+    "fetchedAt": "2026-10-27T15:25:20.929Z"
   },
   "rss-yahoo.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.334Z"
+    "fetchedAt": "2026-10-27T15:25:21.624Z"
   },
   "rss-rotowire.xml": {
-    "fetchedAt": "2026-10-26T16:11:36.958Z"
+    "fetchedAt": "2026-10-27T15:25:20.848Z"
   },
   "rss-gnews-injuries.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.772Z"
+    "fetchedAt": "2026-10-27T15:25:21.637Z"
   },
   "rss-gnews-moves.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.760Z"
+    "fetchedAt": "2026-10-27T15:25:21.626Z"
   },
   "rss-gnews-fantasy.xml": {
-    "fetchedAt": "2026-10-26T16:11:37.779Z"
+    "fetchedAt": "2026-10-27T15:25:21.634Z"
   }
 }
